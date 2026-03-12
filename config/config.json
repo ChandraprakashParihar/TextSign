@@ -1,0 +1,11 @@
+{
+  "port": 31927,
+  "allowedOrigins": ["http://localhost:3000"],
+  "pkcs11": {
+    "preferredLibrary": null,
+    "windowsCandidates": [],
+    "macCandidates": ["/usr/local/lib/libcastle_v2.1.0.0.dylib"],
+    "linuxCandidates": []
+  }
+}
+
