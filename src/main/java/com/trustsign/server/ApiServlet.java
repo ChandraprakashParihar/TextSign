@@ -218,43 +218,12 @@ public final class ApiServlet extends HttpServlet {
     resp.setContentType("application/json");
     Json.MAPPER.writeValue(resp.getOutputStream(), body);
   }
-
   private char[] promptPin() {
-    if (GraphicsEnvironment.isHeadless()) {
-      Console console = System.console();
-      if (console != null) {
-        char[] pin = console.readPassword("Enter token PIN: ");
-        if (pin == null || pin.length == 0) throw new SecurityException("Empty PIN not allowed");
-        return pin;
-      }
-      System.out.print("Enter token PIN: ");
-      System.out.flush();
-      try {
-        StringBuilder sb = new StringBuilder();
-        int c;
-        while ((c = System.in.read()) != '\n' && c != '\r' && c != -1) {
-          if (c != '\n' && c != '\r') sb.append((char) c);
-        }
-        String pinStr = sb.toString().trim();
-        if (pinStr.isEmpty()) throw new SecurityException("Empty PIN not allowed");
-        return pinStr.toCharArray();
-      } catch (IOException e) {
-        throw new SecurityException("Failed to read PIN from console", e);
-      }
-    }
-
-    JPasswordField pf = new JPasswordField();
-    int ok = JOptionPane.showConfirmDialog(
-        null,
-        new Object[]{"Enter token PIN:", pf},
-        "TrustSign - Token PIN",
-        JOptionPane.OK_CANCEL_OPTION,
-        JOptionPane.PLAIN_MESSAGE
-    );
-    if (ok != JOptionPane.OK_OPTION) throw new SecurityException("PIN entry cancelled");
-    char[] pin = pf.getPassword();
-    if (pin == null || pin.length == 0) throw new SecurityException("Empty PIN not allowed");
-    return pin;
+    // WARNING: Hardcoded PIN for development/testing only.
+    // Do NOT use this approach in production.
+    String pinStr = "12345678"; // <-- change this to your token PIN
+    if (pinStr.isEmpty()) throw new SecurityException("Empty PIN not allowed");
+    return pinStr.toCharArray();
   }
 
   private File resolveConfigFile() {
