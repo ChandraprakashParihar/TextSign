@@ -45,7 +45,8 @@ public final class ApiServlet extends HttpServlet {
           writeJson(resp, 200, Map.of("status", "ok", "ts", Instant.now().toString()));
           return;
         }
-           case "/certificates" -> {
+        
+        case "/certificates" -> {
           requireSession(req);
 
           AgentConfig cfg = ConfigLoader.load(resolveConfigFile());
@@ -98,6 +99,112 @@ public final class ApiServlet extends HttpServlet {
         case "/session" -> {
           SessionManager.Session s = sessions.createSessionMinutes(10);
           writeJson(resp, 200, Map.of("token", s.token(), "expiresAt", s.expiresAt().toString()));
+          return;
+        }
+
+        case "/auto-sign-text" -> {
+          var mp = Multipart.read(req, 2 * 1024 * 1024); // 2 MB text payload max
+          byte[] data = mp.file("file");
+          String outputDir = mp.field("outputDir");
+
+          if (data == null || data.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
+            return;
+          }
+          if (outputDir == null || outputDir.isBlank()) {
+            writeJson(resp, 400, Map.of("error", "Missing field: outputDir"));
+            return;
+          }
+
+          char[] pin = promptPin();
+
+          AgentConfig cfg = ConfigLoader.load(resolveConfigFile());
+          List<String> libs = resolvePkcs11Libraries(cfg);
+          if (libs.isEmpty()) {
+            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            return;
+          }
+
+          Pkcs11Token.Loaded loaded;
+          try {
+            loaded = Pkcs11Token.load(pin, libs);
+          } catch (RuntimeException e) {
+            String detail = buildTokenErrorDetail(e);
+            writeJson(resp, 400, Map.of(
+                "error", "Token load failed",
+                "details", detail
+            ));
+            return;
+          }
+
+          KeyStore ks = loaded.keyStore();
+
+          String alias = null;
+          var certItems = Pkcs11Token.listCertificates(ks);
+          if (!certItems.isEmpty()) {
+            alias = certItems.get(1).alias();
+          }
+          if (alias == null || alias.isBlank()) {
+            writeJson(resp, 400, Map.of("error", "No suitable certificate alias found on token"));
+            return;
+          }
+
+          PrivateKey key = (PrivateKey) ks.getKey(alias, pin);
+          Certificate[] chain = ks.getCertificateChain(alias);
+
+          if (key == null || chain == null || chain.length == 0) {
+            writeJson(resp, 400, Map.of("error", "No key/certificate chain found for alias: " + alias));
+            return;
+          }
+
+          byte[] signature = TextSignerService.signDetached(data, key, chain, loaded.provider());
+
+          String originalText = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+          String sigB64 = Base64.getEncoder().encodeToString(signature);
+
+          X509Certificate signingCert = null;
+          if (chain[0] instanceof X509Certificate x509) {
+            signingCert = x509;
+          }
+          String certB64 = signingCert != null
+              ? Base64.getEncoder().encodeToString(signingCert.getEncoded())
+              : "";
+
+          StringBuilder sb = new StringBuilder();
+          sb.append(originalText);
+          if (!originalText.endsWith("\n")) {
+            sb.append("\n");
+          }
+          sb.append("<START-SIGNATURE>").append(sigB64).append("</START-SIGNATURE>\n");
+          sb.append("<START-CERTIFICATE>").append(certB64).append("</START-CERTIFICATE>\n");
+          sb.append("<SIGNER-VERSION>TrustSign</SIGNER-VERSION>\n");
+
+          String inputFilename = mp.filename("file");
+          if (inputFilename == null || inputFilename.isBlank()) {
+            inputFilename = "text.txt";
+          }
+          File outDirFile = new File(outputDir);
+          outDirFile.mkdirs();
+          String baseName = inputFilename;
+          String ext = "";
+          int dot = inputFilename.lastIndexOf('.');
+          if (dot > 0 && dot < inputFilename.length() - 1) {
+            baseName = inputFilename.substring(0, dot);
+            ext = inputFilename.substring(dot);
+          }
+          File outFile = new File(outDirFile, baseName + "-signed" + ext);
+
+          java.nio.file.Files.writeString(
+              outFile.toPath(),
+              sb.toString(),
+              java.nio.charset.StandardCharsets.UTF_8
+          );
+
+          writeJson(resp, 200, Map.of(
+              "ok", true,
+              "alias", alias,
+              "outputPath", outFile.getAbsolutePath()
+          ));
           return;
         }
 
@@ -167,7 +274,7 @@ public final class ApiServlet extends HttpServlet {
           }
           sb.append("<START-SIGNATURE>").append(sigB64).append("</START-SIGNATURE>\n");
           sb.append("<START-CERTIFICATE>").append(certB64).append("</START-CERTIFICATE>\n");
-          sb.append("<SIGNER-VERSION>V-NCODE_01.05.2013</SIGNER-VERSION>\n");
+          sb.append("<SIGNER-VERSION>TrustSign</SIGNER-VERSION>\n");
 
           resp.setStatus(200);
           resp.setContentType("text/plain; charset=UTF-8");
