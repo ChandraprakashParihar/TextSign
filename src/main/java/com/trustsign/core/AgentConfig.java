@@ -11,6 +11,7 @@ import java.util.List;
  *   "allowedOrigins": ["http://localhost:3000"],
  *   "pkcs11": {
  *     "preferredLibrary": "/path/to/pkcs11.so",
+ *     "pin": "token-pin",
  *     "windowsCandidates": ["%ProgramFiles%\\\\HyperPKI\\\\bin\\\\pkcs11.dll"],
  *     "macCandidates": [],
  *     "linuxCandidates": []
@@ -28,7 +29,8 @@ public record AgentConfig(
       String preferredLibrary,
       List<String> windowsCandidates,
       List<String> macCandidates,
-      List<String> linuxCandidates
+      List<String> linuxCandidates,
+      String pin
   ) {}
 
   public int portOrDefault() {

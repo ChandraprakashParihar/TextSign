@@ -3,6 +3,7 @@
   "allowedOrigins": ["http://localhost:3000"],
   "pkcs11": {
     "preferredLibrary": null,
+    "pin": null,
     "windowsCandidates": [
       "%SystemRoot%\\System32\\eps2003csp11v2.dll",
       "%SystemRoot%\\System32\\eps2003csp11v2_s.dll",

@@ -1,6 +1,7 @@
 plugins {
   id("java")
   id("application")
+  id("com.gradleup.shadow") version "8.3.9"
 }
 
 group = "com.trustsign"
@@ -34,7 +35,83 @@ application {
   mainClass.set("com.trustsign.server.Main")
 }
 
+tasks.shadowJar {
+  archiveBaseName.set("trustsign")
+  archiveClassifier.set("all")
+  manifest {
+    attributes("Main-Class": "com.trustsign.server.Main")
+  }
+  mergeServiceFiles()
+  duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
 tasks.test {
   useJUnitPlatform()
+}
+
+tasks.register("clientFolder") {
+  group = "distribution"
+  description = "Creates build/client/ with JAR, run script, config, and public key — ready to give to the client. Requires config/public-key.pem."
+  dependsOn("shadowJar")
+  def clientDir = file("$buildDir/client")
+  outputs.dir(clientDir)
+  doLast {
+    clientDir.mkdirs()
+    def configDir = new File(clientDir, "config")
+    configDir.mkdirs()
+    copy {
+      from(tasks.shadowJar.archiveFile) { rename { "trustsign-${project.version}-all.jar" } }
+      into(clientDir)
+    }
+    copy {
+      from("run-trustsign.bat")
+      into(clientDir)
+    }
+    def configSource = file("installer/config.json").exists() ? file("installer/config.json") : file("config/config.json")
+    if (configSource.exists()) {
+      copy {
+        from(configSource)
+        into(configDir)
+        rename { "config.json" }
+      }
+    }
+    def publicKeyFile = file("config/public-key.pem")
+    if (!publicKeyFile.exists()) {
+      throw new GradleException("config/public-key.pem is required for the client package. Put the signer's public key (or certificate PEM) in config/public-key.pem, then run clientFolder again.")
+    }
+    copy {
+      from(publicKeyFile)
+      into(configDir)
+      rename { "public-key.pem" }
+    }
+    copy {
+      from("CLIENT-RUN.md")
+      into(clientDir)
+      rename { "README.txt" }
+    }
+    new File(configDir, "SET-PIN.txt").text =
+        "Before first run: set your token PIN so TrustSign can use the key.\n\n" +
+        "Option 1 - Edit config.json:\n" +
+        "  Open config\\config.json and set \"pin\" inside \"pkcs11\" to your PIN, e.g.:\n" +
+        "  \"pkcs11\": { \"pin\": \"your-token-pin\", ... }\n\n" +
+        "Option 2 - Environment variable:\n" +
+        "  Set TRUSTSIGN_TOKEN_PIN=your-token-pin before running (e.g. in a batch file).\n"
+  }
+}
+
+tasks.register("buildInstaller") {
+  group = "distribution"
+  description = "Builds the Windows installer (requires Inno Setup 6). Runs installDist then compiles installer/TrustSign.iss"
+  dependsOn("installDist")
+  doLast {
+    def isccExe = ["C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe", "C:\\Program Files\\Inno Setup 6\\ISCC.exe"].find { new File(it).exists() } ?: "iscc"
+    def iss = file("installer/TrustSign.iss")
+    if (!iss.exists()) throw new GradleException("installer/TrustSign.iss not found")
+    def pb = new ProcessBuilder(isccExe, iss.absolutePath)
+    pb.directory(file("."))
+    pb.inheritIO()
+    def ret = pb.start().waitFor()
+    if (ret != 0) throw new GradleException("ISCC exited with code $ret")
+  }
 }
 

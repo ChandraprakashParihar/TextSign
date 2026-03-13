@@ -71,7 +71,7 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          char[] pin = promptPin();
+          char[] pin = resolvePin(cfg);
           Pkcs11Token.Loaded loaded;
           try {
             loaded = Pkcs11Token.load(pin, libs);
@@ -131,9 +131,8 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          char[] pin = promptPin();
-
           AgentConfig cfg = ConfigLoader.load(resolveConfigFile());
+          char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
             writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
@@ -156,7 +155,7 @@ public final class ApiServlet extends HttpServlet {
 
           PublicKey requestedPublicKey;
           try {
-            requestedPublicKey = loadConfiguredPublicKey();
+            requestedPublicKey = loadConfiguredPublicKeyOrThrow();
           } catch (Exception e) {
             writeJson(resp, 500, Map.of("error", "Failed to load configured public key", "details", safeMsg(e)));
             return;
@@ -194,23 +193,16 @@ public final class ApiServlet extends HttpServlet {
           String originalText = new String(data, java.nio.charset.StandardCharsets.UTF_8);
           String sigB64 = Base64.getEncoder().encodeToString(signature);
 
-          X509Certificate signingCert = null;
+          X509Certificate signingCert = matchedCert;
           X509Certificate[] x509Chain = null;
-          if (matchedCert != null) {
-            signingCert = matchedCert;
-          }
           if (chain[0] instanceof X509Certificate) {
             x509Chain = java.util.Arrays.stream(chain)
                 .filter(c -> c instanceof X509Certificate)
                 .map(c -> (X509Certificate) c)
                 .toArray(X509Certificate[]::new);
           }
-          if (signingCert != null) {
-            CertificateValidator.validateForSigning(signingCert, x509Chain);
-          }
-          String certB64 = signingCert != null
-              ? Base64.getEncoder().encodeToString(signingCert.getEncoded())
-              : "";
+          CertificateValidator.validateForSigning(signingCert, x509Chain);
+          String certB64 = Base64.getEncoder().encodeToString(signingCert.getEncoded());
 
           StringBuilder sb = new StringBuilder();
           sb.append(originalText);
@@ -262,9 +254,8 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          char[] pin = promptPin();
-
           AgentConfig cfg = ConfigLoader.load(resolveConfigFile());
+          char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
             writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
@@ -287,7 +278,7 @@ public final class ApiServlet extends HttpServlet {
 
           PublicKey requestedPublicKey;
           try {
-            requestedPublicKey = loadConfiguredPublicKey();
+            requestedPublicKey = loadConfiguredPublicKeyOrThrow();
           } catch (Exception e) {
             writeJson(resp, 500, Map.of("error", "Failed to load configured public key", "details", safeMsg(e)));
             return;
@@ -325,23 +316,16 @@ public final class ApiServlet extends HttpServlet {
           String originalText = new String(data, java.nio.charset.StandardCharsets.UTF_8);
           String sigB64 = Base64.getEncoder().encodeToString(signature);
 
-          X509Certificate signingCert = null;
+          X509Certificate signingCert = matchedCert;
           X509Certificate[] x509Chain = null;
-          if (matchedCert != null) {
-            signingCert = matchedCert;
-          }
           if (chain[0] instanceof X509Certificate) {
             x509Chain = java.util.Arrays.stream(chain)
                 .filter(c -> c instanceof X509Certificate)
                 .map(c -> (X509Certificate) c)
                 .toArray(X509Certificate[]::new);
           }
-          if (signingCert != null) {
-            CertificateValidator.validateForSigning(signingCert, x509Chain);
-          }
-          String certB64 = signingCert != null
-              ? Base64.getEncoder().encodeToString(signingCert.getEncoded())
-              : "";
+          CertificateValidator.validateForSigning(signingCert, x509Chain);
+          String certB64 = Base64.getEncoder().encodeToString(signingCert.getEncoded());
 
           StringBuilder sb = new StringBuilder();
           sb.append(originalText);
@@ -357,12 +341,8 @@ public final class ApiServlet extends HttpServlet {
           String filename = mp.filename("file");
           if (filename == null || filename.isBlank()) filename = "text";
           resp.setHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
-          resp.setHeader("X-Signer-SubjectDN", signingCert != null
-              ? signingCert.getSubjectX500Principal().getName()
-              : "");
-          resp.setHeader("X-Signer-SerialNumber", signingCert != null
-              ? signingCert.getSerialNumber().toString(16)
-              : "");
+          resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
+          resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
           resp.getOutputStream().write(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
           return;
         }
@@ -470,13 +450,9 @@ public final class ApiServlet extends HttpServlet {
 
   /**
    * Loads the signer public key from a configured location on disk.
-   *
-   * Resolution order:
-   * - System property "trustsign.publicKey.path" if set
-   * - "config/public-key.pem" relative to working directory
-   * - "../config/public-key.pem" (for running from build output dir)
+   * Resolution order: trustsign.publicKey.path, config/public-key.pem, ../config/public-key.pem.
    */
-  private static PublicKey loadConfiguredPublicKey() throws Exception {
+  private static PublicKey loadConfiguredPublicKeyOrThrow() throws Exception {
     String path = System.getProperty("trustsign.publicKey.path");
     if (path == null || path.isBlank()) {
       File f1 = new File("config/public-key.pem");
@@ -491,7 +467,6 @@ public final class ApiServlet extends HttpServlet {
         }
       }
     }
-
     String pem = java.nio.file.Files.readString(
         java.nio.file.Paths.get(path),
         java.nio.charset.StandardCharsets.UTF_8
@@ -531,11 +506,21 @@ public final class ApiServlet extends HttpServlet {
     KeyFactory kf = KeyFactory.getInstance("RSA");
     return kf.generatePublic(spec);
   }
-  private char[] promptPin() {
-    // WARNING: Hardcoded PIN for development/testing only.
-    // Do NOT use this approach in production.
-    String pinStr = "12345678"; // <-- change this to your token PIN
-    if (pinStr.isEmpty()) throw new SecurityException("Empty PIN not allowed");
+  /**
+   * Resolves the token PIN from: 1) env TRUSTSIGN_TOKEN_PIN, 2) config pkcs11.pin.
+   * Client can set either in config.json ("pkcs11": { "pin": "their-pin" }) or via environment variable.
+   */
+  private char[] resolvePin(AgentConfig cfg) {
+    String pinStr = System.getenv("TRUSTSIGN_TOKEN_PIN");
+    if (pinStr == null || pinStr.isBlank()) {
+      if (cfg.pkcs11() != null && cfg.pkcs11().pin() != null && !cfg.pkcs11().pin().isBlank()) {
+        pinStr = cfg.pkcs11().pin();
+      }
+    }
+    if (pinStr == null || pinStr.isBlank()) {
+      throw new SecurityException(
+          "Token PIN not configured. Set it in config.json (pkcs11.pin) or set environment variable TRUSTSIGN_TOKEN_PIN.");
+    }
     return pinStr.toCharArray();
   }
 
