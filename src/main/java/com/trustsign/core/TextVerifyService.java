@@ -1,33 +1,20 @@
 package com.trustsign.core;
 
-import org.bouncycastle.cms.CMSProcessableByteArray;
-import org.bouncycastle.cms.CMSSignedData;
-import org.bouncycastle.cms.CMSSignerDigestMismatchException;
-import org.bouncycastle.cms.SignerInformation;
-import org.bouncycastle.cms.SignerInformationStore;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
-
-import java.security.Security;
+import java.security.PublicKey;
+import java.security.Signature;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
-import java.util.Collection;
 
 /**
  * Verifies text signatures in the custom format:
  *
  * <original text>
- * <START-SIGNATURE>base64(PKCS#7)</START-SIGNATURE>
+ * <START-SIGNATURE>base64(raw SHA1withRSA signature)</START-SIGNATURE>
  * <START-CERTIFICATE>base64(cert)</START-CERTIFICATE>
  * <SIGNER-VERSION>...</SIGNER-VERSION>
  */
 public final class TextVerifyService {
-  static {
-    if (Security.getProvider("BC") == null) {
-      Security.addProvider(new BouncyCastleProvider());
-    }
-  }
-
   public record Result(boolean ok, String reason) {}
 
   public static Result verify(String signedText) {
@@ -56,6 +43,7 @@ public final class TextVerifyService {
 
       CertificateFactory cf = CertificateFactory.getInstance("X.509");
       X509Certificate cert = (X509Certificate) cf.generateCertificate(new java.io.ByteArrayInputStream(certBytes));
+      PublicKey publicKey = cert.getPublicKey();
 
       // Try verifying with and without a trailing newline to tolerate editor differences.
       String[] candidates;
@@ -66,29 +54,16 @@ public final class TextVerifyService {
         candidates = new String[]{textBeforeSig};
       }
 
-      for (int i = 0; i < candidates.length; i++) {
-        String originalText = candidates[i];
-        try {
-          CMSSignedData signedData = new CMSSignedData(new CMSProcessableByteArray(
-              originalText.getBytes(java.nio.charset.StandardCharsets.UTF_8)), sigBytes);
-
-          SignerInformationStore signers = signedData.getSignerInfos();
-          Collection<SignerInformation> c = signers.getSigners();
-          if (c.isEmpty()) return new Result(false, "No signer information in signature");
-
-          SignerInformation signer = c.iterator().next();
-          boolean ok = signer.verify(new org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder()
-              .setProvider("BC")
-              .build(cert));
-          if (ok) return new Result(true, "Signature valid");
-        } catch (CMSSignerDigestMismatchException e) {
-          if (i == candidates.length - 1) {
-            return new Result(false, "Digest mismatch: content has been modified");
-          }
+      for (String originalText : candidates) {
+        Signature signature = Signature.getInstance("SHA1withRSA");
+        signature.initVerify(publicKey);
+        signature.update(originalText.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        if (signature.verify(sigBytes)) {
+          return new Result(true, "Signature valid");
         }
       }
 
-      return new Result(false, "Signature invalid");
+      return new Result(false, "Signature invalid or content has been modified");
     } catch (Exception e) {
       String msg = e.getMessage();
       if (msg == null || msg.isBlank()) msg = e.getClass().getSimpleName();

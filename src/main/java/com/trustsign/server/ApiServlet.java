@@ -178,7 +178,7 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          byte[] signature = TextSignerService.signDetached(data, key, chain, loaded.provider());
+          byte[] signature = TextSignerService.signRawSha1WithRsa(data, key, loaded.provider());
 
           String originalText = new String(data, java.nio.charset.StandardCharsets.UTF_8);
           String sigB64 = Base64.getEncoder().encodeToString(signature);
@@ -309,7 +309,7 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          byte[] signature = TextSignerService.signDetached(data, key, chain, loaded.provider());
+          byte[] signature = TextSignerService.signRawSha1WithRsa(data, key, loaded.provider());
 
           String originalText = new String(data, java.nio.charset.StandardCharsets.UTF_8);
           String sigB64 = Base64.getEncoder().encodeToString(signature);
