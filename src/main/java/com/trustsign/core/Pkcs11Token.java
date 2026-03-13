@@ -13,13 +13,15 @@ public final class Pkcs11Token {
 
   public static Loaded load(char[] pin, List<String> libraryCandidates) {
     Exception last = null;
+    int tried = 0;
 
     for (String lib : libraryCandidates) {
       if (lib == null || lib.isBlank()) continue;
 
       Path libPath = Paths.get(lib);
       if (!Files.isRegularFile(libPath)) {
-        last = new IOException("PKCS#11 library not found or not a regular file: " + lib);
+        last = new IOException("PKCS#11 library not found: " + lib);
+        tried++;
         continue;
       }
 
@@ -38,6 +40,7 @@ public final class Pkcs11Token {
         return new Loaded(ks, p11, lib);
       } catch (Exception e) {
         last = e;
+        tried++;
 
         if (p11 != null) {
           try { Security.removeProvider(p11.getName()); } catch (Exception ignore) {}
@@ -45,7 +48,9 @@ public final class Pkcs11Token {
       }
     }
 
-    throw new RuntimeException("Unable to load token using configured PKCS#11 libraries.", last);
+    String hint = last != null ? last.getMessage() : "No library path succeeded.";
+    if (tried == 0) hint = "No PKCS#11 library paths configured or all paths are blank.";
+    throw new RuntimeException("Unable to load token using configured PKCS#11 libraries. " + hint, last);
   }
 
   private static Provider createProviderWithTempConfig(Path libraryPath) throws IOException {

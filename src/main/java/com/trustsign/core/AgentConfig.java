@@ -11,11 +11,12 @@ import java.util.List;
  *   "allowedOrigins": ["http://localhost:3000"],
  *   "pkcs11": {
  *     "preferredLibrary": "/path/to/pkcs11.so",
- *     "windowsCandidates": [],
+ *     "windowsCandidates": ["%ProgramFiles%\\\\HyperPKI\\\\bin\\\\pkcs11.dll"],
  *     "macCandidates": [],
  *     "linuxCandidates": []
  *   }
  * }
+ * On Windows, preferredLibrary and paths in windowsCandidates can use env vars (e.g. %ProgramFiles%).
  */
 public record AgentConfig(
     List<String> allowedOrigins,

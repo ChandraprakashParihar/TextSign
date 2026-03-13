@@ -27,6 +27,9 @@ import java.security.KeyFactory;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.security.spec.X509EncodedKeySpec;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -49,7 +52,22 @@ public final class ApiServlet extends HttpServlet {
           writeJson(resp, 200, Map.of("status", "ok", "ts", Instant.now().toString()));
           return;
         }
-        
+        case "/pkcs11/candidates" -> {
+          AgentConfig cfg = ConfigLoader.load(resolveConfigFile());
+          List<String> libs = OsPkcs11Resolver.candidates(cfg);
+          List<Map<String, Object>> list = libs.stream()
+              .map(p -> Map.<String, Object>of(
+                  "path", p,
+                  "exists", Files.isRegularFile(Paths.get(p))
+              ))
+              .toList();
+          Map<String, Object> body = new java.util.HashMap<>(Map.of("candidates", list));
+          if (OsPkcs11Resolver.current() == OsPkcs11Resolver.Os.WINDOWS) {
+            body.put("discovered", discoverPkcs11OnWindows());
+          }
+          writeJson(resp, 200, body);
+          return;
+        }
         case "/certificates" -> {
           requireSession(req);
 
@@ -391,6 +409,66 @@ public final class ApiServlet extends HttpServlet {
     return pathInfo.startsWith("/") ? pathInfo : "/" + pathInfo;
   }
 
+  /**
+   * On Windows, searches common locations for PKCS#11 DLLs (pkcs11.dll or *pkcs*.dll / *p11*.dll)
+   * so the user can set preferredLibrary if the driver is installed in a non-standard path.
+   */
+  private static List<Map<String, Object>> discoverPkcs11OnWindows() {
+    List<Map<String, Object>> out = new java.util.ArrayList<>();
+    java.util.Set<String> seen = new java.util.HashSet<>();
+
+    String sysRoot = System.getenv("SystemRoot");
+    String[] roots = {
+        System.getenv("ProgramFiles"),
+        System.getenv("ProgramFiles(x86)"),
+        sysRoot != null ? sysRoot + "\\System32" : null,
+        sysRoot != null ? sysRoot + "\\SysWOW64" : null
+    };
+
+    for (String rootStr : roots) {
+      if (rootStr == null || rootStr.isBlank()) continue;
+      Path root = Paths.get(rootStr);
+      if (!Files.isDirectory(root)) continue;
+
+      if (rootStr.contains("System32") || rootStr.contains("SysWOW64")) {
+        addDllsInDir(root, seen, out);
+        continue;
+      }
+
+      int count = 0;
+      try (var stream = Files.list(root)) {
+        for (Path dir : stream.toList()) {
+          if (count >= 100) break;
+          if (!Files.isDirectory(dir)) continue;
+          count++;
+          for (String rel : new String[] { "", "bin/", "x64/", "x86/" }) {
+            Path base = rel.isEmpty() ? dir : dir.resolve(rel);
+            if (!Files.isDirectory(base) && !rel.isEmpty()) continue;
+            if (rel.isEmpty() && !Files.isDirectory(base)) continue;
+            addDllsInDir(base, seen, out);
+          }
+        }
+      } catch (Exception ignore) { }
+    }
+    return out;
+  }
+
+  private static void addDllsInDir(Path dir, java.util.Set<String> seen, List<Map<String, Object>> out) {
+    try (var stream = Files.list(dir)) {
+      for (Path p : stream.toList()) {
+        if (!Files.isRegularFile(p)) continue;
+        String name = p.getFileName().toString().toLowerCase();
+        if (!name.endsWith(".dll")) continue;
+        if (name.contains("pkcs") || name.contains("p11") || name.equals("pkcs11.dll")) {
+          String path = p.toAbsolutePath().toString();
+          if (seen.add(path)) {
+            out.add(Map.of("path", path, "exists", true));
+          }
+        }
+      }
+    } catch (Exception ignore) { }
+  }
+
   private void writeJson(HttpServletResponse resp, int status, Object body) throws IOException {
     resp.setStatus(status);
     resp.setContentType("application/json");
@@ -477,21 +555,8 @@ public final class ApiServlet extends HttpServlet {
   }
 
   private static List<String> resolvePkcs11Libraries(AgentConfig cfg) throws IOException {
-    AgentConfig.Pkcs11Config pkcs = cfg.pkcs11();
-    if (pkcs == null) return List.of();
-
-    if (pkcs.preferredLibrary() != null && !pkcs.preferredLibrary().isBlank()) {
-      return List.of(pkcs.preferredLibrary());
-    }
-
-    String os = System.getProperty("os.name", "").toLowerCase();
-    if (os.contains("win")) {
-      return pkcs.windowsCandidates() != null ? pkcs.windowsCandidates() : List.of();
-    } else if (os.contains("mac")) {
-      return pkcs.macCandidates() != null ? pkcs.macCandidates() : List.of();
-    } else {
-      return pkcs.linuxCandidates() != null ? pkcs.linuxCandidates() : List.of();
-    }
+    if (cfg.pkcs11() == null) return List.of();
+    return OsPkcs11Resolver.candidates(cfg);
   }
 
   private String safeMsg(Exception e) {
@@ -502,17 +567,16 @@ public final class ApiServlet extends HttpServlet {
   }
 
   private static String buildTokenErrorDetail(RuntimeException e) {
-    Throwable t = e;
-    String msg = null;
-    while (t != null) {
-      msg = t.getMessage();
-      if (msg != null && !msg.isBlank()) break;
-      t = t.getCause();
+    Throwable root = e;
+    while (root.getCause() != null) root = root.getCause();
+    String causeMsg = root.getMessage();
+    if (causeMsg != null && !causeMsg.isBlank()) {
+      String out = causeMsg.length() > 400 ? causeMsg.substring(0, 400) : causeMsg;
+      if (root != e) return out + " (from " + root.getClass().getSimpleName() + ")";
+      return out;
     }
-    if (msg != null && !msg.isBlank()) {
-      if (msg.length() > 400) return msg.substring(0, 400);
-      return msg;
-    }
+    String topMsg = e.getMessage();
+    if (topMsg != null && !topMsg.isBlank()) return topMsg;
     return "Connect your PKCS#11 token, check the library path and PIN, and try again.";
   }
 }
