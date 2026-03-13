@@ -11,13 +11,6 @@ import com.trustsign.core.CertificateValidator;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-
-import javax.swing.JPasswordField;
-import javax.swing.JOptionPane;
-import com.fasterxml.jackson.databind.JsonNode;
-
-import java.awt.GraphicsEnvironment;
-import java.io.Console;
 import java.io.File;
 import java.io.IOException;
 import java.security.KeyStore;
