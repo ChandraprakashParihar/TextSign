@@ -84,7 +84,7 @@ public final class CertificateValidator {
     }
 
     boolean enablePathValidation = Boolean.parseBoolean(
-        System.getProperty("trustsign.enablePathValidation", "true")
+        System.getProperty("trustsign.enablePathValidation", "false")
     );
     if (enablePathValidation) {
       validateTrustChain(cert, chain);
