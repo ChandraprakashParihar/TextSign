@@ -1,5 +1,7 @@
 package com.trustsign.core;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.List;
 
 /**
@@ -22,7 +24,9 @@ import java.util.List;
 public record AgentConfig(
     List<String> allowedOrigins,
     Integer port,
-    Pkcs11Config pkcs11
+    Pkcs11Config pkcs11,
+    /** Optional. When set, outputDir for /auto-sign-text must be under this path (absolute or relative to working dir). */
+    @JsonProperty(required = false) String outputBaseDir
 ) {
 
   public record Pkcs11Config(

@@ -1,0 +1,9 @@
+# Licence private key – never commit (vendor keeps secure)
+licence-private-key.pem
+**/licence-private-key.pem
+build/tools-keys/
+
+# Build
+build/
+.gradle/
+*.class

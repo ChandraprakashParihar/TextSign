@@ -2,6 +2,7 @@ plugins {
   id("java")
   id("application")
   id("com.gradleup.shadow") version "8.3.9"
+  id("de.undercouch.download") version "5.6.0"
 }
 
 group = "com.trustsign"
@@ -29,6 +30,7 @@ dependencies {
   implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 
   testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+  testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 application {
@@ -47,6 +49,78 @@ tasks.shadowJar {
 
 tasks.test {
   useJUnitPlatform()
+}
+
+// Embed build timestamp so licence first-use cannot be backdated beyond release.
+// Only write once (when file missing) so "Licence state invalid" doesn't happen on every dev run.
+def buildTimeDir = file("$buildDir/generated/licence-resources")
+def buildTimeFile = file("$buildTimeDir/build-time.txt")
+tasks.register("writeBuildTime") {
+  group = "build"
+  doLast {
+    buildTimeDir.mkdirs()
+    if (!buildTimeFile.exists()) {
+      buildTimeFile.text = String.valueOf((long) (System.currentTimeMillis() / 1000))
+    }
+  }
+}
+tasks.processResources {
+  dependsOn("writeBuildTime")
+  from(buildTimeDir) { into("com/trustsign") }
+}
+
+// Eclipse Temurin 17 JRE for Windows x64 (bundled so clients don't need to install Java)
+def windowsJreZipUrl = "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.18%2B8/OpenJDK17U-jre_x64_windows_hotspot_17.0.18_8.zip"
+def windowsJreZip = file("$buildDir/jre-win/temurin17-jre-win-x64.zip")
+def windowsJreExtractDir = file("$buildDir/jre-win/extracted")
+
+tasks.register("downloadWindowsJre", de.undercouch.gradle.tasks.download.Download) {
+  group = "distribution"
+  description = "Downloads Eclipse Temurin 17 JRE for Windows x64 (used when building installer with bundled JRE)"
+  onlyIf { !windowsJreZip.exists() }
+  src(windowsJreZipUrl)
+  dest(windowsJreZip)
+  overwrite(false)
+}
+
+tasks.register("extractWindowsJre") {
+  group = "distribution"
+  description = "Extracts the Windows JRE zip (after download)"
+  dependsOn("downloadWindowsJre")
+  def extractTo = windowsJreExtractDir
+  outputs.dir(extractTo)
+  doLast {
+    extractTo.mkdirs()
+    copy {
+      from(zipTree(windowsJreZip))
+      into(extractTo)
+    }
+  }
+}
+
+tasks.register("installDistWithJre") {
+  group = "distribution"
+  description = "Same as installDist but embeds Windows JRE and patches launcher to use it (for installer)"
+  dependsOn("installDist", "extractWindowsJre")
+  doLast {
+    def installDir = file("$buildDir/install/trustsign")
+    def jreDir = new File(installDir, "jre")
+    if (!jreDir.exists()) {
+      def topDirs = windowsJreExtractDir.listFiles()?.findAll { it.isDirectory() }
+      def jreContentDir = (topDirs?.size() == 1) ? topDirs[0] : windowsJreExtractDir
+      copy {
+        from(jreContentDir)
+        into(jreDir)
+      }
+    }
+    // Patch trustsign.bat to use bundled JRE when present (installDist overwrites script each time)
+    def batFile = new File(installDir, "bin/trustsign.bat")
+    if (batFile.exists() && !batFile.text.contains("Use bundled JRE if present")) {
+      def findJavaMarker = "@rem Find java.exe"
+      def bundledBlock = "@rem Use bundled JRE if present\nif exist \"%APP_HOME%\\jre\\bin\\java.exe\" set JAVA_EXE=%APP_HOME%\\jre\\bin\\java.exe & goto execute\n\n"
+      batFile.text = batFile.text.replace(findJavaMarker, bundledBlock + findJavaMarker)
+    }
+  }
 }
 
 tasks.register("clientFolder") {
@@ -101,8 +175,8 @@ tasks.register("clientFolder") {
 
 tasks.register("buildInstaller") {
   group = "distribution"
-  description = "Builds the Windows installer (requires Inno Setup 6). Runs installDist then compiles installer/TrustSign.iss"
-  dependsOn("installDist")
+  description = "Builds the Windows installer with bundled JRE (requires Inno Setup 6). Runs installDistWithJre then compiles installer/TrustSign.iss"
+  dependsOn("installDistWithJre")
   doLast {
     def isccExe = ["C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe", "C:\\Program Files\\Inno Setup 6\\ISCC.exe"].find { new File(it).exists() } ?: "iscc"
     def iss = file("installer/TrustSign.iss")

@@ -1,6 +1,7 @@
 package com.trustsign.server;
 
 import com.trustsign.core.AgentConfig;
+import com.trustsign.core.LicenceEnforcer;
 import com.trustsign.core.SessionManager;
 import jakarta.servlet.MultipartConfigElement;
 import org.eclipse.jetty.server.Server;
@@ -10,7 +11,7 @@ import org.eclipse.jetty.servlet.ServletHolder;
 
 public final class ServerBootstrap {
 
-  public static Server buildServer(AgentConfig cfg) {
+  public static Server buildServer(AgentConfig cfg, LicenceEnforcer licenceEnforcer) {
     SessionManager sessions = new SessionManager();
 
     Server server = new Server();
@@ -23,7 +24,7 @@ public final class ServerBootstrap {
     ServletContextHandler ctx = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
     ctx.setContextPath("/");
 
-    ServletHolder api = new ServletHolder(new ApiServlet(sessions));
+    ServletHolder api = new ServletHolder(new ApiServlet(sessions, licenceEnforcer));
 
     int maxFile = 2 * 1024 * 1024;
     long maxReq = maxFile + (1L * 1024 * 1024);

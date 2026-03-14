@@ -42,7 +42,9 @@ public final class Multipart {
     int total = 0;
     while ((r = in.read(buf)) != -1) {
       total += r;
-      if (total > maxBytes) throw new IllegalStateException("Payload too large");
+      if (total > maxBytes) {
+        throw new IllegalStateException("Payload too large (max " + (maxBytes / 1024) + " KB)");
+      }
       out.write(buf, 0, r);
     }
     return out.toByteArray();

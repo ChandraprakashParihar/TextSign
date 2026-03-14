@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.*;
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.*;
 
@@ -79,17 +80,17 @@ public final class Pkcs11Token {
         String alias = aliases.nextElement();
         if (!ks.isKeyEntry(alias)) continue;
 
-        X509Certificate cert = (X509Certificate) ks.getCertificate(alias);
-        if (cert == null) continue;
+        Certificate cert = ks.getCertificate(alias);
+        if (!(cert instanceof X509Certificate x509)) continue;
 
         out.add(new CertItem(
             alias,
-            cert.getSubjectX500Principal().getName(),
-            cert.getIssuerX500Principal().getName(),
-            cert.getSerialNumber().toString(16),
-            cert.getNotBefore(),
-            cert.getNotAfter(),
-            cert.getPublicKey().getAlgorithm()
+            x509.getSubjectX500Principal().getName(),
+            x509.getIssuerX500Principal().getName(),
+            x509.getSerialNumber().toString(16),
+            x509.getNotBefore(),
+            x509.getNotAfter(),
+            x509.getPublicKey().getAlgorithm()
         ));
       }
       return out;

@@ -8,6 +8,7 @@ import com.trustsign.core.SessionManager;
 import com.trustsign.core.TextSignerService;
 import com.trustsign.core.TextVerifyService;
 import com.trustsign.core.CertificateValidator;
+import com.trustsign.core.LicenceEnforcer;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -27,16 +28,80 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 public final class ApiServlet extends HttpServlet {
-  private final SessionManager sessions;
+  private static final Logger LOG = Logger.getLogger(ApiServlet.class.getName());
+  private static final Pattern SAFE_FILENAME = Pattern.compile("[^a-zA-Z0-9._-]");
 
-  public ApiServlet(SessionManager sessions) {
+  private final SessionManager sessions;
+  private final LicenceEnforcer licenceEnforcer;
+
+  public ApiServlet(SessionManager sessions, LicenceEnforcer licenceEnforcer) {
     this.sessions = sessions;
+    this.licenceEnforcer = licenceEnforcer;
+  }
+
+  /**
+   * Loads config from resolved path. On failure writes error response and returns null.
+   */
+  private AgentConfig loadConfig(HttpServletResponse resp) throws IOException {
+    File f = resolveConfigFile();
+    if (!f.exists()) {
+      writeJson(resp, 500, Map.of("error", "Config file not found", "path", f.getAbsolutePath()));
+      return null;
+    }
+    try {
+      return ConfigLoader.load(f);
+    } catch (Exception e) {
+      LOG.warning("Config load failed: " + e.getMessage());
+      writeJson(resp, 500, Map.of("error", "Invalid config", "details", safeMsg(e)));
+      return null;
+    }
+  }
+
+  /**
+   * Resolves outputDir to a directory. Rejects path traversal (..).
+   * When basePath is null, the user can pass any directory path (absolute or relative to working dir).
+   * When basePath is set (outputBaseDir in config), outputDir must be under that base.
+   */
+  private static File resolveSafeOutputDir(String outputDir, Path basePath) {
+    if (outputDir == null || outputDir.isBlank()) {
+      throw new IllegalArgumentException("outputDir is required");
+    }
+    Path requested = Paths.get(outputDir.trim()).normalize();
+    if (requested.toString().contains("..")) {
+      throw new SecurityException("outputDir must not contain '..'");
+    }
+    Path base = Paths.get(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+    Path resolved = requested.isAbsolute() ? requested.normalize().toAbsolutePath() : base.resolve(requested).normalize().toAbsolutePath();
+    if (basePath != null) {
+      Path allowedBase = basePath.toAbsolutePath().normalize();
+      if (!resolved.startsWith(allowedBase)) {
+        throw new SecurityException("outputDir must be under configured outputBaseDir (" + allowedBase + ")");
+      }
+    }
+    return resolved.toFile();
+  }
+
+  /** Sanitizes a filename for Content-Disposition header (no path, no control chars). */
+  private static String sanitizeFilename(String filename) {
+    if (filename == null || filename.isBlank()) return "signed.txt";
+    String name = Paths.get(filename).getFileName().toString();
+    if (name == null || name.isBlank()) return "signed.txt";
+    name = SAFE_FILENAME.matcher(name).replaceAll("_");
+    if (name.length() > 200) name = name.substring(0, 200);
+    return name.isEmpty() ? "signed.txt" : name;
   }
 
   @Override
   protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    LicenceEnforcer.Result licence = licenceEnforcer.check();
+    if (!licence.allowed()) {
+      writeJson(resp, 403, Map.of("error", "Licence", "message", licence.message()));
+      return;
+    }
     String path = normPath(req.getPathInfo());
 
     try {
@@ -46,7 +111,8 @@ public final class ApiServlet extends HttpServlet {
           return;
         }
         case "/pkcs11/candidates" -> {
-          AgentConfig cfg = ConfigLoader.load(resolveConfigFile());
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) return;
           List<String> libs = OsPkcs11Resolver.candidates(cfg);
           List<Map<String, Object>> list = libs.stream()
               .map(p -> Map.<String, Object>of(
@@ -64,7 +130,8 @@ public final class ApiServlet extends HttpServlet {
         case "/certificates" -> {
           requireSession(req);
 
-          AgentConfig cfg = ConfigLoader.load(resolveConfigFile());
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) return;
           List<String> libs = OsPkcs11Resolver.candidates(cfg);
           if (libs.isEmpty()) {
             writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
@@ -101,12 +168,18 @@ public final class ApiServlet extends HttpServlet {
     } catch (SecurityException se) {
       writeJson(resp, 403, Map.of("error", se.getMessage()));
     } catch (Exception e) {
+      LOG.warning("GET error: " + e.getMessage());
       writeJson(resp, 500, Map.of("error", "Internal error", "details", safeMsg(e)));
     }
   }
 
   @Override
   protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    LicenceEnforcer.Result licence = licenceEnforcer.check();
+    if (!licence.allowed()) {
+      writeJson(resp, 403, Map.of("error", "Licence", "message", licence.message()));
+      return;
+    }
     String path = normPath(req.getPathInfo());
 
     try {
@@ -131,7 +204,24 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          AgentConfig cfg = ConfigLoader.load(resolveConfigFile());
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) return;
+
+          Path outputBase = null;
+          if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+            outputBase = Paths.get(cfg.outputBaseDir());
+            if (!outputBase.isAbsolute()) {
+              outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+            }
+          }
+          File outDirFile;
+          try {
+            outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+          } catch (SecurityException | IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+            return;
+          }
+
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
@@ -217,7 +307,6 @@ public final class ApiServlet extends HttpServlet {
           if (inputFilename == null || inputFilename.isBlank()) {
             inputFilename = "text.txt";
           }
-          File outDirFile = new File(outputDir);
           outDirFile.mkdirs();
           String baseName = inputFilename;
           String ext = "";
@@ -254,7 +343,8 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          AgentConfig cfg = ConfigLoader.load(resolveConfigFile());
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) return;
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
@@ -338,8 +428,7 @@ public final class ApiServlet extends HttpServlet {
 
           resp.setStatus(200);
           resp.setContentType("text/plain; charset=UTF-8");
-          String filename = mp.filename("file");
-          if (filename == null || filename.isBlank()) filename = "text";
+          String filename = sanitizeFilename(mp.filename("file"));
           resp.setHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
           resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
           resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
@@ -368,6 +457,7 @@ public final class ApiServlet extends HttpServlet {
     } catch (SecurityException se) {
       writeJson(resp, 403, Map.of("error", se.getMessage()));
     } catch (Exception e) {
+      LOG.warning("POST error: " + e.getMessage());
       writeJson(resp, 500, Map.of("error", "Internal error", "details", safeMsg(e)));
     }
   }
