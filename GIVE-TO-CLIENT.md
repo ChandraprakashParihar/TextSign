@@ -23,6 +23,7 @@ java -cp build/libs/trustsign-0.1.0-all.jar com.trustsign.tools.LicenceGenerator
 ### Option A: Windows installer (recommended for Windows clients)
 
 - Client gets a single **Setup.exe**; no Java install needed (JRE is bundled).
+- **You must build the installer on Windows** (Inno Setup is Windows-only). On Mac/Linux, use Option B instead.
 
 **Steps:**
 
@@ -30,7 +31,7 @@ java -cp build/libs/trustsign-0.1.0-all.jar com.trustsign.tools.LicenceGenerator
    ```bash
    cp config/licence.json installer/licence.json
    ```
-2. Build the installer (on a machine where **Inno Setup 6** is installed):
+2. On a **Windows** machine with **Inno Setup 6** installed, run:
    ```bash
    ./gradlew buildInstaller
    ```
@@ -42,7 +43,7 @@ They run the installer, set their token PIN (in config or env), and start TrustS
 
 ### Option B: Client folder (any OS, or when you can’t build the installer)
 
-- Client gets a folder with the JAR, run script, and config. They need **Java 17+** installed (unless you use a different distribution that bundles it).
+- Client gets a folder with the JAR, **bundled Windows JRE**, run script, and config. **Windows clients do not need to install Java.** Mac/Linux clients need Java 17+ to run the JAR.
 
 **Steps:**
 

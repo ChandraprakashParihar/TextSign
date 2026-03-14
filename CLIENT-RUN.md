@@ -1,6 +1,6 @@
 # How to run TrustSign (for clients)
 
-You can give the client **one JAR file** and a small run script. The client needs **Java 17 or later** installed (unless you use the Windows installer, which includes Java).
+The client package includes a **bundled JRE** (Windows), so **the client does not need to install Java**. They run **run-trustsign.bat** (Windows) or use the JAR with Java 17+ (Mac/Linux).
 
 ---
 
@@ -19,10 +19,12 @@ This creates **`build/client/`** with everything the client needs:
 ```
 build/client/
   trustsign-0.1.0-all.jar
-  run-trustsign.bat
+  run-trustsign.bat      ← double-click to start (uses bundled JRE on Windows)
+  jre/                   ← bundled Java (Windows); client does not install Java
   config/
     config.json
-    public-key.pem    ← the public key you provided
+    licence.json
+    public-key.pem       ← the public key you provided
   README.txt
 ```
 
@@ -48,8 +50,8 @@ build/client/
 
 ## How the client runs the service
 
-1. Install **Java 17 or later** if needed (e.g. [Eclipse Temurin 17](https://adoptium.net/temurin/releases/?os=windows&arch=x64&package=jre&version=17)).
-2. Put the JAR, `run-trustsign.bat`, and `config` folder in one folder (e.g. `TrustSign`).
+1. **Windows:** No need to install Java — the package includes a bundled JRE. **Mac/Linux:** Install Java 17 or later if not already present.
+2. Put the folder contents in one place (e.g. `TrustSign`). Do not remove the `jre` folder (Windows).
 3. **Double‑click `run-trustsign.bat`**  
    - Or open Command Prompt in that folder and run:  
      `java -jar trustsign-0.1.0-all.jar`
