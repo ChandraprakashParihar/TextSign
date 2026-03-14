@@ -28,7 +28,9 @@ public record AgentConfig(
     /** Optional. When set, outputDir for /auto-sign-text must be under this path (absolute or relative to working dir). */
     @JsonProperty(required = false) String outputBaseDir,
     /** Optional. When set, signing certificates are validated against this trust store (chain validation). */
-    @JsonProperty(required = false) TruststoreConfig truststore
+    @JsonProperty(required = false) TruststoreConfig truststore,
+    /** Optional. When set, enables CCA ROOT SKI and/or class (certificate policy) validation. */
+    @JsonProperty(required = false) CertificateValidationConfig certificateValidation
 ) {
 
   public record TruststoreConfig(
@@ -36,6 +38,16 @@ public record AgentConfig(
       @JsonProperty(required = false) String password,
       @JsonProperty(required = false) String type,
       @JsonProperty(required = false) Boolean enablePathValidation
+  ) {}
+
+  /** Config for CCA ROOT SKI and class (certificate policy OID) validation. */
+  public record CertificateValidationConfig(
+      @JsonProperty(required = false) Boolean enableCcaRootSkiCheck,
+      /** Comma-separated hex Subject Key Identifiers of allowed root CAs (e.g. CCA India root SKI). */
+      @JsonProperty(required = false) String allowedRootSkis,
+      @JsonProperty(required = false) Boolean enableClassValidation,
+      /** Comma-separated certificate policy OIDs (e.g. India PKI Class 2/3 policy OIDs). */
+      @JsonProperty(required = false) String allowedCertificatePolicyOids
   ) {}
 
   public record Pkcs11Config(

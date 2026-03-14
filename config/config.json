@@ -6,6 +6,12 @@
     "password": "trustsign",
     "enablePathValidation": true
   },
+  "certificateValidation": {
+    "enableCcaRootSkiCheck": false,
+    "allowedRootSkis": "",
+    "enableClassValidation": false,
+    "allowedCertificatePolicyOids": ""
+  },
   "pkcs11": {
     "preferredLibrary": null,
     "pin": "12345678",

@@ -3,10 +3,12 @@ package com.trustsign.core;
 import org.bouncycastle.asn1.ASN1OctetString;
 import org.bouncycastle.asn1.ASN1Primitive;
 import org.bouncycastle.asn1.x509.CRLDistPoint;
+import org.bouncycastle.asn1.x509.CertificatePolicies;
 import org.bouncycastle.asn1.x509.DistributionPoint;
 import org.bouncycastle.asn1.x509.DistributionPointName;
 import org.bouncycastle.asn1.x509.GeneralName;
 import org.bouncycastle.asn1.x509.GeneralNames;
+import org.bouncycastle.asn1.x509.PolicyInformation;
 
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
@@ -18,14 +20,22 @@ import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509CRL;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * Helper for validating signing certificates from the token.
  *
  * Currently performs:
  * - validity period checks
- * - optional key usage checks
+ * - optional key usage checks (is signing allowed)
  * - optional CRL-based revocation checks (via CRL distribution points)
+ * - optional trust-chain validation
+ * - optional CCA ROOT SKI validation (root CA Subject Key Identifier must be in allowed list)
+ * - optional class validation (certificate policy OID must be in allowed list)
  */
 public final class CertificateValidator {
 
@@ -44,6 +54,10 @@ public final class CertificateValidator {
    * - trustsign.truststore.path (optional, file path)
    * - trustsign.truststore.password (optional, for custom trust store)
    * - trustsign.truststore.type (default: JKS)
+   * - trustsign.enableCcaRootSkiCheck (default: false); when true, root CA SKI must be in trustsign.allowedRootSkis
+   * - trustsign.allowedRootSkis (comma-separated hex Subject Key Identifiers of allowed root CAs, e.g. CCA India)
+   * - trustsign.enableClassValidation (default: false); when true, cert must contain a policy OID in trustsign.allowedCertificatePolicyOids
+   * - trustsign.allowedCertificatePolicyOids (comma-separated OIDs, e.g. India PKI Class 2/3 policy OIDs)
    *
    * Throws {@link SecurityException} when the certificate is not acceptable.
    */
@@ -89,6 +103,119 @@ public final class CertificateValidator {
     if (enablePathValidation) {
       validateTrustChain(cert, chain);
     }
+
+    boolean enableCcaRootSkiCheck = Boolean.parseBoolean(
+        System.getProperty("trustsign.enableCcaRootSkiCheck", "false")
+    );
+    if (enableCcaRootSkiCheck) {
+      validateCcaRootSki(cert, chain);
+    }
+
+    boolean enableClassValidation = Boolean.parseBoolean(
+        System.getProperty("trustsign.enableClassValidation", "false")
+    );
+    if (enableClassValidation) {
+      validateClass(cert);
+    }
+  }
+
+  private static final String OID_SUBJECT_KEY_IDENTIFIER = "2.5.29.14";
+  private static final String OID_CERTIFICATE_POLICIES = "2.5.29.32";
+
+  /**
+   * Validates that the root CA of the certificate chain has a Subject Key Identifier
+   * that is in the allowed list (e.g. CCA India root SKI). Requires chain to be present.
+   */
+  private static void validateCcaRootSki(X509Certificate leaf, X509Certificate[] chain) {
+    X509Certificate root = getRootCertificate(leaf, chain);
+    if (root == null) {
+      throw new SecurityException("CCA ROOT SKI validation requires a certificate chain");
+    }
+    String rootSkiHex = getSubjectKeyIdentifierHex(root);
+    if (rootSkiHex == null || rootSkiHex.isEmpty()) {
+      throw new SecurityException("Root certificate has no Subject Key Identifier (SKI)");
+    }
+    String allowed = System.getProperty("trustsign.allowedRootSkis", "").trim();
+    if (allowed.isEmpty()) {
+      throw new SecurityException("CCA ROOT SKI check is enabled but trustsign.allowedRootSkis is not set");
+    }
+    List<String> allowedSkis = parseCommaSeparatedHex(allowed);
+    String normalizedRootSki = rootSkiHex.toUpperCase(Locale.ROOT);
+    for (String a : allowedSkis) {
+      if (a.toUpperCase(Locale.ROOT).equals(normalizedRootSki)) {
+        return;
+      }
+    }
+    throw new SecurityException("Root CA Subject Key Identifier is not in the allowed list (CCA ROOT SKI validation failed)");
+  }
+
+  /**
+   * Validates that the signing certificate contains at least one certificate policy OID
+   * from the allowed list (e.g. India PKI Class 2 or Class 3).
+   */
+  private static void validateClass(X509Certificate cert) {
+    List<String> policyOids = getCertificatePolicyOids(cert);
+    String allowed = System.getProperty("trustsign.allowedCertificatePolicyOids", "").trim();
+    if (allowed.isEmpty()) {
+      throw new SecurityException("Class validation is enabled but trustsign.allowedCertificatePolicyOids is not set");
+    }
+    List<String> allowedOids = Arrays.asList(allowed.split("\\s*,\\s*"));
+    for (String oid : policyOids) {
+      if (allowedOids.contains(oid)) {
+        return;
+      }
+    }
+    throw new SecurityException(
+        "Certificate does not contain an allowed certificate policy OID (class validation failed). " +
+            "Present policies: " + policyOids + "; allowed: " + allowedOids);
+  }
+
+  private static X509Certificate getRootCertificate(X509Certificate leaf, X509Certificate[] chain) {
+    if (chain != null && chain.length > 0) {
+      return chain[chain.length - 1];
+    }
+    return null;
+  }
+
+  private static String getSubjectKeyIdentifierHex(X509Certificate cert) {
+    byte[] extVal = cert.getExtensionValue(OID_SUBJECT_KEY_IDENTIFIER);
+    if (extVal == null) return null;
+    try {
+      byte[] octets = ASN1OctetString.getInstance(extVal).getOctets();
+      if (octets == null || octets.length == 0) return null;
+      return HexFormat.of().formatHex(octets);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private static List<String> parseCommaSeparatedHex(String allowed) {
+    List<String> out = new ArrayList<>();
+    for (String s : allowed.split("\\s*,\\s*")) {
+      String t = s.trim();
+      if (t.isEmpty()) continue;
+      out.add(t);
+    }
+    return out;
+  }
+
+  private static List<String> getCertificatePolicyOids(X509Certificate cert) {
+    List<String> oids = new ArrayList<>();
+    byte[] extVal = cert.getExtensionValue(OID_CERTIFICATE_POLICIES);
+    if (extVal == null) return oids;
+    try {
+      ASN1Primitive derObj = ASN1Primitive.fromByteArray(ASN1OctetString.getInstance(extVal).getOctets());
+      CertificatePolicies policies = CertificatePolicies.getInstance(derObj);
+      if (policies == null) return oids;
+      for (PolicyInformation info : policies.getPolicyInformation()) {
+        if (info != null && info.getPolicyIdentifier() != null) {
+          oids.add(info.getPolicyIdentifier().getId());
+        }
+      }
+    } catch (Exception ignored) {
+      // return empty list on parse error
+    }
+    return oids;
   }
 
   private static boolean safeIndex(boolean[] arr, int idx) {

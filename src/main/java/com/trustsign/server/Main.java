@@ -30,6 +30,7 @@ public final class Main {
 
     AgentConfig cfg = ConfigLoader.load(configFile);
     applyTruststoreConfig(configFile, cfg);
+    applyCertificateValidationConfig(cfg);
 
     LicenceEnforcer licenceEnforcer = createLicenceEnforcer(configFile);
     LicenceEnforcer.Result licenceResult = licenceEnforcer.check();
@@ -105,6 +106,29 @@ public final class Main {
     }
     if (cfg.truststore().enablePathValidation() != null && cfg.truststore().enablePathValidation()) {
       System.setProperty("trustsign.enablePathValidation", "true");
+    }
+  }
+
+  /**
+   * Applies certificate validation settings (CCA ROOT SKI, class validation) from config
+   * to system properties so CertificateValidator uses them.
+   */
+  private static void applyCertificateValidationConfig(AgentConfig cfg) {
+    if (cfg.certificateValidation() == null) {
+      return;
+    }
+    AgentConfig.CertificateValidationConfig v = cfg.certificateValidation();
+    if (Boolean.TRUE.equals(v.enableCcaRootSkiCheck())) {
+      System.setProperty("trustsign.enableCcaRootSkiCheck", "true");
+      if (v.allowedRootSkis() != null && !v.allowedRootSkis().isBlank()) {
+        System.setProperty("trustsign.allowedRootSkis", v.allowedRootSkis().trim());
+      }
+    }
+    if (Boolean.TRUE.equals(v.enableClassValidation())) {
+      System.setProperty("trustsign.enableClassValidation", "true");
+      if (v.allowedCertificatePolicyOids() != null && !v.allowedCertificatePolicyOids().isBlank()) {
+        System.setProperty("trustsign.allowedCertificatePolicyOids", v.allowedCertificatePolicyOids().trim());
+      }
     }
   }
 
