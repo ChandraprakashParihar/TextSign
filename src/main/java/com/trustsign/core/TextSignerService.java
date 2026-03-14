@@ -95,6 +95,21 @@ public final class TextSignerService {
     return signature.sign();
   }
 
+    public static byte[] signRawSha256WithRsa(
+      byte[] content,
+      PrivateKey privateKey,
+      Provider p11Provider
+  ) throws Exception {
+    if (content == null) throw new IllegalArgumentException("content is null");
+    if (privateKey == null) throw new IllegalArgumentException("privateKey is null");
+    if (p11Provider == null) throw new IllegalArgumentException("p11Provider is null");
+
+    Signature signature = Signature.getInstance("SHA256withRSA", p11Provider);
+    signature.initSign(privateKey);
+    signature.update(content);
+    return signature.sign();
+  }
+
   private TextSignerService() {}
 }
 

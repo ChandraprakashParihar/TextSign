@@ -278,7 +278,8 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          byte[] signature = TextSignerService.signRawSha1WithRsa(data, key, loaded.provider());
+          // byte[] signature = TextSignerService.signRawSha1WithRsa(data, key, loaded.provider());
+          byte[] signature = TextSignerService.signRawSha256WithRsa(data, key, loaded.provider());
 
           String originalText = new String(data, java.nio.charset.StandardCharsets.UTF_8);
           String sigB64 = Base64.getEncoder().encodeToString(signature);
