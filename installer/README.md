@@ -16,10 +16,10 @@ This folder contains the Inno Setup script to build a Windows installer for Trus
 
 ## Build the installer
 
-From the project root:
+1. **Put a signed licence** in `installer/licence.json` (see **GIVE-TO-CLIENT.md** in the project root). Without it, the installed app will not start.
+2. From the project root:
 
 ```bash
-# 1. Build the application and create the installer
 ./gradlew buildInstaller
 ```
 

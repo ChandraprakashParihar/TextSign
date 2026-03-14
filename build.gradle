@@ -149,6 +149,21 @@ tasks.register("clientFolder") {
         rename { "config.json" }
       }
     }
+    def licenceSource = file("installer/licence.json").exists() ? file("installer/licence.json") : file("config/licence.json")
+    if (!licenceSource.exists()) {
+      throw new GradleException("Licence required for client package. Sign a licence (see GIVE-TO-CLIENT.md) and ensure config/licence.json or installer/licence.json exists.")
+    }
+    copy {
+      from(licenceSource)
+      into(configDir)
+      rename { "licence.json" }
+    }
+    if (file("config/truststore.jks").exists()) {
+      copy {
+        from("config/truststore.jks")
+        into(configDir)
+      }
+    }
     def publicKeyFile = file("config/public-key.pem")
     if (!publicKeyFile.exists()) {
       throw new GradleException("config/public-key.pem is required for the client package. Put the signer's public key (or certificate PEM) in config/public-key.pem, then run clientFolder again.")

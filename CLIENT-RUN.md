@@ -1,6 +1,6 @@
 # How to run TrustSign (for clients)
 
-You can give the client **one JAR file** and a small run script. The client needs **Java 17 or later** installed.
+You can give the client **one JAR file** and a small run script. The client needs **Java 17 or later** installed (unless you use the Windows installer, which includes Java).
 
 ---
 
@@ -35,8 +35,10 @@ build/client/
 1. **trustsign-0.1.0-all.jar** – fat JAR (app + dependencies).
 2. **run-trustsign.bat** – double‑click to start the service.
 3. **config/config.json** – default config (port, PKCS#11 paths). Client can edit if needed.
-4. **config/public-key.pem** – signer’s public key (used to select which certificate on the token is used for signing). **Required for signing.**
-5. **README.txt** – copy of these instructions for the client.
+4. **config/licence.json** – licence (included by the vendor; do not delete).
+5. **config/public-key.pem** – signer’s public key (used to select which certificate on the token is used for signing). **Required for signing.**
+6. **config/truststore.jks** – (if present) trust store for certificate chain validation.
+7. **README.txt** – copy of these instructions for the client.
 
 **Token PIN:** The client must set the token PIN so the service can use the key. Either:
 - Edit **config/config.json** and set **`pkcs11.pin`** to the token PIN (e.g. `"pin": "12345678"`), or  
