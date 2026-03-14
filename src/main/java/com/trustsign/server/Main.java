@@ -29,6 +29,7 @@ public final class Main {
     LOG.info("Using config: " + configFile.getAbsolutePath());
 
     AgentConfig cfg = ConfigLoader.load(configFile);
+    applyTruststoreConfig(configFile, cfg);
 
     LicenceEnforcer licenceEnforcer = createLicenceEnforcer(configFile);
     LicenceEnforcer.Result licenceResult = licenceEnforcer.check();
@@ -81,6 +82,30 @@ public final class Main {
 
   private static File resolveConfigFileOrFail(String[] args) {
     return resolveConfigFile(args);
+  }
+
+  /**
+   * Applies truststore and path-validation settings from config to system properties
+   * so CertificateValidator uses them when validating signing certificates.
+   */
+  private static void applyTruststoreConfig(File configFile, AgentConfig cfg) {
+    if (cfg.truststore() == null || cfg.truststore().path() == null || cfg.truststore().path().isBlank()) {
+      return;
+    }
+    String path = cfg.truststore().path();
+    if (!new File(path).isAbsolute()) {
+      path = new File(path).getAbsolutePath();
+    }
+    System.setProperty("trustsign.truststore.path", path);
+    if (cfg.truststore().password() != null) {
+      System.setProperty("trustsign.truststore.password", cfg.truststore().password());
+    }
+    if (cfg.truststore().type() != null && !cfg.truststore().type().isBlank()) {
+      System.setProperty("trustsign.truststore.type", cfg.truststore().type());
+    }
+    if (cfg.truststore().enablePathValidation() != null && cfg.truststore().enablePathValidation()) {
+      System.setProperty("trustsign.enablePathValidation", "true");
+    }
   }
 
   private static LicenceEnforcer createLicenceEnforcer(File configFile) throws Exception {

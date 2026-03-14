@@ -26,8 +26,17 @@ public record AgentConfig(
     Integer port,
     Pkcs11Config pkcs11,
     /** Optional. When set, outputDir for /auto-sign-text must be under this path (absolute or relative to working dir). */
-    @JsonProperty(required = false) String outputBaseDir
+    @JsonProperty(required = false) String outputBaseDir,
+    /** Optional. When set, signing certificates are validated against this trust store (chain validation). */
+    @JsonProperty(required = false) TruststoreConfig truststore
 ) {
+
+  public record TruststoreConfig(
+      String path,
+      @JsonProperty(required = false) String password,
+      @JsonProperty(required = false) String type,
+      @JsonProperty(required = false) Boolean enablePathValidation
+  ) {}
 
   public record Pkcs11Config(
       String preferredLibrary,

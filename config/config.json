@@ -1,6 +1,11 @@
 {
   "port": 31927,
   "allowedOrigins": ["http://localhost:3000"],
+  "truststore": {
+    "path": "config/truststore.jks",
+    "password": "trustsign",
+    "enablePathValidation": true
+  },
   "pkcs11": {
     "preferredLibrary": null,
     "pin": "12345678",
