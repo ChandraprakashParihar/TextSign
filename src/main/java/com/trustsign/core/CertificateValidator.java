@@ -77,14 +77,14 @@ public final class CertificateValidator {
     }
 
     boolean enableCrl = Boolean.parseBoolean(
-        System.getProperty("trustsign.enableCrlCheck", "false")
+        System.getProperty("trustsign.enableCrlCheck", "true")
     );
     if (enableCrl) {
       checkRevocationWithCrl(cert);
     }
 
     boolean enablePathValidation = Boolean.parseBoolean(
-        System.getProperty("trustsign.enablePathValidation", "false")
+        System.getProperty("trustsign.enablePathValidation", "true")
     );
     if (enablePathValidation) {
       validateTrustChain(cert, chain);
