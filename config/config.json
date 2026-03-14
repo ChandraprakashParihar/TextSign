@@ -1,6 +1,7 @@
 {
   "port": 31927,
   "allowedOrigins": ["http://localhost:3000"],
+  "signerVersion": "V-NCODE_01.05.2013",
   "truststore": {
     "path": "config/truststore.jks",
     "password": "trustsign",

@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.TextVerifyServiceTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-03-14T06:58:39.714Z" hostname="Chandras-Mac-mini.local" time="0.002">
+<testsuite name="com.trustsign.core.TextVerifyServiceTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-03-14T09:02:26.168Z" hostname="CHANDRAPRAKASHP" time="0.662">
   <properties/>
-  <testcase name="verifyReturnsFalseForNull()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.0"/>
-  <testcase name="verifyReturnsFalseWhenSignatureMarkersMissing()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.001"/>
-  <testcase name="verifyReturnsFalseForEmptyString()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.0"/>
-  <testcase name="verifyReturnsFalseWhenSignatureBlockEmpty()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.0"/>
+  <testcase name="analyzeIcegateSignedFile()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.618"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

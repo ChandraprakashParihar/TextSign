@@ -30,7 +30,9 @@ public record AgentConfig(
     /** Optional. When set, signing certificates are validated against this trust store (chain validation). */
     @JsonProperty(required = false) TruststoreConfig truststore,
     /** Optional. When set, enables CCA ROOT SKI and/or class (certificate policy) validation. */
-    @JsonProperty(required = false) CertificateValidationConfig certificateValidation
+    @JsonProperty(required = false) CertificateValidationConfig certificateValidation,
+    /** Optional. Emitted as &lt;SIGNER-VERSION&gt; in signed output. Use e.g. "V-NCODE_01.05.2013" for Icegate verification. */
+    @JsonProperty(required = false) String signerVersion
 ) {
 
   public record TruststoreConfig(

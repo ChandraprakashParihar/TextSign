@@ -5,6 +5,7 @@ import com.trustsign.core.ConfigLoader;
 import com.trustsign.core.Pkcs11Token;
 import com.trustsign.core.OsPkcs11Resolver;
 import com.trustsign.core.SessionManager;
+import com.trustsign.core.SignedFileAnalyzer;
 import com.trustsign.core.TextSignerService;
 import com.trustsign.core.TextVerifyService;
 import com.trustsign.core.CertificateValidator;
@@ -21,9 +22,11 @@ import java.security.KeyFactory;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.security.spec.X509EncodedKeySpec;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
@@ -278,11 +281,25 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          // byte[] signature = TextSignerService.signRawSha1WithRsa(data, key, loaded.provider());
-          byte[] signature = TextSignerService.signRawSha256WithRsa(data, key, loaded.provider());
-
+          // Normalize line endings to \n so signing is consistent (Windows CRLF vs Unix LF).
           String originalText = new String(data, java.nio.charset.StandardCharsets.UTF_8);
-          String sigB64 = Base64.getEncoder().encodeToString(signature);
+          String normalizedText = originalText.replace("\r\n", "\n").replace("\r", "\n");
+          // Sign exactly the bytes that will appear before <START-SIGNATURE> in the output file.
+          // If trustsign.signContentWithoutTrailingNewline=true, sign without the trailing newline (for verifiers that strip it).
+          byte[] contentToSign;
+          if (Boolean.getBoolean("trustsign.signContentWithoutTrailingNewline")) {
+            String contentForSigning = normalizedText.endsWith("\n")
+                ? normalizedText.substring(0, normalizedText.length() - 1) : normalizedText;
+            contentToSign = contentForSigning.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+          } else {
+            byte[] normBytes = normalizedText.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            contentToSign = normalizedText.endsWith("\n") ? normBytes : java.util.Arrays.copyOf(normBytes, normBytes.length + 1);
+            if (!normalizedText.endsWith("\n")) contentToSign[normBytes.length] = '\n';
+          }
+          // Use SHA1withRSA so output is verifiable on Icegate (they expect this algorithm).
+          byte[] sigBytes = TextSignerService.signRawSha1WithRsa(contentToSign, key, loaded.provider());
+
+          String sigB64 = Base64.getEncoder().encodeToString(sigBytes);
 
           X509Certificate signingCert = matchedCert;
           X509Certificate[] x509Chain = null;
@@ -295,14 +312,17 @@ public final class ApiServlet extends HttpServlet {
           CertificateValidator.validateForSigning(signingCert, x509Chain);
           String certB64 = Base64.getEncoder().encodeToString(signingCert.getEncoded());
 
+          String signerVersion = (cfg.signerVersion() != null && !cfg.signerVersion().isBlank())
+              ? cfg.signerVersion() : "TrustSign";
+
           StringBuilder sb = new StringBuilder();
-          sb.append(originalText);
-          if (!originalText.endsWith("\n")) {
+          sb.append(normalizedText);
+          if (!normalizedText.endsWith("\n")) {
             sb.append("\n");
           }
           sb.append("<START-SIGNATURE>").append(sigB64).append("</START-SIGNATURE>\n");
           sb.append("<START-CERTIFICATE>").append(certB64).append("</START-CERTIFICATE>\n");
-          sb.append("<SIGNER-VERSION>TrustSign</SIGNER-VERSION>\n");
+          sb.append("<SIGNER-VERSION>").append(signerVersion).append("</SIGNER-VERSION>\n");
 
           String inputFilename = mp.filename("file");
           if (inputFilename == null || inputFilename.isBlank()) {
@@ -444,10 +464,25 @@ public final class ApiServlet extends HttpServlet {
             writeJson(resp, 400, Map.of("ok", false, "reason", "Missing text file field: file"));
             return;
           }
-          String signed = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+          String signed = new String(data, StandardCharsets.UTF_8);
           // TextVerifyService.Result result = TextVerifyService.verify(signed);
           TextVerifyService.Result result = TextVerifyService.verifySha256WithRsa(signed);
           writeJson(resp, 200, Map.of("ok", result.ok(), "reason", result.reason()));
+          return;
+        }
+
+        case "/analyze-signed-file" -> {
+          var mp = Multipart.read(req, 2 * 1024 * 1024);
+          byte[] data = mp.file("file");
+          if (data == null || data.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing file field: file"));
+            return;
+          }
+          String signedText = new String(data, StandardCharsets.UTF_8);
+          int sigStart = signedText.indexOf("<START-SIGNATURE>");
+          byte[] rawBeforeSig = sigStart > 0 ? Arrays.copyOf(data, sigStart) : new byte[0];
+          SignedFileAnalyzer.Result analysis = SignedFileAnalyzer.analyze(signedText, rawBeforeSig);
+          writeJson(resp, 200, analysis);
           return;
         }
 

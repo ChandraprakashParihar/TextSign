@@ -1,0 +1,85 @@
+{
+  "standardVerifyOk" : false,
+  "standardVerifyReason" : "Signature invalid or content has been modified",
+  "contentBeforeSignatureChars" : 16,
+  "contentBeforeSignatureBytes" : 16,
+  "verifiedMatches" : [ ],
+  "attempts" : [ {
+    "algorithm" : "SHA1withRSA",
+    "contentVariant" : "exact (as in file)",
+    "contentLengthBytes" : 16,
+    "verified" : false
+  }, {
+    "algorithm" : "SHA1withRSA",
+    "contentVariant" : "strip trailing \\n",
+    "contentLengthBytes" : 15,
+    "verified" : false
+  }, {
+    "algorithm" : "SHA1withRSA",
+    "contentVariant" : "normalize \\r\\n to \\n",
+    "contentLengthBytes" : 16,
+    "verified" : false
+  }, {
+    "algorithm" : "SHA1withRSA",
+    "contentVariant" : "normalize then strip trailing \\n",
+    "contentLengthBytes" : 15,
+    "verified" : false
+  }, {
+    "algorithm" : "SHA1withRSA",
+    "contentVariant" : "raw bytes from file (before sig)",
+    "contentLengthBytes" : 16,
+    "verified" : false
+  }, {
+    "algorithm" : "SHA256withRSA",
+    "contentVariant" : "exact (as in file)",
+    "contentLengthBytes" : 16,
+    "verified" : false
+  }, {
+    "algorithm" : "SHA256withRSA",
+    "contentVariant" : "strip trailing \\n",
+    "contentLengthBytes" : 15,
+    "verified" : false
+  }, {
+    "algorithm" : "SHA256withRSA",
+    "contentVariant" : "normalize \\r\\n to \\n",
+    "contentLengthBytes" : 16,
+    "verified" : false
+  }, {
+    "algorithm" : "SHA256withRSA",
+    "contentVariant" : "normalize then strip trailing \\n",
+    "contentLengthBytes" : 15,
+    "verified" : false
+  }, {
+    "algorithm" : "SHA256withRSA",
+    "contentVariant" : "raw bytes from file (before sig)",
+    "contentLengthBytes" : 16,
+    "verified" : false
+  }, {
+    "algorithm" : "MD5withRSA",
+    "contentVariant" : "exact (as in file)",
+    "contentLengthBytes" : 16,
+    "verified" : false
+  }, {
+    "algorithm" : "MD5withRSA",
+    "contentVariant" : "strip trailing \\n",
+    "contentLengthBytes" : 15,
+    "verified" : false
+  }, {
+    "algorithm" : "MD5withRSA",
+    "contentVariant" : "normalize \\r\\n to \\n",
+    "contentLengthBytes" : 16,
+    "verified" : false
+  }, {
+    "algorithm" : "MD5withRSA",
+    "contentVariant" : "normalize then strip trailing \\n",
+    "contentLengthBytes" : 15,
+    "verified" : false
+  }, {
+    "algorithm" : "MD5withRSA",
+    "contentVariant" : "raw bytes from file (before sig)",
+    "contentLengthBytes" : 16,
+    "verified" : false
+  } ],
+  "signerSubjectDN" : "CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN",
+  "signerSerialNumberHex" : "6d6b6bc104"
+}
