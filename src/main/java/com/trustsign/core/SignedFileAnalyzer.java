@@ -20,6 +20,9 @@ public final class SignedFileAnalyzer {
   public record Attempt(String algorithm, String contentVariant, int contentLengthBytes, boolean verified) {}
 
   public record Result(
+      String formatDetected,
+      Boolean cmsVerifyOk,
+      String cmsVerifyReason,
       boolean standardVerifyOk,
       String standardVerifyReason,
       int contentBeforeSignatureChars,
@@ -39,18 +42,52 @@ public final class SignedFileAnalyzer {
       "raw bytes from file (before sig)",
   };
 
-  private static final String[] ALGORITHMS = { "SHA1withRSA", "SHA256withRSA", "MD5withRSA" };
+  private static final String[] ALGORITHMS = { "SHA256withRSA" };
 
   /**
-   * Analyzes the given signed file content and returns which algorithm + content
-   * variant combinations verify. Uses raw bytes for "content before signature"
-   * when provided (so CRLF vs LF is preserved).
+   * Analyzes the given signed file content. Detects CMS format (START-CMS-SIGNATURE)
+   * or raw format (START-SIGNATURE / START-CERTIFICATE) and runs the appropriate verification.
    */
   public static Result analyze(String signedText, byte[] rawContentBeforeSig) throws Exception {
+    int cmsStart = signedText.indexOf("<START-CMS-SIGNATURE>");
+    if (cmsStart >= 0) {
+      return analyzeCmsFormat(signedText, rawContentBeforeSig, cmsStart);
+    }
+    return analyzeRawFormat(signedText, rawContentBeforeSig);
+  }
+
+  private static Result analyzeCmsFormat(String signedText, byte[] rawContentBeforeSig, int cmsTagStart) throws Exception {
+    String cmsB64 = between(signedText, "<START-CMS-SIGNATURE>", "</START-CMS-SIGNATURE>");
+    if (cmsB64 == null || cmsB64.isBlank()) {
+      throw new IllegalArgumentException("Empty <START-CMS-SIGNATURE> block");
+    }
+    byte[] cmsBytes = Base64.getDecoder().decode(cmsB64.trim());
+    byte[] contentBytes = rawContentBeforeSig != null && rawContentBeforeSig.length > 0
+        ? rawContentBeforeSig
+        : signedText.substring(0, cmsTagStart).getBytes(StandardCharsets.UTF_8);
+    CmsVerifyService.Result cmsResult = CmsVerifyService.verify(contentBytes, cmsBytes);
+    String signerDN = cmsResult.signerCert() != null ? cmsResult.signerCert().getSubjectX500Principal().getName() : null;
+    String signerSerial = cmsResult.signerCert() != null ? cmsResult.signerCert().getSerialNumber().toString(16) : null;
+    return new Result(
+        "cms",
+        cmsResult.ok(),
+        cmsResult.reason(),
+        cmsResult.ok(),
+        cmsResult.reason(),
+        signedText.substring(0, cmsTagStart).length(),
+        contentBytes.length,
+        List.of(),
+        List.of(),
+        signerDN,
+        signerSerial
+    );
+  }
+
+  private static Result analyzeRawFormat(String signedText, byte[] rawContentBeforeSig) throws Exception {
     int sigStart = signedText.indexOf("<START-SIGNATURE>");
     int certStart = signedText.indexOf("<START-CERTIFICATE>");
     if (sigStart < 0 || certStart < 0) {
-      throw new IllegalArgumentException("Missing <START-SIGNATURE> or <START-CERTIFICATE> markers");
+      throw new IllegalArgumentException("Missing <START-SIGNATURE> or <START-CERTIFICATE> markers (and no <START-CMS-SIGNATURE> found)");
     }
 
     String textBeforeSig = signedText.substring(0, sigStart);
@@ -92,6 +129,9 @@ public final class SignedFileAnalyzer {
     TextVerifyService.Result standardResult = TextVerifyService.verify(signedText);
 
     return new Result(
+        "raw",
+        null,
+        null,
         standardResult.ok(),
         standardResult.reason(),
         textBeforeSig.length(),

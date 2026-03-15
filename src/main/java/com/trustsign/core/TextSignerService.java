@@ -76,26 +76,11 @@ public final class TextSignerService {
 
   /**
    * Creates a raw RSA signature (RSASSA-PKCS1-v1_5) over the given content
-   * using SHA-1 as the digest. The resulting bytes are suitable for direct
-   * Base64 encoding inside &lt;START-SIGNATURE&gt; ... &lt;/START-SIGNATURE&gt;,
-   * matching the format that the ICEGATE verifier expects.
+   * using SHA-256 as the digest. The resulting bytes are suitable for direct
+   * Base64 encoding inside &lt;START-SIGNATURE&gt; ... &lt;/START-SIGNATURE&gt;.
+   * Uses SHA256withRSA only (Bouncy Castle / PKCS#11).
    */
-  public static byte[] signRawSha1WithRsa(
-      byte[] content,
-      PrivateKey privateKey,
-      Provider p11Provider
-  ) throws Exception {
-    if (content == null) throw new IllegalArgumentException("content is null");
-    if (privateKey == null) throw new IllegalArgumentException("privateKey is null");
-    if (p11Provider == null) throw new IllegalArgumentException("p11Provider is null");
-
-    Signature signature = Signature.getInstance("SHA1withRSA", p11Provider);
-    signature.initSign(privateKey);
-    signature.update(content);
-    return signature.sign();
-  }
-
-    public static byte[] signRawSha256WithRsa(
+  public static byte[] signRawSha256WithRsa(
       byte[] content,
       PrivateKey privateKey,
       Provider p11Provider

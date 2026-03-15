@@ -47,7 +47,8 @@ public final class ApiServlet extends HttpServlet {
   }
 
   /**
-   * Loads config from resolved path. On failure writes error response and returns null.
+   * Loads config from resolved path. On failure writes error response and returns
+   * null.
    */
   private AgentConfig loadConfig(HttpServletResponse resp) throws IOException {
     File f = resolveConfigFile();
@@ -66,8 +67,10 @@ public final class ApiServlet extends HttpServlet {
 
   /**
    * Resolves outputDir to a directory. Rejects path traversal (..).
-   * When basePath is null, the user can pass any directory path (absolute or relative to working dir).
-   * When basePath is set (outputBaseDir in config), outputDir must be under that base.
+   * When basePath is null, the user can pass any directory path (absolute or
+   * relative to working dir).
+   * When basePath is set (outputBaseDir in config), outputDir must be under that
+   * base.
    */
   private static File resolveSafeOutputDir(String outputDir, Path basePath) {
     if (outputDir == null || outputDir.isBlank()) {
@@ -78,7 +81,8 @@ public final class ApiServlet extends HttpServlet {
       throw new SecurityException("outputDir must not contain '..'");
     }
     Path base = Paths.get(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
-    Path resolved = requested.isAbsolute() ? requested.normalize().toAbsolutePath() : base.resolve(requested).normalize().toAbsolutePath();
+    Path resolved = requested.isAbsolute() ? requested.normalize().toAbsolutePath()
+        : base.resolve(requested).normalize().toAbsolutePath();
     if (basePath != null) {
       Path allowedBase = basePath.toAbsolutePath().normalize();
       if (!resolved.startsWith(allowedBase)) {
@@ -88,13 +92,19 @@ public final class ApiServlet extends HttpServlet {
     return resolved.toFile();
   }
 
-  /** Sanitizes a filename for Content-Disposition header (no path, no control chars). */
+  /**
+   * Sanitizes a filename for Content-Disposition header (no path, no control
+   * chars).
+   */
   private static String sanitizeFilename(String filename) {
-    if (filename == null || filename.isBlank()) return "signed.txt";
+    if (filename == null || filename.isBlank())
+      return "signed.txt";
     String name = Paths.get(filename).getFileName().toString();
-    if (name == null || name.isBlank()) return "signed.txt";
+    if (name == null || name.isBlank())
+      return "signed.txt";
     name = SAFE_FILENAME.matcher(name).replaceAll("_");
-    if (name.length() > 200) name = name.substring(0, 200);
+    if (name.length() > 200)
+      name = name.substring(0, 200);
     return name.isEmpty() ? "signed.txt" : name;
   }
 
@@ -114,14 +124,14 @@ public final class ApiServlet extends HttpServlet {
           return;
         }
         case "/pkcs11/candidates" -> {
+          requireSession(req);
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null) return;
           List<String> libs = OsPkcs11Resolver.candidates(cfg);
           List<Map<String, Object>> list = libs.stream()
               .map(p -> Map.<String, Object>of(
                   "path", p,
-                  "exists", Files.isRegularFile(Paths.get(p))
-              ))
+                  "exists", Files.isRegularFile(Paths.get(p))))
               .toList();
           Map<String, Object> body = new java.util.HashMap<>(Map.of("candidates", list));
           if (OsPkcs11Resolver.current() == OsPkcs11Resolver.Os.WINDOWS) {
@@ -134,7 +144,8 @@ public final class ApiServlet extends HttpServlet {
           requireSession(req);
 
           AgentConfig cfg = loadConfig(resp);
-          if (cfg == null) return;
+          if (cfg == null)
+            return;
           List<String> libs = OsPkcs11Resolver.candidates(cfg);
           if (libs.isEmpty()) {
             writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
@@ -149,8 +160,7 @@ public final class ApiServlet extends HttpServlet {
             String detail = buildTokenErrorDetail(e);
             writeJson(resp, 400, Map.of(
                 "error", "Token load failed",
-                "details", detail
-            ));
+                "details", detail));
             return;
           }
 
@@ -159,8 +169,7 @@ public final class ApiServlet extends HttpServlet {
           writeJson(resp, 200, Map.of(
               "libraryPath", loaded.libraryPath(),
               "certCount", certs.size(),
-              "certificates", certs
-          ));
+              "certificates", certs));
           return;
         }
         default -> {
@@ -194,9 +203,10 @@ public final class ApiServlet extends HttpServlet {
         }
 
         case "/auto-sign-text" -> {
-          var mp = Multipart.read(req, 2 * 1024 * 1024); // 2 MB text payload max
+          // requireSession(req);
+          var mp = Multipart.read(req, 2 * 1024 * 1024);
           byte[] data = mp.file("file");
-          String outputDir = mp.field("outputDir");
+          String outputDir = mp.field("outputDir") != null ? mp.field("outputDir").trim() : null;
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
@@ -296,8 +306,8 @@ public final class ApiServlet extends HttpServlet {
             contentToSign = normalizedText.endsWith("\n") ? normBytes : java.util.Arrays.copyOf(normBytes, normBytes.length + 1);
             if (!normalizedText.endsWith("\n")) contentToSign[normBytes.length] = '\n';
           }
-          // Use SHA1withRSA so output is verifiable on Icegate (they expect this algorithm).
-          byte[] sigBytes = TextSignerService.signRawSha1WithRsa(contentToSign, key, loaded.provider());
+          // SHA256withRSA only (Bouncy Castle / PKCS#11).
+          byte[] sigBytes = TextSignerService.signRawSha256WithRsa(contentToSign, key, loaded.provider());
 
           String sigB64 = Base64.getEncoder().encodeToString(sigBytes);
 
@@ -353,12 +363,124 @@ public final class ApiServlet extends HttpServlet {
           return;
         }
 
+        case "/auto-sign-text-cms" -> {
+          requireSession(req);
+          var mp = Multipart.read(req, 2 * 1024 * 1024);
+          byte[] data = mp.file("file");
+          String outputDir = mp.field("outputDir") != null ? mp.field("outputDir").trim() : null;
+          if (data == null || data.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
+            return;
+          }
+          if (outputDir == null || outputDir.isBlank()) {
+            writeJson(resp, 400, Map.of("error", "Missing field: outputDir"));
+            return;
+          }
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) return;
+          Path outputBase = null;
+          if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+            outputBase = Paths.get(cfg.outputBaseDir());
+            if (!outputBase.isAbsolute()) {
+              outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+            }
+          }
+          File outDirFile;
+          try {
+            outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+          } catch (SecurityException | IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+            return;
+          }
+          char[] pin = resolvePin(cfg);
+          List<String> libs = resolvePkcs11Libraries(cfg);
+          if (libs.isEmpty()) {
+            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            return;
+          }
+          Pkcs11Token.Loaded loaded;
+          try {
+            loaded = Pkcs11Token.load(pin, libs);
+          } catch (RuntimeException e) {
+            String detail = buildTokenErrorDetail(e);
+            writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
+            return;
+          }
+          KeyStore ks = loaded.keyStore();
+          PublicKey requestedPublicKey;
+          try {
+            requestedPublicKey = loadConfiguredPublicKeyOrThrow();
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to load configured public key", "details", safeMsg(e)));
+            return;
+          }
+          String matchedAlias = null;
+          X509Certificate matchedCert = null;
+          Certificate[] chain = null;
+          for (java.util.Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
+            String a = e.nextElement();
+            Certificate cert = ks.getCertificate(a);
+            if (cert instanceof X509Certificate x509) {
+              if (x509.getPublicKey().equals(requestedPublicKey)) {
+                matchedAlias = a;
+                matchedCert = x509;
+                chain = ks.getCertificateChain(a);
+                break;
+              }
+            }
+          }
+          if (matchedAlias == null || chain == null || chain.length == 0) {
+            writeJson(resp, 400, Map.of("error", "No certificate on token matches provided public key"));
+            return;
+          }
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          if (key == null) {
+            writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
+            return;
+          }
+          String originalText = new String(data, StandardCharsets.UTF_8);
+          String normalizedText = originalText.replace("\r\n", "\n").replace("\r", "\n");
+          byte[] contentToSign = normalizedText.endsWith("\n")
+              ? normalizedText.getBytes(StandardCharsets.UTF_8)
+              : java.util.Arrays.copyOf(normalizedText.getBytes(StandardCharsets.UTF_8), normalizedText.getBytes(StandardCharsets.UTF_8).length + 1);
+          if (!normalizedText.endsWith("\n")) contentToSign[normalizedText.getBytes(StandardCharsets.UTF_8).length] = '\n';
+          byte[] cmsBytes = TextSignerService.signDetached(contentToSign, key, chain, loaded.provider());
+          String cmsB64 = Base64.getEncoder().encodeToString(cmsBytes);
+          X509Certificate signingCert = matchedCert;
+          X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
+              ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c).toArray(X509Certificate[]::new)
+              : null;
+          CertificateValidator.validateForSigning(signingCert, x509Chain);
+          StringBuilder sb = new StringBuilder();
+          sb.append(normalizedText);
+          if (!normalizedText.endsWith("\n")) sb.append("\n");
+          sb.append("<START-CMS-SIGNATURE>").append(cmsB64).append("</START-CMS-SIGNATURE>\n");
+          String inputFilename = mp.filename("file");
+          if (inputFilename == null || inputFilename.isBlank()) inputFilename = "text.txt";
+          outDirFile.mkdirs();
+          String baseName = inputFilename;
+          String ext = "";
+          int dot = inputFilename.lastIndexOf('.');
+          if (dot > 0 && dot < inputFilename.length() - 1) {
+            baseName = inputFilename.substring(0, dot);
+            ext = inputFilename.substring(dot);
+          }
+          File outFile = new File(outDirFile, baseName + "-cms-signed" + ext);
+          java.nio.file.Files.writeString(outFile.toPath(), sb.toString(), StandardCharsets.UTF_8);
+          writeJson(resp, 200, Map.of(
+              "ok", true,
+              "subjectDn", signingCert.getSubjectX500Principal().getName(),
+              "serialNumber", signingCert.getSerialNumber().toString(16),
+              "outputPath", outFile.getAbsolutePath()
+          ));
+          return;
+        }
+
         case "/sign-text" -> {
           requireSession(req);
 
-          var mp = Multipart.read(req, 2 * 1024 * 1024); // 2 MB text payload max
+          var mp = Multipart.read(req, 2 * 1024 * 1024);
           byte[] data = mp.file("file");
-
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
             return;
@@ -378,15 +500,11 @@ public final class ApiServlet extends HttpServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
-            writeJson(resp, 400, Map.of(
-                "error", "Token load failed",
-                "details", detail
-            ));
+            writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
             return;
           }
 
           KeyStore ks = loaded.keyStore();
-
           PublicKey requestedPublicKey;
           try {
             requestedPublicKey = loadConfiguredPublicKeyOrThrow();
@@ -422,38 +540,45 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          byte[] signature = TextSignerService.signRawSha1WithRsa(data, key, loaded.provider());
-
-          String originalText = new String(data, java.nio.charset.StandardCharsets.UTF_8);
-          String sigB64 = Base64.getEncoder().encodeToString(signature);
+          // Same signing logic as /auto-sign-text: normalize line endings, sign content that appears before <START-SIGNATURE>.
+          String originalText = new String(data, StandardCharsets.UTF_8);
+          String normalizedText = originalText.replace("\r\n", "\n").replace("\r", "\n");
+          byte[] contentToSign;
+          if (Boolean.getBoolean("trustsign.signContentWithoutTrailingNewline")) {
+            String contentForSigning = normalizedText.endsWith("\n")
+                ? normalizedText.substring(0, normalizedText.length() - 1) : normalizedText;
+            contentToSign = contentForSigning.getBytes(StandardCharsets.UTF_8);
+          } else {
+            byte[] normBytes = normalizedText.getBytes(StandardCharsets.UTF_8);
+            contentToSign = normalizedText.endsWith("\n") ? normBytes : java.util.Arrays.copyOf(normBytes, normBytes.length + 1);
+            if (!normalizedText.endsWith("\n")) contentToSign[normBytes.length] = '\n';
+          }
+          byte[] sigBytes = TextSignerService.signRawSha256WithRsa(contentToSign, key, loaded.provider());
+          String sigB64 = Base64.getEncoder().encodeToString(sigBytes);
 
           X509Certificate signingCert = matchedCert;
-          X509Certificate[] x509Chain = null;
-          if (chain[0] instanceof X509Certificate) {
-            x509Chain = java.util.Arrays.stream(chain)
-                .filter(c -> c instanceof X509Certificate)
-                .map(c -> (X509Certificate) c)
-                .toArray(X509Certificate[]::new);
-          }
+          X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
+              ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c).toArray(X509Certificate[]::new)
+              : null;
           CertificateValidator.validateForSigning(signingCert, x509Chain);
           String certB64 = Base64.getEncoder().encodeToString(signingCert.getEncoded());
 
+          String signerVersion = (cfg.signerVersion() != null && !cfg.signerVersion().isBlank())
+              ? cfg.signerVersion() : "TrustSign";
+
           StringBuilder sb = new StringBuilder();
-          sb.append(originalText);
-          if (!originalText.endsWith("\n")) {
-            sb.append("\n");
-          }
+          sb.append(normalizedText);
+          if (!normalizedText.endsWith("\n")) sb.append("\n");
           sb.append("<START-SIGNATURE>").append(sigB64).append("</START-SIGNATURE>\n");
           sb.append("<START-CERTIFICATE>").append(certB64).append("</START-CERTIFICATE>\n");
-          sb.append("<SIGNER-VERSION>TrustSign</SIGNER-VERSION>\n");
+          sb.append("<SIGNER-VERSION>").append(signerVersion).append("</SIGNER-VERSION>\n");
 
           resp.setStatus(200);
           resp.setContentType("text/plain; charset=UTF-8");
-          String filename = sanitizeFilename(mp.filename("file"));
-          resp.setHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+          resp.setHeader("Content-Disposition", "attachment; filename=\"" + sanitizeFilename(mp.filename("file")) + "\"");
           resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
           resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
-          resp.getOutputStream().write(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+          resp.getOutputStream().write(sb.toString().getBytes(StandardCharsets.UTF_8));
           return;
         }
 
@@ -465,8 +590,7 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
           String signed = new String(data, StandardCharsets.UTF_8);
-          // TextVerifyService.Result result = TextVerifyService.verify(signed);
-          TextVerifyService.Result result = TextVerifyService.verifySha256WithRsa(signed);
+          TextVerifyService.Result result = TextVerifyService.verify(signed);
           writeJson(resp, 200, Map.of("ok", result.ok(), "reason", result.reason()));
           return;
         }
@@ -479,8 +603,10 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
           String signedText = new String(data, StandardCharsets.UTF_8);
-          int sigStart = signedText.indexOf("<START-SIGNATURE>");
-          byte[] rawBeforeSig = sigStart > 0 ? Arrays.copyOf(data, sigStart) : new byte[0];
+          int cmsStart = signedText.indexOf("<START-CMS-SIGNATURE>");
+          int rawStart = signedText.indexOf("<START-SIGNATURE>");
+          int contentEnd = cmsStart >= 0 ? cmsStart : (rawStart >= 0 ? rawStart : 0);
+          byte[] rawBeforeSig = contentEnd > 0 ? Arrays.copyOf(data, contentEnd) : new byte[0];
           SignedFileAnalyzer.Result analysis = SignedFileAnalyzer.analyze(signedText, rawBeforeSig);
           writeJson(resp, 200, analysis);
           return;
@@ -548,6 +674,7 @@ public final class ApiServlet extends HttpServlet {
             addDllsInDir(base, seen, out);
           }
         }
+      
       } catch (Exception ignore) { }
     }
     return out;
@@ -566,6 +693,7 @@ public final class ApiServlet extends HttpServlet {
           }
         }
       }
+    
     } catch (Exception ignore) { }
   }
 
@@ -577,6 +705,7 @@ public final class ApiServlet extends HttpServlet {
 
   /**
    * Loads the signer public key from a configured location on disk.
+   * 
    * Resolution order: trustsign.publicKey.path, config/public-key.pem, ../config/public-key.pem.
    */
   private static PublicKey loadConfiguredPublicKeyOrThrow() throws Exception {
@@ -590,13 +719,13 @@ public final class ApiServlet extends HttpServlet {
         if (f2.exists()) {
           path = f2.getPath();
         } else {
+              
           throw new IOException("No configured public key file found (checked config/public-key.pem and ../config/public-key.pem)");
         }
       }
     }
     String pem = java.nio.file.Files.readString(
-        java.nio.file.Paths.get(path),
-        java.nio.charset.StandardCharsets.UTF_8
+        java.nio.file.Paths.get(path),    java.nio.charset.StandardCharsets.UTF_8
     );
     return parsePublicKey(pem);
   }
@@ -633,6 +762,7 @@ public final class ApiServlet extends HttpServlet {
     KeyFactory kf = KeyFactory.getInstance("RSA");
     return kf.generatePublic(spec);
   }
+
   /**
    * Resolves the token PIN from: 1) env TRUSTSIGN_TOKEN_PIN, 2) config pkcs11.pin.
    * Client can set either in config.json ("pkcs11": { "pin": "their-pin" }) or via environment variable.
@@ -659,7 +789,8 @@ public final class ApiServlet extends HttpServlet {
     return f1;
   }
 
-  private static List<String> resolvePkcs11Libraries(AgentConfig cfg) throws IOException {
+  private static List<String>
+      resolvePkcs11Libraries(AgentConfig cfg) throws IOException {
     if (cfg.pkcs11() == null) return List.of();
     return OsPkcs11Resolver.candidates(cfg);
   }
@@ -673,6 +804,7 @@ public final class ApiServlet extends HttpServlet {
 
   private static String buildTokenErrorDetail(RuntimeException e) {
     Throwable root = e;
+      
     while (root.getCause() != null) root = root.getCause();
     String causeMsg = root.getMessage();
     if (causeMsg != null && !causeMsg.isBlank()) {

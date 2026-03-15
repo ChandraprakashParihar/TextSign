@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.trustsign.core.SessionManagerTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-03-15T09:21:30.521Z" hostname="CHANDRAPRAKASHP" time="0.01">
+  <properties/>
+  <testcase name="createSessionReturnsTokenAndExpiry()" classname="com.trustsign.core.SessionManagerTest" time="0.003"/>
+  <testcase name="requireValidThrowsWhenTokenBlank()" classname="com.trustsign.core.SessionManagerTest" time="0.002"/>
+  <testcase name="requireValidThrowsWhenTokenUnknown()" classname="com.trustsign.core.SessionManagerTest" time="0.001"/>
+  <testcase name="requireValidThrowsWhenTokenNull()" classname="com.trustsign.core.SessionManagerTest" time="0.001"/>
+  <testcase name="requireValidSucceedsForValidToken()" classname="com.trustsign.core.SessionManagerTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -56,7 +56,7 @@ public final class DiscoverSignedContentFormat {
 
     StringBuilder out = new StringBuilder();
     out.append("Content before <START-SIGNATURE> length: ").append(textBeforeSig.length()).append(" chars, ").append(textBeforeSig.getBytes(StandardCharsets.UTF_8).length).append(" bytes\n");
-    out.append("Signature algorithm: SHA1withRSA (256 bytes = 2048-bit RSA)\n\n");
+    out.append("Signature algorithm: SHA256withRSA only\n\n");
 
     String[] variants = {
         "exact (as in file)",
@@ -75,26 +75,16 @@ public final class DiscoverSignedContentFormat {
         rawContentBeforeSig,
     };
 
-    String[] algorithms = { "SHA1withRSA", "SHA256withRSA", "MD5withRSA" };
-    for (String algo : algorithms) {
-      for (int i = 0; i < variants.length; i++) {
-        if (variantBytes[i] == null) continue;
-        try {
-          Signature sig = Signature.getInstance(algo);
-          sig.initVerify(publicKey);
-          sig.update(variantBytes[i]);
-          boolean ok = sig.verify(sigBytes);
-          if (ok) out.append("  VERIFIES: ").append(algo).append(" + ").append(variants[i]).append(" (").append(variantBytes[i].length).append(" bytes)\n");
-        } catch (Exception ignored) {}
-      }
-    }
+    String algo = "SHA256withRSA";
     for (int i = 0; i < variants.length; i++) {
       if (variantBytes[i] == null) continue;
-      Signature sig = Signature.getInstance("SHA1withRSA");
-      sig.initVerify(publicKey);
-      sig.update(variantBytes[i]);
-      boolean ok = sig.verify(sigBytes);
-      if (!ok) out.append("  no:       SHA1withRSA + ").append(variants[i]).append(" (").append(variantBytes[i].length).append(" bytes)\n");
+      try {
+        Signature sig = Signature.getInstance(algo);
+        sig.initVerify(publicKey);
+        sig.update(variantBytes[i]);
+        boolean ok = sig.verify(sigBytes);
+        out.append(ok ? "  VERIFIES: " : "  no:       ").append(algo).append(" + ").append(variants[i]).append(" (").append(variantBytes[i].length).append(" bytes)\n");
+      } catch (Exception ignored) {}
     }
 
     TextVerifyService.Result r = TextVerifyService.verify(signedText);

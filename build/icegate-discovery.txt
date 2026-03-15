@@ -1,10 +1,10 @@
 Content before <START-SIGNATURE> length: 16 chars, 16 bytes
-Signature algorithm: SHA1withRSA (256 bytes = 2048-bit RSA)
+Signature algorithm: SHA256withRSA only
 
-  no:       SHA1withRSA + exact (as in file) (16 bytes)
-  no:       SHA1withRSA + strip trailing \n (15 bytes)
-  no:       SHA1withRSA + normalize \r\n to \n then use (16 bytes)
-  no:       SHA1withRSA + normalize then strip trailing \n (15 bytes)
-  no:       SHA1withRSA + raw bytes from file (before sig) (16 bytes)
+  no:       SHA256withRSA + exact (as in file) (16 bytes)
+  no:       SHA256withRSA + strip trailing \n (15 bytes)
+  no:       SHA256withRSA + normalize \r\n to \n then use (16 bytes)
+  no:       SHA256withRSA + normalize then strip trailing \n (15 bytes)
+  no:       SHA256withRSA + raw bytes from file (before sig) (16 bytes)
 
 TextVerifyService.verify() result: false - Signature invalid or content has been modified

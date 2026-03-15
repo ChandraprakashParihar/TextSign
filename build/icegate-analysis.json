@@ -1,35 +1,13 @@
 {
+  "formatDetected" : "raw",
+  "cmsVerifyOk" : null,
+  "cmsVerifyReason" : null,
   "standardVerifyOk" : false,
   "standardVerifyReason" : "Signature invalid or content has been modified",
   "contentBeforeSignatureChars" : 16,
   "contentBeforeSignatureBytes" : 16,
   "verifiedMatches" : [ ],
   "attempts" : [ {
-    "algorithm" : "SHA1withRSA",
-    "contentVariant" : "exact (as in file)",
-    "contentLengthBytes" : 16,
-    "verified" : false
-  }, {
-    "algorithm" : "SHA1withRSA",
-    "contentVariant" : "strip trailing \\n",
-    "contentLengthBytes" : 15,
-    "verified" : false
-  }, {
-    "algorithm" : "SHA1withRSA",
-    "contentVariant" : "normalize \\r\\n to \\n",
-    "contentLengthBytes" : 16,
-    "verified" : false
-  }, {
-    "algorithm" : "SHA1withRSA",
-    "contentVariant" : "normalize then strip trailing \\n",
-    "contentLengthBytes" : 15,
-    "verified" : false
-  }, {
-    "algorithm" : "SHA1withRSA",
-    "contentVariant" : "raw bytes from file (before sig)",
-    "contentLengthBytes" : 16,
-    "verified" : false
-  }, {
     "algorithm" : "SHA256withRSA",
     "contentVariant" : "exact (as in file)",
     "contentLengthBytes" : 16,
@@ -51,31 +29,6 @@
     "verified" : false
   }, {
     "algorithm" : "SHA256withRSA",
-    "contentVariant" : "raw bytes from file (before sig)",
-    "contentLengthBytes" : 16,
-    "verified" : false
-  }, {
-    "algorithm" : "MD5withRSA",
-    "contentVariant" : "exact (as in file)",
-    "contentLengthBytes" : 16,
-    "verified" : false
-  }, {
-    "algorithm" : "MD5withRSA",
-    "contentVariant" : "strip trailing \\n",
-    "contentLengthBytes" : 15,
-    "verified" : false
-  }, {
-    "algorithm" : "MD5withRSA",
-    "contentVariant" : "normalize \\r\\n to \\n",
-    "contentLengthBytes" : 16,
-    "verified" : false
-  }, {
-    "algorithm" : "MD5withRSA",
-    "contentVariant" : "normalize then strip trailing \\n",
-    "contentLengthBytes" : 15,
-    "verified" : false
-  }, {
-    "algorithm" : "MD5withRSA",
     "contentVariant" : "raw bytes from file (before sig)",
     "contentLengthBytes" : 16,
     "verified" : false
