@@ -1,9 +1,21 @@
 {
   "port": 31927,
   "allowedOrigins": ["http://localhost:3000"],
+  "signerVersion": "TrustSign_0.1.0",
+  "truststore": {
+    "path": "config/truststore.jks",
+    "password": "trustsign",
+    "enablePathValidation": true
+  },
+  "certificateValidation": {
+    "enableCcaRootSkiCheck": false,
+    "allowedRootSkis": "",
+    "enableClassValidation": false,
+    "allowedCertificatePolicyOids": ""
+  },
   "pkcs11": {
     "preferredLibrary": null,
-    "pin": null,
+    "pin": "12345678",
     "windowsCandidates": [
       "%SystemRoot%\\System32\\eps2003csp11v2.dll",
       "%SystemRoot%\\System32\\eps2003csp11v2_s.dll",
@@ -22,3 +34,4 @@
     "linuxCandidates": []
   }
 }
+

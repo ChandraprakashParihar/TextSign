@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.ConfigLoaderTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-03-15T09:21:30.122Z" hostname="CHANDRAPRAKASHP" time="0.397">
+<testsuite name="com.trustsign.core.ConfigLoaderTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-03-15T10:07:03.613Z" hostname="CHANDRAPRAKASHP" time="0.313">
   <properties/>
-  <testcase name="loadThrowsWhenFileIsEmpty()" classname="com.trustsign.core.ConfigLoaderTest" time="0.215"/>
-  <testcase name="loadThrowsWhenPkcs11Missing()" classname="com.trustsign.core.ConfigLoaderTest" time="0.129"/>
-  <testcase name="loadThrowsWhenFileDoesNotExist()" classname="com.trustsign.core.ConfigLoaderTest" time="0.004"/>
-  <testcase name="loadThrowsWhenFileIsNull()" classname="com.trustsign.core.ConfigLoaderTest" time="0.003"/>
-  <testcase name="loadThrowsWhenAllowedOriginsMissing()" classname="com.trustsign.core.ConfigLoaderTest" time="0.005"/>
-  <testcase name="loadSucceedsWithValidConfig()" classname="com.trustsign.core.ConfigLoaderTest" time="0.01"/>
+  <testcase name="loadThrowsWhenFileIsEmpty()" classname="com.trustsign.core.ConfigLoaderTest" time="0.182"/>
+  <testcase name="loadThrowsWhenPkcs11Missing()" classname="com.trustsign.core.ConfigLoaderTest" time="0.087"/>
+  <testcase name="loadThrowsWhenFileDoesNotExist()" classname="com.trustsign.core.ConfigLoaderTest" time="0.002"/>
+  <testcase name="loadThrowsWhenFileIsNull()" classname="com.trustsign.core.ConfigLoaderTest" time="0.002"/>
+  <testcase name="loadThrowsWhenAllowedOriginsMissing()" classname="com.trustsign.core.ConfigLoaderTest" time="0.004"/>
+  <testcase name="loadSucceedsWithValidConfig()" classname="com.trustsign.core.ConfigLoaderTest" time="0.005"/>
   <testcase name="portOrDefaultWhenPortZeroUsesDefault()" classname="com.trustsign.core.ConfigLoaderTest" time="0.004"/>
-  <testcase name="loadThrowsWhenPortOutOfRange()" classname="com.trustsign.core.ConfigLoaderTest" time="0.009"/>
+  <testcase name="loadThrowsWhenPortOutOfRange()" classname="com.trustsign.core.ConfigLoaderTest" time="0.006"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

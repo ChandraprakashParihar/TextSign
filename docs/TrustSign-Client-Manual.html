@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrustSign — Client Installation &amp; Integration Guide</title>
+  <style>
+    :root { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11pt; line-height: 1.5; color: #1a1a1a; }
+    body { max-width: 800px; margin: 0 auto; padding: 2em; }
+    h1 { font-size: 1.6em; border-bottom: 2px solid #2563eb; padding-bottom: 0.3em; margin-top: 0; }
+    h2 { font-size: 1.25em; margin-top: 1.5em; color: #1e40af; }
+    h3 { font-size: 1.1em; margin-top: 1.2em; }
+    table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.95em; }
+    th, td { border: 1px solid #cbd5e1; padding: 0.4em 0.6em; text-align: left; }
+    th { background: #f1f5f9; font-weight: 600; }
+    pre, code { background: #f1f5f9; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.9em; }
+    pre { padding: 1em; overflow-x: auto; border-radius: 4px; }
+    code { padding: 0.15em 0.4em; border-radius: 3px; }
+    pre code { padding: 0; background: none; }
+    ul, ol { margin: 0.5em 0; padding-left: 1.5em; }
+    .toc { background: #f8fafc; padding: 1em; border-radius: 6px; margin: 1em 0; }
+    .toc ul { list-style: none; padding-left: 0; }
+    .toc li { margin: 0.3em 0; }
+    .toc a { color: #2563eb; text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    hr { border: none; border-top: 1px solid #e2e8f0; margin: 2em 0; }
+    @media print {
+      body { padding: 1em; max-width: none; }
+      h2 { page-break-after: avoid; }
+      pre, table { page-break-inside: avoid; }
+      .toc a { color: #1a1a1a; }
+      .no-print { display: none; }
+    }
+    .no-print { margin-top: 2em; padding: 1em; background: #eff6ff; border-radius: 6px; font-size: 0.95em; }
+  </style>
+</head>
+<body>
+  <h1>TrustSign — Client Installation &amp; Integration Guide</h1>
+  <p><strong>Version 0.1.0</strong></p>
+  <p>This manual describes how to install and run the TrustSign signing service from the provided ZIP package, and how to integrate the <strong><code>/auto-sign-text</code></strong> endpoint into your backend server so your applications can request text signing from TrustSign.</p>
+
+  <hr>
+  <h2>Table of Contents</h2>
+  <div class="toc">
+    <ol>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#requirements">System Requirements</a></li>
+      <li><a href="#installation">Installation from ZIP</a></li>
+      <li><a href="#configuration">Configuration</a></li>
+      <li><a href="#running">Running the TrustSign Service</a></li>
+      <li><a href="#integrating">Integrating /auto-sign-text in Your Backend</a></li>
+      <li><a href="#api">API Reference: POST /v1/auto-sign-text</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+    </ol>
+  </div>
+
+  <hr>
+  <h2 id="overview">1. Overview</h2>
+  <p>TrustSign is a local signing service that uses a PKCS#11 hardware token (or software token) to sign text documents. You receive TrustSign as a <strong>ZIP package</strong> containing the application, a bundled JRE (Windows), configuration, and run scripts.</p>
+  <p><strong>Typical setup:</strong></p>
+  <ul>
+    <li>You run the <strong>TrustSign service</strong> on a machine where the signing token is attached (e.g. a Windows PC or server).</li>
+    <li>Your <strong>backend server</strong> (your own application) runs on the same machine or another machine on the network.</li>
+    <li>Your backend <strong>calls the TrustSign API</strong> (e.g. <code>POST /v1/auto-sign-text</code>) to request signing. TrustSign signs the content and returns the result; the signed file is written to a directory you specify.</li>
+  </ul>
+  <p>This guide covers <strong>installation from the ZIP file</strong> and <strong>integration of the <code>/auto-sign-text</code> endpoint</strong> into your backend.</p>
+
+  <h2 id="requirements">2. System Requirements</h2>
+  <table>
+    <tr><th>Item</th><th>Requirement</th></tr>
+    <tr><td><strong>OS</strong></td><td>Windows (recommended; package includes bundled JRE), or Mac/Linux with Java 17+ installed</td></tr>
+    <tr><td><strong>Java</strong></td><td>Not required on Windows (JRE is bundled). On Mac/Linux: Java 17 or later</td></tr>
+    <tr><td><strong>Hardware</strong></td><td>PKCS#11-compatible USB token (e.g. ePass2003, HyperPKI) or supported software token</td></tr>
+    <tr><td><strong>Network</strong></td><td>If your backend runs on another machine, ensure firewall allows access to the TrustSign port (default: 31927)</td></tr>
+  </table>
+
+  <h2 id="installation">3. Installation from ZIP</h2>
+  <h3>3.1 Extract the ZIP</h3>
+  <ol>
+    <li>Obtain the client package (e.g. <strong>TrustSign-0.1.0-client.zip</strong> or similar name provided by your vendor).</li>
+    <li>Extract the ZIP to a folder of your choice (e.g. <code>C:\TrustSign</code> on Windows, <code>/opt/TrustSign</code> on Linux).</li>
+    <li>Do <strong>not</strong> remove or rename the <code>jre</code> folder on Windows (it contains the bundled Java runtime).</li>
+  </ol>
+  <p>After extraction, the folder should look like this:</p>
+  <pre><code>TrustSign/
+  trustsign-0.1.0-all.jar
+  run-trustsign.bat          (Windows launcher)
+  jre/                       (Windows only – bundled Java)
+  config/
+    config.json
+    licence.json
+    public-key.pem
+    (optional: truststore.jks)
+  README.txt</code></pre>
+
+  <h3>3.2 Verify Contents</h3>
+  <table>
+    <tr><th>File/Folder</th><th>Purpose</th></tr>
+    <tr><td><strong>trustsign-0.1.0-all.jar</strong></td><td>TrustSign application (do not delete)</td></tr>
+    <tr><td><strong>run-trustsign.bat</strong></td><td>Double-click to start the service on Windows</td></tr>
+    <tr><td><strong>jre/</strong></td><td>Bundled Java (Windows); required if you do not install Java</td></tr>
+    <tr><td><strong>config/config.json</strong></td><td>Port, PKCS#11 library paths, and other settings</td></tr>
+    <tr><td><strong>config/licence.json</strong></td><td>Licence file (do not delete or modify)</td></tr>
+    <tr><td><strong>config/public-key.pem</strong></td><td>Public key used to select the signing certificate on the token (required for signing)</td></tr>
+  </table>
+
+  <h2 id="configuration">4. Configuration</h2>
+  <h3>4.1 Set the Token PIN</h3>
+  <p>The service needs the PIN of your PKCS#11 token. Use <strong>one</strong> of the following:</p>
+  <p><strong>Option A – Config file:</strong> Open <code>config\config.json</code>, find the <code>pkcs11</code> section and set <code>pin</code> to your token PIN.</p>
+  <p><strong>Option B – Environment variable:</strong> Set <code>TRUSTSIGN_TOKEN_PIN</code> to your token PIN (e.g. in a batch file or system environment).</p>
+
+  <h3>4.2 Optional: Change Port or Other Settings</h3>
+  <p>Edit <code>config/config.json</code> to change the <strong>port</strong> (default 31927) or add <strong>allowedOrigins</strong> for CORS if needed.</p>
+
+  <h3>4.3 Optional: Restrict Output Directory</h3>
+  <p>If the vendor sets <strong>outputBaseDir</strong> in the configuration, the <code>outputDir</code> you send to <code>/auto-sign-text</code> must be under that base path.</p>
+
+  <h2 id="running">5. Running the TrustSign Service</h2>
+  <h3>5.1 Start the Service</h3>
+  <p><strong>Windows:</strong> Connect your PKCS#11 token, then double-click <strong>run-trustsign.bat</strong>. When ready you will see:</p>
+  <pre><code>TrustSign text server listening on http://127.0.0.1:31927/v1</code></pre>
+  <p>Leave the window open. To stop: close the window or press <strong>Ctrl+C</strong>.</p>
+  <p><strong>Command line (all platforms):</strong></p>
+  <pre><code>cd C:\TrustSign
+java -jar trustsign-0.1.0-all.jar</code></pre>
+  <h3>5.2 Custom Config File</h3>
+  <pre><code>java -jar trustsign-0.1.0-all.jar --config=C:\path\to\config.json</code></pre>
+  <h3>5.3 Check That the Service Is Running</h3>
+  <pre><code>curl http://127.0.0.1:31927/v1/health</code></pre>
+  <p>Expected: <code>{"status":"ok","ts":"..."}</code></p>
+
+  <h2 id="integrating">6. Integrating /auto-sign-text in Your Backend</h2>
+  <p>Your backend server runs alongside (or on another machine than) TrustSign. Your backend should call TrustSign when it needs to sign text.</p>
+  <h3>6.1 Architecture</h3>
+  <pre><code>[Your Backend Server]  ----HTTP POST---->  [TrustSign Service]
+       (your code)       /v1/auto-sign-text    (this package)
+                                |
+                                v
+                        [PKCS#11 token]
+                        (signs the text)</code></pre>
+  <ul>
+    <li><strong>TrustSign</strong> runs as a separate process and listens on a port (default <strong>31927</strong>).</li>
+    <li><strong>Your backend</strong> sends a <strong>POST</strong> request to <strong><code>http://&lt;host&gt;:31927/v1/auto-sign-text</code></strong> with <strong>multipart/form-data</strong>: part <strong>file</strong> (text file to sign) and part <strong>outputDir</strong> (directory path on the TrustSign machine where the signed file will be written).</li>
+  </ul>
+  <h3>6.2 Base URL</h3>
+  <ul>
+    <li><strong>Same machine:</strong> <code>http://127.0.0.1:31927/v1</code></li>
+    <li><strong>Another machine:</strong> <code>http://&lt;TrustSign-host&gt;:31927/v1</code></li>
+  </ul>
+  <p>Full endpoint: <strong>POST <code>http://&lt;host&gt;:31927/v1/auto-sign-text</code></strong></p>
+  <h3>6.3 Important Points for Your Backend</h3>
+  <ol>
+    <li><strong>outputDir</strong> is a path on the <strong>machine where TrustSign is running</strong>, not on your backend server.</li>
+    <li>Request: <strong>multipart/form-data</strong> with <code>file</code> and <code>outputDir</code>.</li>
+    <li>Response: JSON. Success: <code>ok: true</code>, <code>outputPath</code>, certificate details. Error: <code>error</code> and optional <code>details</code>.</li>
+    <li>Run TrustSign in a trusted network; restrict access (firewall/VPN) if your backend is on another host.</li>
+  </ol>
+
+  <h2 id="api">7. API Reference: POST /v1/auto-sign-text</h2>
+  <h3>7.1 Endpoint</h3>
+  <table>
+    <tr><th>Method</th><th>URL</th></tr>
+    <tr><td><strong>POST</strong></td><td><code>http://&lt;host&gt;:&lt;port&gt;/v1/auto-sign-text</code></td></tr>
+  </table>
+  <p>Example: <code>http://127.0.0.1:31927/v1/auto-sign-text</code></p>
+
+  <h3>7.2 Request</h3>
+  <p><strong>Content-Type:</strong> <code>multipart/form-data</code></p>
+  <table>
+    <tr><th>Part name</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><strong>file</strong></td><td>file</td><td>Yes</td><td>Text file to sign (UTF-8). Max 2 MB.</td></tr>
+    <tr><td><strong>outputDir</strong></td><td>string</td><td>Yes</td><td>Directory path on TrustSign server where the signed file will be written. Must not contain <code>..</code>. If server has <code>outputBaseDir</code>, must be under that path.</td></tr>
+  </table>
+  <p>The signed file is named like the uploaded file with <strong>-signed</strong> before the extension (e.g. <code>document.txt</code> → <code>document-signed.txt</code>).</p>
+
+  <h3>7.3 Success Response (HTTP 200)</h3>
+  <p><strong>Content-Type:</strong> <code>application/json</code></p>
+  <pre><code>{
+  "ok": true,
+  "subjectDn": "CN=..., O=..., ...",
+  "serialNumber": "1a2b3c4d",
+  "outputPath": "C:\\TrustSign\\output\\document-signed.txt"
+}</code></pre>
+  <table>
+    <tr><th>Field</th><th>Description</th></tr>
+    <tr><td><strong>ok</strong></td><td><code>true</code> on success</td></tr>
+    <tr><td><strong>subjectDn</strong></td><td>Subject DN of the signing certificate</td></tr>
+    <tr><td><strong>serialNumber</strong></td><td>Serial number of the certificate (hex)</td></tr>
+    <tr><td><strong>outputPath</strong></td><td>Full path of the signed file on the TrustSign machine</td></tr>
+  </table>
+
+  <h3>7.4 Error Responses</h3>
+  <table>
+    <tr><th>HTTP</th><th>Body (example)</th><th>Meaning</th></tr>
+    <tr><td>400</td><td><code>{"error": "Missing text file field: file"}</code></td><td>No <code>file</code> part</td></tr>
+    <tr><td>400</td><td><code>{"error": "Missing field: outputDir"}</code></td><td>No <code>outputDir</code> part</td></tr>
+    <tr><td>400</td><td><code>{"error": "Invalid outputDir", "details": "..."}</code></td><td>Invalid or disallowed path</td></tr>
+    <tr><td>400</td><td><code>{"error": "No PKCS#11 libraries configured for this OS"}</code></td><td>No token library for this platform</td></tr>
+    <tr><td>400</td><td><code>{"error": "Token load failed", "details": "..."}</code></td><td>Token not found, wrong PIN, or driver issue</td></tr>
+    <tr><td>400</td><td><code>{"error": "No certificate on token matches provided public key"}</code></td><td>Token certificate does not match <code>config/public-key.pem</code></td></tr>
+    <tr><td>403</td><td><code>{"error": "Licence", "message": "..."}</code></td><td>Licence check failed</td></tr>
+    <tr><td>500</td><td><code>{"error": "...", "details": "..."}</code></td><td>Server or config error</td></tr>
+  </table>
+
+  <h3>7.5 Example: cURL</h3>
+  <pre><code>curl -X POST "http://127.0.0.1:31927/v1/auto-sign-text" \
+  -F "file=@/path/to/document.txt" \
+  -F "outputDir=C:\TrustSign\output"</code></pre>
+
+  <h3>7.6 Example: Python (requests)</h3>
+  <pre><code>import requests
+
+url = "http://127.0.0.1:31927/v1/auto-sign-text"
+output_dir = "C:\\TrustSign\\output"
+
+with open("document.txt", "rb") as f:
+    files = {"file": ("document.txt", f, "text/plain")}
+    data = {"outputDir": output_dir}
+    r = requests.post(url, files=files, data=data)
+
+print(r.status_code)
+print(r.json())
+if r.ok:
+    print("Signed file written to:", r.json().get("outputPath"))</code></pre>
+
+  <h3>7.7 Example: Node.js</h3>
+  <pre><code>const FormData = require('form-data');
+const fs = require('fs');
+const axios = require('axios');
+
+const url = 'http://127.0.0.1:31927/v1/auto-sign-text';
+const form = new FormData();
+form.append('file', fs.createReadStream('document.txt'), { filename: 'document.txt' });
+form.append('outputDir', 'C:\\TrustSign\\output');
+
+const response = await axios.post(url, form, {
+  headers: form.getHeaders(),
+  maxBodyLength: Infinity,
+});
+console.log(response.data);</code></pre>
+
+  <h3>7.8 Signed Output Format</h3>
+  <p>The signed file contains the original text (normalized line endings) followed by:</p>
+  <pre><code>&lt;START-SIGNATURE&gt;&lt;base64-signature&gt;&lt;/START-SIGNATURE&gt;
+&lt;START-CERTIFICATE&gt;&lt;base64-cert&gt;&lt;/START-CERTIFICATE&gt;
+&lt;SIGNER-VERSION&gt;TrustSign_0.1.0&lt;/SIGNER-VERSION&gt;</code></pre>
+  <p>Your backend or downstream systems can verify the signature using the certificate and the content before <code>&lt;START-SIGNATURE&gt;</code>.</p>
+
+  <h2 id="troubleshooting">8. Troubleshooting</h2>
+  <table>
+    <tr><th>Issue</th><th>What to check</th></tr>
+    <tr><td>"Missing text file field: file"</td><td>Send the file as a multipart part named exactly <code>file</code>.</td></tr>
+    <tr><td>"Missing field: outputDir"</td><td>Send a form field named exactly <code>outputDir</code> with a non-empty path.</td></tr>
+    <tr><td>"Invalid outputDir"</td><td>No <code>..</code> in path; if server has <code>outputBaseDir</code>, path must be under it. Create the directory on the TrustSign machine if needed.</td></tr>
+    <tr><td>"No PKCS#11 libraries configured"</td><td>Add correct library path in <code>config.json</code> under <code>pkcs11</code> for your OS.</td></tr>
+    <tr><td>"Token load failed"</td><td>Token connected, correct PIN (config or <code>TRUSTSIGN_TOKEN_PIN</code>), correct PKCS#11 driver installed.</td></tr>
+    <tr><td>"No certificate on token matches provided public key"</td><td>Token certificate must match <code>config/public-key.pem</code>. Ensure correct public key is in the package.</td></tr>
+    <tr><td>"Licence" (403)</td><td>Licence invalid or expired. Contact your vendor.</td></tr>
+    <tr><td>Connection refused</td><td>TrustSign not running or firewall blocking port. Start the service and ensure port 31927 is reachable from your backend.</td></tr>
+  </table>
+
+  <hr>
+  <h2>Summary</h2>
+  <ol>
+    <li><strong>Install:</strong> Extract the TrustSign ZIP, set the token PIN in config or environment, and (on Windows) run <strong>run-trustsign.bat</strong>.</li>
+    <li><strong>Run:</strong> Keep the TrustSign process running; it listens on <code>http://127.0.0.1:31927/v1</code> by default.</li>
+    <li><strong>Integrate:</strong> From your backend, send <strong>POST</strong> requests to <strong><code>http://&lt;host&gt;:31927/v1/auto-sign-text</code></strong> with <strong>multipart/form-data</strong> (<code>file</code> + <code>outputDir</code>), and handle the JSON response to get <code>outputPath</code> and certificate info.</li>
+  </ol>
+  <p>For further support, contact your TrustSign vendor.</p>
+
+  <div class="no-print">
+    <p><strong>Generate PDF:</strong> Use your browser’s <strong>Print</strong> function (Ctrl+P) and choose <strong>Save as PDF</strong> or <strong>Microsoft Print to PDF</strong> to create a PDF of this manual.</p>
+  </div>
+</body>
+</html>

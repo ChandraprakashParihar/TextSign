@@ -1,13 +1,13 @@
 ; TrustSign Windows Installer
 ; Requires: Inno Setup 6 (https://jrsoftware.org/isinfo.php)
-; Build: 1) Run "gradlew installDist" from project root
-;        2) Compile this script (e.g. iscc installer\TrustSign.iss) or run "gradlew buildInstaller"
+; Build: ./gradlew buildInstaller (creates build/client then packages it here; same files as client folder)
 
 #define MyAppName "TrustSign"
 #define MyAppVersion "0.1.0"
 #define MyAppPublisher "TrustSign"
 #define MyAppURL "https://github.com/trustsign/trustsign"
-#define BuildDir "..\build\install\trustsign"
+; Same content as build/client (JAR, run script, config, JRE) so installer and zip client match
+#define BuildDir "..\build\client"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -20,8 +20,9 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\build\installer
 OutputBaseFilename=TrustSign-{#MyAppVersion}-Setup
-Compression=lzma2
-SolidCompression=yes
+; Use zip for faster builds (2-5 min). Use lzma2+SolidCompression=yes for smallest exe (15-30+ min).
+Compression=zip
+SolidCompression=no
 WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
@@ -35,24 +36,23 @@ Name: "runatstartup"; Description: "Run TrustSign when Windows starts"; GroupDes
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; Application (from gradle installDistWithJre: includes bundled JRE)
-Source: "{#BuildDir}\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs
-Source: "{#BuildDir}\lib\*"; DestDir: "{app}\lib"; Flags: ignoreversion recursesubdirs
+; Same layout as build/client: JAR, launcher, README, config (incl. licence, public-key, truststore, SET-PIN), JRE
+Source: "{#BuildDir}\*.jar"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDir}\run-trustsign.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDir}\README.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDir}\config\*"; DestDir: "{app}\config"; Flags: ignoreversion recursesubdirs
 Source: "{#BuildDir}\jre\*"; DestDir: "{app}\jre"; Flags: ignoreversion recursesubdirs
-; Default config (client can edit later)
-Source: "config.json"; DestDir: "{app}\config"; DestName: "config.json"; Flags: ignoreversion onlyifdoesntexist
-; Signed licence (vendor must place licence.json here before building the installer)
-Source: "licence.json"; DestDir: "{app}\config"; DestName: "licence.json"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\bin\trustsign.bat"; WorkingDir: "{app}"; Comment: "TrustSign text signing service"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\run-trustsign.bat"; WorkingDir: "{app}"; Comment: "TrustSign text signing service"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autostartup}\{#MyAppName}"; Filename: "{app}\bin\trustsign.bat"; WorkingDir: "{app}"; Tasks: runatstartup
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\bin\trustsign.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autostartup}\{#MyAppName}"; Filename: "{app}\run-trustsign.bat"; WorkingDir: "{app}"; Tasks: runatstartup
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\run-trustsign.bat"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-; If Java was just installed, allow shell to pick it up
-Filename: "{app}\bin\trustsign.bat"; Description: "Start TrustSign now"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\run-trustsign.bat"; Description: "Start TrustSign now"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
-; No Java check: TrustSign installer includes a bundled JRE (Eclipse Temurin 17) so the client does not need to install Java.
+// TrustSign installer includes a bundled JRE (Eclipse Temurin 17) so the client does not need to install Java.
+begin
+end.

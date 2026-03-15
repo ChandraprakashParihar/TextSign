@@ -129,6 +129,17 @@ tasks.register("clientFolder") {
   dependsOn("shadowJar", "installDistWithJre")
   def clientDir = file("$buildDir/client")
   outputs.dir(clientDir)
+  // Re-run when any of these source files change so licence.json, config.json, etc. are always updated.
+  inputs.files(
+    tasks.shadowJar.archiveFile,
+    file("config/config.json"),
+    file("config/licence.json"),
+    file("config/public-key.pem"),
+    file("config/truststore.jks"),
+    file("CLIENT-RUN.md"),
+    file("installer/config.json"),
+    file("installer/licence.json")
+  )
   doLast {
     clientDir.mkdirs()
     def configDir = new File(clientDir, "config")
@@ -178,7 +189,8 @@ echo.
 "%JAVA_EXE%" -jar "%JAR%" %*
 pause
 """
-    def configSource = file("installer/config.json").exists() ? file("installer/config.json") : file("config/config.json")
+    // Prefer main config so you can change anything in config/ and both clientFolder and buildInstaller use it
+    def configSource = file("config/config.json").exists() ? file("config/config.json") : file("installer/config.json")
     if (configSource.exists()) {
       copy {
         from(configSource)
@@ -186,7 +198,8 @@ pause
         rename { "config.json" }
       }
     }
-    def licenceSource = file("installer/licence.json").exists() ? file("installer/licence.json") : file("config/licence.json")
+    // Prefer config/licence.json (what you sign) so client package gets the current licence; fallback to installer/licence.json
+    def licenceSource = file("config/licence.json").exists() ? file("config/licence.json") : file("installer/licence.json")
     if (!licenceSource.exists()) {
       throw new GradleException("Licence required for client package. Sign a licence (see GIVE-TO-CLIENT.md) and ensure config/licence.json or installer/licence.json exists.")
     }
@@ -227,8 +240,8 @@ pause
 
 tasks.register("buildInstaller") {
   group = "distribution"
-  description = "Builds the Windows installer with bundled JRE (requires Windows and Inno Setup 6). Runs installDistWithJre then compiles installer/TrustSign.iss"
-  dependsOn("installDistWithJre")
+  description = "Builds the Windows installer with bundled JRE (requires Windows and Inno Setup 6). Packages the same files as clientFolder (build/client) so the installer and zip client match."
+  dependsOn("clientFolder")
   doLast {
     if (!System.getProperty("os.name", "").toLowerCase().contains("windows")) {
       throw new GradleException(
@@ -238,6 +251,13 @@ tasks.register("buildInstaller") {
       )
     }
     def isccExe = ["C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe", "C:\\Program Files\\Inno Setup 6\\ISCC.exe"].find { new File(it).exists() } ?: "iscc"
+    if (isccExe == "iscc") {
+      throw new GradleException(
+        "Inno Setup 6 is required to build the Windows installer but was not found.\n" +
+        "Install from https://jrsoftware.org/isinfo.php (use default path so Gradle finds ISCC.exe).\n" +
+        "If you don't need the .exe installer, run ./gradlew clientFolder and distribute build/client/ (e.g. as a zip)."
+      )
+    }
     def iss = file("installer/TrustSign.iss")
     if (!iss.exists()) throw new GradleException("installer/TrustSign.iss not found")
     def pb = new ProcessBuilder(isccExe, iss.absolutePath)

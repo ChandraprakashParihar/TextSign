@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.TextVerifyServiceTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-03-15T09:21:30.533Z" hostname="CHANDRAPRAKASHP" time="0.098">
+<testsuite name="com.trustsign.core.TextVerifyServiceTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-03-15T10:07:03.940Z" hostname="CHANDRAPRAKASHP" time="0.065">
   <properties/>
   <testcase name="verifyReturnsFalseForNull()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.002"/>
   <testcase name="verifyReturnsFalseWhenSignatureMarkersMissing()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.001"/>
-  <testcase name="discoverIcegateFormat()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.059"/>
-  <testcase name="analyzeIcegateSignedFile()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.029"/>
-  <testcase name="verifyReturnsFalseForEmptyString()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.001"/>
-  <testcase name="verifyReturnsFalseWhenSignatureBlockEmpty()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.001"/>
+  <testcase name="discoverIcegateFormat()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.027"/>
+  <testcase name="analyzeIcegateSignedFile()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.032"/>
+  <testcase name="verifyReturnsFalseForEmptyString()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.0"/>
+  <testcase name="verifyReturnsFalseWhenSignatureBlockEmpty()" classname="com.trustsign.core.TextVerifyServiceTest" time="0.0"/>
   <system-out><![CDATA[Content before <START-SIGNATURE> length: 16 chars, 16 bytes
 Signature algorithm: SHA256withRSA only
 
