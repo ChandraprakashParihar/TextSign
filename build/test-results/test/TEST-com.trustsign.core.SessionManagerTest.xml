@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.SessionManagerTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-03-16T05:17:13.630Z" hostname="Chandras-Mac-mini.local" time="0.003">
+<testsuite name="com.trustsign.core.SessionManagerTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-03-16T06:01:25.641Z" hostname="Chandras-Mac-mini.local" time="0.003">
   <properties/>
-  <testcase name="createSessionReturnsTokenAndExpiry()" classname="com.trustsign.core.SessionManagerTest" time="0.0"/>
+  <testcase name="createSessionReturnsTokenAndExpiry()" classname="com.trustsign.core.SessionManagerTest" time="0.001"/>
   <testcase name="requireValidThrowsWhenTokenBlank()" classname="com.trustsign.core.SessionManagerTest" time="0.001"/>
   <testcase name="requireValidThrowsWhenTokenUnknown()" classname="com.trustsign.core.SessionManagerTest" time="0.0"/>
-  <testcase name="requireValidThrowsWhenTokenNull()" classname="com.trustsign.core.SessionManagerTest" time="0.001"/>
+  <testcase name="requireValidThrowsWhenTokenNull()" classname="com.trustsign.core.SessionManagerTest" time="0.0"/>
   <testcase name="requireValidSucceedsForValidToken()" classname="com.trustsign.core.SessionManagerTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
