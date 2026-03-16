@@ -313,9 +313,22 @@ public final class CertificateValidator {
         throw new SecurityException("No X509TrustManager available for path validation");
       }
 
-      // Use "RSA" as the authType for typical RSA/ECDSA signing certs; implementation
-      // usually ignores the exact string but requires it to be non-empty.
-      x509Tm.checkServerTrusted(toValidate, "RSA");
+      // Use client-style validation for signing certificates.
+      // Many trust managers applying TLS rules enforce Extended Key Usage
+      // for client/server auth; for pure signing certificates we ignore
+      // those specific EKU errors while still enforcing chain validity.
+      try {
+        x509Tm.checkClientTrusted(toValidate, "RSA");
+      } catch (Exception e) {
+        String msg = e.getMessage();
+        if (msg != null &&
+            (msg.contains("Extended key usage does not permit use for TLS client authentication")
+                || msg.contains("Extended key usage does not permit use for TLS server authentication"))) {
+          // Treat EKU-for-TLS-only complaints as non-fatal for signing use cases.
+          return;
+        }
+        throw e;
+      }
     } catch (SecurityException se) {
       throw se;
     } catch (Exception e) {

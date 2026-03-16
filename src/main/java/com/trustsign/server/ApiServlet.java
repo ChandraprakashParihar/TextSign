@@ -256,34 +256,30 @@ public final class ApiServlet extends HttpServlet {
 
           KeyStore ks = loaded.keyStore();
 
-          PublicKey requestedPublicKey;
+          java.util.List<PublicKey> requestedPublicKeys;
           try {
-            requestedPublicKey = loadConfiguredPublicKeyOrThrow();
+            requestedPublicKeys = loadConfiguredPublicKeysOrThrow();
           } catch (Exception e) {
-            writeJson(resp, 500, Map.of("error", "Failed to load configured public key", "details", safeMsg(e)));
+            writeJson(resp, 500, Map.of("error", "Failed to load configured public key(s)", "details", safeMsg(e)));
             return;
           }
 
-          String matchedAlias = null;
-          X509Certificate matchedCert = null;
-          Certificate[] chain = null;
-          for (java.util.Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
-            String a = e.nextElement();
-            Certificate cert = ks.getCertificate(a);
-            if (cert instanceof X509Certificate x509) {
-              if (x509.getPublicKey().equals(requestedPublicKey)) {
-                matchedAlias = a;
-                matchedCert = x509;
-                chain = ks.getCertificateChain(a);
-                break;
-              }
-            }
-          }
-
-          if (matchedAlias == null || chain == null || chain.length == 0) {
-            writeJson(resp, 400, Map.of("error", "No certificate on token matches provided public key"));
+          CertificateSelection selection;
+          try {
+            selection = selectCertificateForPublicKeys(ks, requestedPublicKeys);
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
             return;
           }
+
+          if (selection == null || selection.chain == null || selection.chain.length == 0) {
+            writeJson(resp, 400, Map.of("error", "No certificate on token matches any configured public key"));
+            return;
+          }
+
+          String matchedAlias = selection.alias;
+          X509Certificate matchedCert = selection.certificate;
+          Certificate[] chain = selection.chain;
 
           PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
           if (key == null) {
@@ -407,32 +403,27 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
           KeyStore ks = loaded.keyStore();
-          PublicKey requestedPublicKey;
+          java.util.List<PublicKey> requestedPublicKeys;
           try {
-            requestedPublicKey = loadConfiguredPublicKeyOrThrow();
+            requestedPublicKeys = loadConfiguredPublicKeysOrThrow();
           } catch (Exception e) {
-            writeJson(resp, 500, Map.of("error", "Failed to load configured public key", "details", safeMsg(e)));
+            writeJson(resp, 500, Map.of("error", "Failed to load configured public key(s)", "details", safeMsg(e)));
             return;
           }
-          String matchedAlias = null;
-          X509Certificate matchedCert = null;
-          Certificate[] chain = null;
-          for (java.util.Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
-            String a = e.nextElement();
-            Certificate cert = ks.getCertificate(a);
-            if (cert instanceof X509Certificate x509) {
-              if (x509.getPublicKey().equals(requestedPublicKey)) {
-                matchedAlias = a;
-                matchedCert = x509;
-                chain = ks.getCertificateChain(a);
-                break;
-              }
-            }
-          }
-          if (matchedAlias == null || chain == null || chain.length == 0) {
-            writeJson(resp, 400, Map.of("error", "No certificate on token matches provided public key"));
+          CertificateSelection selection;
+          try {
+            selection = selectCertificateForPublicKeys(ks, requestedPublicKeys);
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
             return;
           }
+          if (selection == null || selection.chain == null || selection.chain.length == 0) {
+            writeJson(resp, 400, Map.of("error", "No certificate on token matches any configured public key"));
+            return;
+          }
+          String matchedAlias = selection.alias;
+          X509Certificate matchedCert = selection.certificate;
+          Certificate[] chain = selection.chain;
           PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
@@ -505,34 +496,30 @@ public final class ApiServlet extends HttpServlet {
           }
 
           KeyStore ks = loaded.keyStore();
-          PublicKey requestedPublicKey;
+          java.util.List<PublicKey> requestedPublicKeys;
           try {
-            requestedPublicKey = loadConfiguredPublicKeyOrThrow();
+            requestedPublicKeys = loadConfiguredPublicKeysOrThrow();
           } catch (Exception e) {
-            writeJson(resp, 500, Map.of("error", "Failed to load configured public key", "details", safeMsg(e)));
+            writeJson(resp, 500, Map.of("error", "Failed to load configured public key(s)", "details", safeMsg(e)));
             return;
           }
 
-          String matchedAlias = null;
-          X509Certificate matchedCert = null;
-          Certificate[] chain = null;
-          for (java.util.Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
-            String a = e.nextElement();
-            Certificate cert = ks.getCertificate(a);
-            if (cert instanceof X509Certificate x509) {
-              if (x509.getPublicKey().equals(requestedPublicKey)) {
-                matchedAlias = a;
-                matchedCert = x509;
-                chain = ks.getCertificateChain(a);
-                break;
-              }
-            }
-          }
-
-          if (matchedAlias == null || chain == null || chain.length == 0) {
-            writeJson(resp, 400, Map.of("error", "No certificate on token matches provided public key"));
+          CertificateSelection selection;
+          try {
+            selection = selectCertificateForPublicKeys(ks, requestedPublicKeys);
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
             return;
           }
+
+          if (selection == null || selection.chain == null || selection.chain.length == 0) {
+            writeJson(resp, 400, Map.of("error", "No certificate on token matches any configured public key"));
+            return;
+          }
+
+          String matchedAlias = selection.alias;
+          X509Certificate matchedCert = selection.certificate;
+          Certificate[] chain = selection.chain;
 
           PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
           if (key == null) {
@@ -704,11 +691,16 @@ public final class ApiServlet extends HttpServlet {
   }
 
   /**
-   * Loads the signer public key from a configured location on disk.
-   * 
+   * Loads one or more signer public keys from a configured location on disk.
+   *
    * Resolution order: trustsign.publicKey.path, config/public-key.pem, ../config/public-key.pem.
+   * The target file may contain:
+   * - a single PEM encoded public key ("-----BEGIN PUBLIC KEY-----")
+   * - one or more PEM encoded X.509 certificates ("-----BEGIN CERTIFICATE-----")
+   * - a mix of the above
+   * - or a single raw base64-encoded DER SubjectPublicKeyInfo.
    */
-  private static PublicKey loadConfiguredPublicKeyOrThrow() throws Exception {
+  private static java.util.List<PublicKey> loadConfiguredPublicKeysOrThrow() throws Exception {
     String path = System.getProperty("trustsign.publicKey.path");
     if (path == null || path.isBlank()) {
       File f1 = new File("config/public-key.pem");
@@ -727,7 +719,11 @@ public final class ApiServlet extends HttpServlet {
     String pem = java.nio.file.Files.readString(
         java.nio.file.Paths.get(path),    java.nio.charset.StandardCharsets.UTF_8
     );
-    return parsePublicKey(pem);
+    java.util.List<PublicKey> keys = parsePublicKeys(pem);
+    if (keys.isEmpty()) {
+      throw new IOException("Configured public key file did not contain any usable public keys");
+    }
+    return keys;
   }
 
   /**
@@ -761,6 +757,115 @@ public final class ApiServlet extends HttpServlet {
     // can be extended to detect EC, etc.
     KeyFactory kf = KeyFactory.getInstance("RSA");
     return kf.generatePublic(spec);
+  }
+
+  /**
+   * Parses one or more public keys from the given input.
+   * Supports multiple PEM blocks (certificates and/or public keys) in a single file
+   * as well as a single base64-encoded public key without PEM headers.
+   */
+  private static java.util.List<PublicKey> parsePublicKeys(String pemOrBase64) throws Exception {
+    String trimmed = pemOrBase64 == null ? "" : pemOrBase64.trim();
+    java.util.List<PublicKey> keys = new java.util.ArrayList<>();
+    if (trimmed.isEmpty()) {
+      return keys;
+    }
+
+    String upper = trimmed.toUpperCase(java.util.Locale.ROOT);
+    boolean hasPemMarkers = upper.contains("-----BEGIN CERTIFICATE-----") || upper.contains("-----BEGIN PUBLIC KEY-----");
+
+    if (!hasPemMarkers) {
+      // Single non-PEM base64-encoded key.
+      keys.add(parsePublicKey(trimmed));
+      return keys;
+    }
+
+    int pos = 0;
+    while (pos < trimmed.length()) {
+      int nextCert = upper.indexOf("-----BEGIN CERTIFICATE-----", pos);
+      int nextPub = upper.indexOf("-----BEGIN PUBLIC KEY-----", pos);
+      if (nextCert == -1 && nextPub == -1) {
+        break;
+      }
+
+      boolean isCert;
+      int begin;
+      if (nextCert == -1) {
+        begin = nextPub;
+        isCert = false;
+      } else if (nextPub == -1 || nextCert < nextPub) {
+        begin = nextCert;
+        isCert = true;
+      } else {
+        begin = nextPub;
+        isCert = false;
+      }
+
+      String endMarker = isCert ? "-----END CERTIFICATE-----" : "-----END PUBLIC KEY-----";
+      int end = upper.indexOf(endMarker, begin);
+      if (end == -1) {
+        break; // malformed block, stop processing further
+      }
+      end += endMarker.length();
+
+      String block = trimmed.substring(begin, end);
+      try {
+        PublicKey pk = parsePublicKey(block);
+        if (pk != null) {
+          keys.add(pk);
+        }
+      } catch (Exception ignore) {
+        // Ignore malformed block and continue with the next one.
+      }
+
+      pos = end;
+    }
+
+    return keys;
+  }
+
+  /**
+   * Represents a selected certificate (and its chain) from the token.
+   */
+  private static final class CertificateSelection {
+    final String alias;
+    final X509Certificate certificate;
+    final Certificate[] chain;
+
+    CertificateSelection(String alias, X509Certificate certificate, Certificate[] chain) {
+      this.alias = alias;
+      this.certificate = certificate;
+      this.chain = chain;
+    }
+  }
+
+  /**
+   * Selects the first certificate on the token whose public key matches any of the
+   * configured public keys. Returns null if no matching certificate is found.
+   */
+  private static CertificateSelection selectCertificateForPublicKeys(
+      KeyStore ks,
+      java.util.List<PublicKey> requestedPublicKeys
+  ) throws Exception {
+    if (requestedPublicKeys == null || requestedPublicKeys.isEmpty()) {
+      throw new IllegalArgumentException("No configured public keys");
+    }
+
+    for (java.util.Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
+      String alias = e.nextElement();
+      Certificate cert = ks.getCertificate(alias);
+      if (cert instanceof X509Certificate x509) {
+        PublicKey certKey = x509.getPublicKey();
+        for (PublicKey requested : requestedPublicKeys) {
+          if (certKey.equals(requested)) {
+            Certificate[] chain = ks.getCertificateChain(alias);
+            return new CertificateSelection(alias, x509, chain);
+          }
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
