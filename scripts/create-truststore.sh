@@ -11,7 +11,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 KEYSTORE="${KEYSTORE:-$PROJECT_DIR/config/truststore.jks}"
-STORE_PASS="${STORE_PASS:-changeit}"
+STORE_PASS="${STORE_PASS:-trustsign}"
 
 if [ $# -ge 3 ]; then
   XTCA="$1"
