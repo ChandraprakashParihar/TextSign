@@ -242,19 +242,20 @@ public final class ApiServlet extends HttpServlet {
           // requireSession(req);
           var mp = Multipart.read(req, 2 * 1024 * 1024);
           byte[] data = mp.file("file");
-          String outputDir = mp.field("outputDir") != null ? mp.field("outputDir").trim() : null;
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
             return;
           }
-          if (outputDir == null || outputDir.isBlank()) {
-            writeJson(resp, 400, Map.of("error", "Missing field: outputDir"));
-            return;
-          }
 
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null) return;
+
+          String outputDir = cfg.autoSignOutputDir();
+          if (outputDir == null || outputDir.isBlank()) {
+            writeJson(resp, 500, Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
+            return;
+          }
 
           Path outputBase = null;
           if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
@@ -399,17 +400,19 @@ public final class ApiServlet extends HttpServlet {
           requireSession(req);
           var mp = Multipart.read(req, 2 * 1024 * 1024);
           byte[] data = mp.file("file");
-          String outputDir = mp.field("outputDir") != null ? mp.field("outputDir").trim() : null;
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
             return;
           }
-          if (outputDir == null || outputDir.isBlank()) {
-            writeJson(resp, 400, Map.of("error", "Missing field: outputDir"));
-            return;
-          }
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null) return;
+
+          String outputDir = cfg.autoSignOutputDir();
+          if (outputDir == null || outputDir.isBlank()) {
+            writeJson(resp, 500, Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
+            return;
+          }
+
           Path outputBase = null;
           if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
             outputBase = Paths.get(cfg.outputBaseDir());

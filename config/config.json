@@ -2,8 +2,9 @@
   "port": 8080,
   "allowedOrigins": ["http://localhost:3000"],
   "allowedClientIps": [
-    "127.0.0.1","10.10.10.109"
+    "127.0.0.1"
   ],
+  "autoSignOutputDir": "/Users/jainnibha/output",
   "signerVersion": "TrustSign_0.1.0",
   "truststore": {
     "path": "config/truststore.jks",

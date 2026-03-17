@@ -17,6 +17,12 @@ public record AgentConfig(
     /** Optional. Emitted as &lt;SIGNER-VERSION&gt; in signed output. Use e.g. "V-NCODE_01.05.2013" for Icegate verification. */
     @JsonProperty(required = false) String signerVersion,
     /**
+     * Optional. When set, /auto-sign-text and /auto-sign-text-cms will always write signed
+     * files to this directory instead of taking outputDir from the HTTP request.
+     * May be absolute or relative to the working directory.
+     */
+    @JsonProperty(required = false) String autoSignOutputDir,
+    /**
      * Optional. When non-empty, only these client IP addresses are allowed to call the HTTP API.
      * Values should be plain IP string matches of HttpServletRequest.getRemoteAddr()
      * (for example: "127.0.0.1", "10.0.0.5").
