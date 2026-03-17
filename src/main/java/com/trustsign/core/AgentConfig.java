@@ -4,23 +4,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
 
-/**
- * Minimal configuration for the standalone text signing backend.
- *
- * Example config.json:
- * {
- *   "port": 31927,
- *   "allowedOrigins": ["http://localhost:3000"],
- *   "pkcs11": {
- *     "preferredLibrary": "/path/to/pkcs11.so",
- *     "pin": "token-pin",
- *     "windowsCandidates": ["%ProgramFiles%\\\\HyperPKI\\\\bin\\\\pkcs11.dll"],
- *     "macCandidates": [],
- *     "linuxCandidates": []
- *   }
- * }
- * On Windows, preferredLibrary and paths in windowsCandidates can use env vars (e.g. %ProgramFiles%).
- */
 public record AgentConfig(
     List<String> allowedOrigins,
     Integer port,
@@ -32,7 +15,14 @@ public record AgentConfig(
     /** Optional. When set, enables CCA ROOT SKI and/or class (certificate policy) validation. */
     @JsonProperty(required = false) CertificateValidationConfig certificateValidation,
     /** Optional. Emitted as &lt;SIGNER-VERSION&gt; in signed output. Use e.g. "V-NCODE_01.05.2013" for Icegate verification. */
-    @JsonProperty(required = false) String signerVersion
+    @JsonProperty(required = false) String signerVersion,
+    /**
+     * Optional. When non-empty, only these client IP addresses are allowed to call the HTTP API.
+     * Values should be plain IP string matches of HttpServletRequest.getRemoteAddr()
+     * (for example: "127.0.0.1", "10.0.0.5").
+     * When null or empty, all client IPs are allowed.
+     */
+    @JsonProperty(required = false) List<String> allowedClientIps
 ) {
 
   public record TruststoreConfig(

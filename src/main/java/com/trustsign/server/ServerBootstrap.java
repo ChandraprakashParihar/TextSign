@@ -17,7 +17,8 @@ public final class ServerBootstrap {
     Server server = new Server();
 
     ServerConnector connector = new ServerConnector(server);
-    connector.setHost("127.0.0.1");
+    // Bind to all interfaces so the API can be reached from other servers.
+    connector.setHost("0.0.0.0");
     connector.setPort(cfg.portOrDefault());
     server.addConnector(connector);
 

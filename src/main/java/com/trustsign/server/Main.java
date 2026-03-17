@@ -51,7 +51,7 @@ public final class Main {
       }
     }));
 
-    LOG.info("TrustSign text server listening on http://127.0.0.1:" + cfg.portOrDefault() + "/v1");
+    LOG.info("TrustSign text server listening on http://localhost:" + cfg.portOrDefault() + "/v1");
     server.join();
   }
 

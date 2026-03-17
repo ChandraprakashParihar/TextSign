@@ -47,6 +47,34 @@ public final class ApiServlet extends HttpServlet {
   }
 
   /**
+   * Returns true if the client IP is allowed according to config.allowedClientIps.
+   * When allowedClientIps is null or empty, all IPs are allowed.
+   */
+  private boolean isClientIpAllowed(HttpServletRequest req) {
+    String remoteIp = req.getRemoteAddr();
+    try {
+      File cfgFile = resolveConfigFile();
+      if (!cfgFile.exists()) {
+        LOG.warning("Config file not found for IP check: " + cfgFile.getAbsolutePath());
+        return false;
+      }
+      AgentConfig cfg = ConfigLoader.load(cfgFile);
+      List<String> allowed = cfg.allowedClientIps();
+      if (allowed == null || allowed.isEmpty()) {
+        return true;
+      }
+      boolean ok = allowed.contains(remoteIp);
+      if (!ok) {
+        LOG.warning("Rejecting request from disallowed IP: " + remoteIp);
+      }
+      return ok;
+    } catch (Exception e) {
+      LOG.warning("Failed to evaluate client IP allowlist: " + e.getMessage());
+      return false;
+    }
+  }
+
+  /**
    * Loads config from resolved path. On failure writes error response and returns
    * null.
    */
@@ -110,6 +138,10 @@ public final class ApiServlet extends HttpServlet {
 
   @Override
   protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    if (!isClientIpAllowed(req)) {
+      writeJson(resp, 403, Map.of("error", "IP not allowed", "ip", req.getRemoteAddr()));
+      return;
+    }
     LicenceEnforcer.Result licence = licenceEnforcer.check();
     if (!licence.allowed()) {
       writeJson(resp, 403, Map.of("error", "Licence", "message", licence.message()));
@@ -187,6 +219,10 @@ public final class ApiServlet extends HttpServlet {
 
   @Override
   protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    if (!isClientIpAllowed(req)) {
+      writeJson(resp, 403, Map.of("error", "IP not allowed", "ip", req.getRemoteAddr()));
+      return;
+    }
     LicenceEnforcer.Result licence = licenceEnforcer.check();
     if (!licence.allowed()) {
       writeJson(resp, 403, Map.of("error", "Licence", "message", licence.message()));
