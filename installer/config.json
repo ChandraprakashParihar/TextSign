@@ -1,6 +1,7 @@
 {
   "port": 31927,
   "allowedOrigins": ["http://localhost:3000"],
+  "autoSignOutputDir": "output",
   "truststore": {
     "path": "config/truststore.jks",
     "password": "trustsign",
