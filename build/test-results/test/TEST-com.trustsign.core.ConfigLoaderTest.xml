@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.ConfigLoaderTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-03-17T06:49:02.137Z" hostname="Chandras-Mac-mini.local" time="0.096">
+<testsuite name="com.trustsign.core.ConfigLoaderTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-03-18T10:41:09.199Z" hostname="Chandras-Mac-mini.local" time="0.113">
   <properties/>
-  <testcase name="loadThrowsWhenFileIsEmpty()" classname="com.trustsign.core.ConfigLoaderTest" time="0.055"/>
-  <testcase name="loadThrowsWhenPkcs11Missing()" classname="com.trustsign.core.ConfigLoaderTest" time="0.027"/>
-  <testcase name="loadThrowsWhenFileDoesNotExist()" classname="com.trustsign.core.ConfigLoaderTest" time="0.0"/>
+  <testcase name="loadThrowsWhenFileIsEmpty()" classname="com.trustsign.core.ConfigLoaderTest" time="0.064"/>
+  <testcase name="loadThrowsWhenPkcs11Missing()" classname="com.trustsign.core.ConfigLoaderTest" time="0.028"/>
+  <testcase name="loadThrowsWhenFileDoesNotExist()" classname="com.trustsign.core.ConfigLoaderTest" time="0.001"/>
   <testcase name="loadThrowsWhenFileIsNull()" classname="com.trustsign.core.ConfigLoaderTest" time="0.001"/>
   <testcase name="loadThrowsWhenAllowedOriginsMissing()" classname="com.trustsign.core.ConfigLoaderTest" time="0.001"/>
   <testcase name="loadSucceedsWithValidConfig()" classname="com.trustsign.core.ConfigLoaderTest" time="0.001"/>

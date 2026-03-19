@@ -15,7 +15,17 @@ import java.util.Base64;
  * <SIGNER-VERSION>...</SIGNER-VERSION>
  */
 public final class TextVerifyService {
-  public record Result(boolean ok, String reason) {}
+  public record CertInfo(
+      String subjectDn,
+      String issuerDn,
+      String serialNumberHex,
+      String notBefore,
+      String notAfter,
+      String signatureAlgorithm,
+      String publicKeyAlgorithm
+  ) {}
+
+  public record Result(boolean ok, String reason, CertInfo certificate) {}
 
   /**
    * Verifies the signed text using SHA256withRSA. Tries with and without trailing newline
@@ -23,7 +33,7 @@ public final class TextVerifyService {
    */
   public static Result verify(String signedText) {
     if (signedText == null || signedText.isEmpty()) {
-      return new Result(false, "Signed text is empty");
+      return new Result(false, "Signed text is empty", null);
     }
     try {
       int sigStart = signedText.indexOf("<START-SIGNATURE>");
@@ -32,20 +42,29 @@ public final class TextVerifyService {
       int certEnd = signedText.indexOf("</START-CERTIFICATE>");
 
       if (sigStart < 0 || sigEnd < 0 || certStart < 0 || certEnd < 0) {
-        return new Result(false, "Signature markers not found");
+        return new Result(false, "Signature markers not found", null);
       }
 
       String textBeforeSig = signedText.substring(0, sigStart);
       String sigB64 = between(signedText, "<START-SIGNATURE>", "</START-SIGNATURE>");
       String certB64 = between(signedText, "<START-CERTIFICATE>", "</START-CERTIFICATE>");
-      if (sigB64 == null || sigB64.isBlank()) return new Result(false, "Empty signature block");
-      if (certB64 == null || certB64.isBlank()) return new Result(false, "Empty certificate block");
+      if (sigB64 == null || sigB64.isBlank()) return new Result(false, "Empty signature block", null);
+      if (certB64 == null || certB64.isBlank()) return new Result(false, "Empty certificate block", null);
 
       byte[] sigBytes = Base64.getDecoder().decode(sigB64.trim());
       byte[] certBytes = Base64.getDecoder().decode(certB64.trim());
       CertificateFactory cf = CertificateFactory.getInstance("X.509");
       X509Certificate cert = (X509Certificate) cf.generateCertificate(new java.io.ByteArrayInputStream(certBytes));
       PublicKey publicKey = cert.getPublicKey();
+      CertInfo certInfo = new CertInfo(
+          cert.getSubjectX500Principal().getName(),
+          cert.getIssuerX500Principal().getName(),
+          cert.getSerialNumber().toString(16),
+          cert.getNotBefore() != null ? cert.getNotBefore().toInstant().toString() : null,
+          cert.getNotAfter() != null ? cert.getNotAfter().toInstant().toString() : null,
+          cert.getSigAlgName(),
+          publicKey != null ? publicKey.getAlgorithm() : null
+      );
 
       String[] candidates;
       if (textBeforeSig.endsWith("\n")) {
@@ -60,15 +79,15 @@ public final class TextVerifyService {
         signature.initVerify(publicKey);
         signature.update(originalText.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         if (signature.verify(sigBytes)) {
-          return new Result(true, "Signature valid");
+          return new Result(true, "Signature valid", certInfo);
         }
       }
 
-      return new Result(false, "Signature invalid or content has been modified");
+      return new Result(false, "Signature invalid or content has been modified", certInfo);
     } catch (Exception e) {
       String msg = e.getMessage();
       if (msg == null || msg.isBlank()) msg = e.getClass().getSimpleName();
-      return new Result(false, msg);
+      return new Result(false, msg, null);
     }
   }
 

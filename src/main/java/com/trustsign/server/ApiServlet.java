@@ -617,7 +617,11 @@ public final class ApiServlet extends HttpServlet {
           }
           String signed = new String(data, StandardCharsets.UTF_8);
           TextVerifyService.Result result = TextVerifyService.verify(signed);
-          writeJson(resp, 200, Map.of("ok", result.ok(), "reason", result.reason()));
+          writeJson(resp, 200, Map.of(
+              "ok", result.ok(),
+              "reason", result.reason(),
+              "certificate", result.certificate()
+          ));
           return;
         }
 
