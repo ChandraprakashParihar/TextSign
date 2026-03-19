@@ -2,6 +2,8 @@ package com.trustsign.server;
 
 import com.trustsign.core.AgentConfig;
 import com.trustsign.core.ConfigLoader;
+import com.trustsign.core.PdfSignerService;
+import com.trustsign.core.PdfVerifyService;
 import com.trustsign.core.Pkcs11Token;
 import com.trustsign.core.OsPkcs11Resolver;
 import com.trustsign.core.SessionManager;
@@ -137,6 +139,29 @@ public final class ApiServlet extends HttpServlet {
     return name.isEmpty() ? "signed.txt" : name;
   }
 
+  private static boolean isPdfUpload(byte[] data, String filename) {
+    if (filename != null && filename.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) {
+      return true;
+    }
+    return data != null
+        && data.length >= 5
+        && data[0] == '%'
+        && data[1] == 'P'
+        && data[2] == 'D'
+        && data[3] == 'F'
+        && data[4] == '-';
+  }
+
+  private static String buildSignedPdfFilename(String filename) {
+    String safe = sanitizeFilename(filename);
+    String base = safe;
+    int dot = safe.lastIndexOf('.');
+    if (dot > 0) {
+      base = safe.substring(0, dot);
+    }
+    return base + "-signed.pdf";
+  }
+
   @Override
   protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
     if (!isClientIpAllowed(req)) {
@@ -247,6 +272,10 @@ public final class ApiServlet extends HttpServlet {
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
+            return;
+          }
+          if (isPdfUpload(data, mp.filename("file"))) {
+            writeJson(resp, 400, Map.of("error", "PDF is not allowed on /auto-sign-text. Use /sign-pdf or /auto-sign-pdf."));
             return;
           }
 
@@ -404,12 +433,134 @@ public final class ApiServlet extends HttpServlet {
           return;
         }
 
+        case "/auto-sign-pdf" -> {
+          var mp = Multipart.read(req, 10 * 1024 * 1024);
+          byte[] data = mp.file("file");
+
+          if (data == null || data.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
+            return;
+          }
+          if (!isPdfUpload(data, mp.filename("file"))) {
+            writeJson(resp, 400, Map.of("error", "Uploaded file is not a PDF"));
+            return;
+          }
+
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null)
+            return;
+
+          String outputDir = cfg.autoSignOutputDir();
+          if (outputDir == null || outputDir.isBlank()) {
+            writeJson(resp, 500,
+                Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
+            return;
+          }
+
+          Path outputBase = null;
+          if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+            outputBase = Paths.get(cfg.outputBaseDir());
+            if (!outputBase.isAbsolute()) {
+              outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+            }
+          }
+          File outDirFile;
+          try {
+            outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+          } catch (SecurityException | IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+            return;
+          }
+
+          char[] pin = resolvePin(cfg);
+          List<String> libs = resolvePkcs11Libraries(cfg);
+          if (libs.isEmpty()) {
+            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            return;
+          }
+
+          Pkcs11Token.Loaded loaded;
+          try {
+            loaded = Pkcs11Token.load(pin, libs);
+          } catch (RuntimeException e) {
+            String detail = buildTokenErrorDetail(e);
+            writeJson(resp, 400, Map.of(
+                "error", "Token load failed",
+                "details", detail));
+            return;
+          }
+
+          KeyStore ks = loaded.keyStore();
+
+          java.util.List<PublicKey> requestedPublicKeys;
+          try {
+            requestedPublicKeys = loadConfiguredPublicKeysOrThrow();
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to load configured public key(s)", "details", safeMsg(e)));
+            return;
+          }
+
+          CertificateSelection selection;
+          try {
+            selection = selectCertificateForPublicKeys(ks, requestedPublicKeys);
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
+            return;
+          }
+
+          if (selection == null || selection.chain == null || selection.chain.length == 0) {
+            writeJson(resp, 400, Map.of("error", "No certificate on token matches any configured public key"));
+            return;
+          }
+
+          String matchedAlias = selection.alias;
+          X509Certificate matchedCert = selection.certificate;
+          Certificate[] chain = selection.chain;
+
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          if (key == null) {
+            writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
+            return;
+          }
+
+          X509Certificate signingCert = matchedCert;
+          X509Certificate[] x509Chain = null;
+          if (chain[0] instanceof X509Certificate) {
+            x509Chain = java.util.Arrays.stream(chain)
+                .filter(c -> c instanceof X509Certificate)
+                .map(c -> (X509Certificate) c)
+                .toArray(X509Certificate[]::new);
+          }
+          CertificateValidator.validateForSigning(signingCert, x509Chain);
+          byte[] signedPdf = PdfSignerService.signPdf(data, key, chain, loaded.provider(), signingCert);
+
+          String inputFilename = mp.filename("file");
+          if (inputFilename == null || inputFilename.isBlank()) {
+            inputFilename = "document.pdf";
+          }
+          outDirFile.mkdirs();
+          File outFile = new File(outDirFile, buildSignedPdfFilename(inputFilename));
+          Files.write(outFile.toPath(), signedPdf);
+
+          writeJson(resp, 200, Map.of(
+              "ok", true,
+              "format", "pdf",
+              "subjectDn", signingCert.getSubjectX500Principal().getName(),
+              "serialNumber", signingCert.getSerialNumber().toString(16),
+              "outputPath", outFile.getAbsolutePath()));
+          return;
+        }
+
         case "/auto-sign-text-cms" -> {
           requireSession(req);
           var mp = Multipart.read(req, 2 * 1024 * 1024);
           byte[] data = mp.file("file");
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
+            return;
+          }
+          if (isPdfUpload(data, mp.filename("file"))) {
+            writeJson(resp, 400, Map.of("error", "PDF is not allowed on /auto-sign-text-cms. Use /sign-pdf or /auto-sign-pdf."));
             return;
           }
           AgentConfig cfg = loadConfig(resp);
@@ -520,6 +671,101 @@ public final class ApiServlet extends HttpServlet {
           return;
         }
 
+        case "/sign-pdf" -> {
+          // requireSession(req);
+          var mp = Multipart.read(req, 10 * 1024 * 1024);
+          byte[] data = mp.file("file");
+          if (data == null || data.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
+            return;
+          }
+          if (!isPdfUpload(data, mp.filename("file"))) {
+            writeJson(resp, 400, Map.of("error", "Uploaded file is not a PDF"));
+            return;
+          }
+
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null)
+            return;
+          char[] pin = resolvePin(cfg);
+          List<String> libs = resolvePkcs11Libraries(cfg);
+          if (libs.isEmpty()) {
+            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            return;
+          }
+
+          Pkcs11Token.Loaded loaded;
+          try {
+            loaded = Pkcs11Token.load(pin, libs);
+          } catch (RuntimeException e) {
+            String detail = buildTokenErrorDetail(e);
+            writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
+            return;
+          }
+
+          KeyStore ks = loaded.keyStore();
+          java.util.List<PublicKey> requestedPublicKeys;
+          try {
+            requestedPublicKeys = loadConfiguredPublicKeysOrThrow();
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to load configured public key(s)", "details", safeMsg(e)));
+            return;
+          }
+          CertificateSelection selection;
+          try {
+            selection = selectCertificateForPublicKeys(ks, requestedPublicKeys);
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
+            return;
+          }
+          if (selection == null || selection.chain == null || selection.chain.length == 0) {
+            writeJson(resp, 400, Map.of("error", "No certificate on token matches any configured public key"));
+            return;
+          }
+
+          String matchedAlias = selection.alias;
+          X509Certificate matchedCert = selection.certificate;
+          Certificate[] chain = selection.chain;
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          if (key == null) {
+            writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
+            return;
+          }
+
+          X509Certificate signingCert = matchedCert;
+          X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
+              ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c)
+                  .toArray(X509Certificate[]::new)
+              : null;
+          CertificateValidator.validateForSigning(signingCert, x509Chain);
+          byte[] signedPdf = PdfSignerService.signPdf(data, key, chain, loaded.provider(), signingCert);
+
+          resp.setStatus(200);
+          resp.setContentType("application/pdf");
+          resp.setHeader("Content-Disposition",
+              "attachment; filename=\"" + buildSignedPdfFilename(mp.filename("file")) + "\"");
+          resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
+          resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
+          resp.getOutputStream().write(signedPdf);
+          return;
+        }
+
+        case "/verify-pdf" -> {
+          var mp = Multipart.read(req, 10 * 1024 * 1024);
+          byte[] data = mp.file("file");
+          if (data == null || data.length == 0) {
+            writeJson(resp, 400, Map.of("ok", false, "reason", "Missing PDF file field: file"));
+            return;
+          }
+          if (!isPdfUpload(data, mp.filename("file"))) {
+            writeJson(resp, 400, Map.of("ok", false, "reason", "Uploaded file is not a PDF"));
+            return;
+          }
+          PdfVerifyService.Result result = PdfVerifyService.verify(data);
+          writeJson(resp, result.ok() ? 200 : 422, result);
+          return;
+        }
+
         case "/sign-text" -> {
           requireSession(req);
 
@@ -527,6 +773,10 @@ public final class ApiServlet extends HttpServlet {
           byte[] data = mp.file("file");
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
+            return;
+          }
+          if (isPdfUpload(data, mp.filename("file"))) {
+            writeJson(resp, 400, Map.of("error", "PDF is not allowed on /sign-text. Use /sign-pdf."));
             return;
           }
 
