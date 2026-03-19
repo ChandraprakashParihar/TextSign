@@ -12,8 +12,10 @@ import java.security.cert.X509Certificate;
 import java.util.Base64;
 
 /**
- * One-off tool to discover which exact content bytes Icegate (or any signed file) signed.
- * Run: ./gradlew test --tests "com.trustsign.tools.DiscoverSignedContentFormat" -Ddiscover.signed.file=g:/pki/testncodeSigned.txt
+ * One-off tool to discover which exact content bytes Icegate (or any signed
+ * file) signed.
+ * Run: ./gradlew test --tests "com.trustsign.tools.DiscoverSignedContentFormat"
+ * -Ddiscover.signed.file=g:/pki/testncodeSigned.txt
  * Or run main with file path as first arg.
  */
 public final class DiscoverSignedContentFormat {
@@ -30,10 +32,14 @@ public final class DiscoverSignedContentFormat {
   }
 
   public static void discover(String signedText) throws Exception {
-    discover(signedText, signedText.substring(0, signedText.indexOf("<START-SIGNATURE>")).getBytes(StandardCharsets.UTF_8));
+    discover(signedText,
+        signedText.substring(0, signedText.indexOf("<START-SIGNATURE>")).getBytes(StandardCharsets.UTF_8));
   }
 
-  /** Call with raw bytes that appear before <START-SIGNATURE> in the file (to try CRLF etc). */
+  /**
+   * Call with raw bytes that appear before <START-SIGNATURE> in the file (to try
+   * CRLF etc).
+   */
   public static void discover(String signedText, byte[] rawContentBeforeSig) throws Exception {
     int sigStart = signedText.indexOf("<START-SIGNATURE>");
     int certStart = signedText.indexOf("<START-CERTIFICATE>");
@@ -55,7 +61,8 @@ public final class DiscoverSignedContentFormat {
     PublicKey publicKey = cert.getPublicKey();
 
     StringBuilder out = new StringBuilder();
-    out.append("Content before <START-SIGNATURE> length: ").append(textBeforeSig.length()).append(" chars, ").append(textBeforeSig.getBytes(StandardCharsets.UTF_8).length).append(" bytes\n");
+    out.append("Content before <START-SIGNATURE> length: ").append(textBeforeSig.length()).append(" chars, ")
+        .append(textBeforeSig.getBytes(StandardCharsets.UTF_8).length).append(" bytes\n");
     out.append("Signature algorithm: SHA256withRSA only\n\n");
 
     String[] variants = {
@@ -68,8 +75,12 @@ public final class DiscoverSignedContentFormat {
     };
     byte[][] variantBytes = {
         textBeforeSig.getBytes(StandardCharsets.UTF_8),
-        textBeforeSig.endsWith("\n") ? textBeforeSig.substring(0, textBeforeSig.length() - 1).getBytes(StandardCharsets.UTF_8) : null,
-        textBeforeSig.endsWith("\r\n") ? textBeforeSig.substring(0, textBeforeSig.length() - 2).getBytes(StandardCharsets.UTF_8) : null,
+        textBeforeSig.endsWith("\n")
+            ? textBeforeSig.substring(0, textBeforeSig.length() - 1).getBytes(StandardCharsets.UTF_8)
+            : null,
+        textBeforeSig.endsWith("\r\n")
+            ? textBeforeSig.substring(0, textBeforeSig.length() - 2).getBytes(StandardCharsets.UTF_8)
+            : null,
         textBeforeSig.replace("\r\n", "\n").replace("\r", "\n").getBytes(StandardCharsets.UTF_8),
         textBeforeSig.replace("\r\n", "\n").replace("\r", "\n").replaceAll("\n$", "").getBytes(StandardCharsets.UTF_8),
         rawContentBeforeSig,
@@ -77,17 +88,20 @@ public final class DiscoverSignedContentFormat {
 
     String algo = "SHA256withRSA";
     for (int i = 0; i < variants.length; i++) {
-      if (variantBytes[i] == null) continue;
+      if (variantBytes[i] == null)
+        continue;
       try {
         Signature sig = Signature.getInstance(algo);
         sig.initVerify(publicKey);
         sig.update(variantBytes[i]);
         boolean ok = sig.verify(sigBytes);
-        out.append(ok ? "  VERIFIES: " : "  no:       ").append(algo).append(" + ").append(variants[i]).append(" (").append(variantBytes[i].length).append(" bytes)\n");
-      } catch (Exception ignored) {}
+        out.append(ok ? "  VERIFIES: " : "  no:       ").append(algo).append(" + ").append(variants[i]).append(" (")
+            .append(variantBytes[i].length).append(" bytes)\n");
+      } catch (Exception ignored) {
+      }
     }
 
-    TextVerifyService.Result r = TextVerifyService.verify(signedText);
+    TextVerifyService.Result r = TextVerifyService.verify(signedText.getBytes(StandardCharsets.UTF_8));
     out.append("\nTextVerifyService.verify() result: ").append(r.ok()).append(" - ").append(r.reason()).append("\n");
     String result = out.toString();
     System.out.print(result);
@@ -101,7 +115,8 @@ public final class DiscoverSignedContentFormat {
   private static String between(String text, String start, String end) {
     int s = text.indexOf(start);
     int e = text.indexOf(end);
-    if (s < 0 || e < 0 || e <= s) return null;
+    if (s < 0 || e < 0 || e <= s)
+      return null;
     return text.substring(s + start.length(), e);
   }
 }

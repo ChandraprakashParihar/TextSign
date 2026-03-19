@@ -47,7 +47,8 @@ public final class ApiServlet extends HttpServlet {
   }
 
   /**
-   * Returns true if the client IP is allowed according to config.allowedClientIps.
+   * Returns true if the client IP is allowed according to
+   * config.allowedClientIps.
    * When allowedClientIps is null or empty, all IPs are allowed.
    */
   private boolean isClientIpAllowed(HttpServletRequest req) {
@@ -158,7 +159,8 @@ public final class ApiServlet extends HttpServlet {
         case "/pkcs11/candidates" -> {
           requireSession(req);
           AgentConfig cfg = loadConfig(resp);
-          if (cfg == null) return;
+          if (cfg == null)
+            return;
           List<String> libs = OsPkcs11Resolver.candidates(cfg);
           List<Map<String, Object>> list = libs.stream()
               .map(p -> Map.<String, Object>of(
@@ -249,11 +251,13 @@ public final class ApiServlet extends HttpServlet {
           }
 
           AgentConfig cfg = loadConfig(resp);
-          if (cfg == null) return;
+          if (cfg == null)
+            return;
 
           String outputDir = cfg.autoSignOutputDir();
           if (outputDir == null || outputDir.isBlank()) {
-            writeJson(resp, 500, Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
+            writeJson(resp, 500,
+                Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
             return;
           }
 
@@ -286,8 +290,7 @@ public final class ApiServlet extends HttpServlet {
             String detail = buildTokenErrorDetail(e);
             writeJson(resp, 400, Map.of(
                 "error", "Token load failed",
-                "details", detail
-            ));
+                "details", detail));
             return;
           }
 
@@ -324,20 +327,26 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          // Normalize line endings to \n so signing is consistent (Windows CRLF vs Unix LF).
+          // Normalize line endings to \n so signing is consistent (Windows CRLF vs Unix
+          // LF).
           String originalText = new String(data, java.nio.charset.StandardCharsets.UTF_8);
           String normalizedText = originalText.replace("\r\n", "\n").replace("\r", "\n");
-          // Sign exactly the bytes that will appear before <START-SIGNATURE> in the output file.
-          // If trustsign.signContentWithoutTrailingNewline=true, sign without the trailing newline (for verifiers that strip it).
+          // Sign exactly the bytes that will appear before <START-SIGNATURE> in the
+          // output file.
+          // If trustsign.signContentWithoutTrailingNewline=true, sign without the
+          // trailing newline (for verifiers that strip it).
           byte[] contentToSign;
           if (Boolean.getBoolean("trustsign.signContentWithoutTrailingNewline")) {
             String contentForSigning = normalizedText.endsWith("\n")
-                ? normalizedText.substring(0, normalizedText.length() - 1) : normalizedText;
+                ? normalizedText.substring(0, normalizedText.length() - 1)
+                : normalizedText;
             contentToSign = contentForSigning.getBytes(java.nio.charset.StandardCharsets.UTF_8);
           } else {
             byte[] normBytes = normalizedText.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            contentToSign = normalizedText.endsWith("\n") ? normBytes : java.util.Arrays.copyOf(normBytes, normBytes.length + 1);
-            if (!normalizedText.endsWith("\n")) contentToSign[normBytes.length] = '\n';
+            contentToSign = normalizedText.endsWith("\n") ? normBytes
+                : java.util.Arrays.copyOf(normBytes, normBytes.length + 1);
+            if (!normalizedText.endsWith("\n"))
+              contentToSign[normBytes.length] = '\n';
           }
           // SHA256withRSA only (Bouncy Castle / PKCS#11).
           byte[] sigBytes = TextSignerService.signRawSha256WithRsa(contentToSign, key, loaded.provider());
@@ -356,7 +365,8 @@ public final class ApiServlet extends HttpServlet {
           String certB64 = Base64.getEncoder().encodeToString(signingCert.getEncoded());
 
           String signerVersion = (cfg.signerVersion() != null && !cfg.signerVersion().isBlank())
-              ? cfg.signerVersion() : "TrustSign";
+              ? cfg.signerVersion()
+              : "TrustSign";
 
           StringBuilder sb = new StringBuilder();
           sb.append(normalizedText);
@@ -384,15 +394,13 @@ public final class ApiServlet extends HttpServlet {
           java.nio.file.Files.writeString(
               outFile.toPath(),
               sb.toString(),
-              java.nio.charset.StandardCharsets.UTF_8
-          );
+              java.nio.charset.StandardCharsets.UTF_8);
 
           writeJson(resp, 200, Map.of(
               "ok", true,
               "subjectDn", signingCert != null ? signingCert.getSubjectX500Principal().getName() : "",
               "serialNumber", signingCert != null ? signingCert.getSerialNumber().toString(16) : "",
-              "outputPath", outFile.getAbsolutePath()
-          ));
+              "outputPath", outFile.getAbsolutePath()));
           return;
         }
 
@@ -405,11 +413,13 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
           AgentConfig cfg = loadConfig(resp);
-          if (cfg == null) return;
+          if (cfg == null)
+            return;
 
           String outputDir = cfg.autoSignOutputDir();
           if (outputDir == null || outputDir.isBlank()) {
-            writeJson(resp, 500, Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
+            writeJson(resp, 500,
+                Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
             return;
           }
 
@@ -472,21 +482,26 @@ public final class ApiServlet extends HttpServlet {
           String normalizedText = originalText.replace("\r\n", "\n").replace("\r", "\n");
           byte[] contentToSign = normalizedText.endsWith("\n")
               ? normalizedText.getBytes(StandardCharsets.UTF_8)
-              : java.util.Arrays.copyOf(normalizedText.getBytes(StandardCharsets.UTF_8), normalizedText.getBytes(StandardCharsets.UTF_8).length + 1);
-          if (!normalizedText.endsWith("\n")) contentToSign[normalizedText.getBytes(StandardCharsets.UTF_8).length] = '\n';
+              : java.util.Arrays.copyOf(normalizedText.getBytes(StandardCharsets.UTF_8),
+                  normalizedText.getBytes(StandardCharsets.UTF_8).length + 1);
+          if (!normalizedText.endsWith("\n"))
+            contentToSign[normalizedText.getBytes(StandardCharsets.UTF_8).length] = '\n';
           byte[] cmsBytes = TextSignerService.signDetached(contentToSign, key, chain, loaded.provider());
           String cmsB64 = Base64.getEncoder().encodeToString(cmsBytes);
           X509Certificate signingCert = matchedCert;
           X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
-              ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c).toArray(X509Certificate[]::new)
+              ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c)
+                  .toArray(X509Certificate[]::new)
               : null;
           CertificateValidator.validateForSigning(signingCert, x509Chain);
           StringBuilder sb = new StringBuilder();
           sb.append(normalizedText);
-          if (!normalizedText.endsWith("\n")) sb.append("\n");
+          if (!normalizedText.endsWith("\n"))
+            sb.append("\n");
           sb.append("<START-CMS-SIGNATURE>").append(cmsB64).append("</START-CMS-SIGNATURE>\n");
           String inputFilename = mp.filename("file");
-          if (inputFilename == null || inputFilename.isBlank()) inputFilename = "text.txt";
+          if (inputFilename == null || inputFilename.isBlank())
+            inputFilename = "text.txt";
           outDirFile.mkdirs();
           String baseName = inputFilename;
           String ext = "";
@@ -501,8 +516,7 @@ public final class ApiServlet extends HttpServlet {
               "ok", true,
               "subjectDn", signingCert.getSubjectX500Principal().getName(),
               "serialNumber", signingCert.getSerialNumber().toString(16),
-              "outputPath", outFile.getAbsolutePath()
-          ));
+              "outputPath", outFile.getAbsolutePath()));
           return;
         }
 
@@ -517,7 +531,8 @@ public final class ApiServlet extends HttpServlet {
           }
 
           AgentConfig cfg = loadConfig(resp);
-          if (cfg == null) return;
+          if (cfg == null)
+            return;
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
@@ -566,59 +581,112 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
-          // Same signing logic as /auto-sign-text: normalize line endings, sign content that appears before <START-SIGNATURE>.
+          // Same signing logic as /auto-sign-text: normalize line endings, sign content
+          // that appears before <START-SIGNATURE>.
           String originalText = new String(data, StandardCharsets.UTF_8);
           String normalizedText = originalText.replace("\r\n", "\n").replace("\r", "\n");
           byte[] contentToSign;
           if (Boolean.getBoolean("trustsign.signContentWithoutTrailingNewline")) {
             String contentForSigning = normalizedText.endsWith("\n")
-                ? normalizedText.substring(0, normalizedText.length() - 1) : normalizedText;
+                ? normalizedText.substring(0, normalizedText.length() - 1)
+                : normalizedText;
             contentToSign = contentForSigning.getBytes(StandardCharsets.UTF_8);
           } else {
             byte[] normBytes = normalizedText.getBytes(StandardCharsets.UTF_8);
-            contentToSign = normalizedText.endsWith("\n") ? normBytes : java.util.Arrays.copyOf(normBytes, normBytes.length + 1);
-            if (!normalizedText.endsWith("\n")) contentToSign[normBytes.length] = '\n';
+            contentToSign = normalizedText.endsWith("\n") ? normBytes
+                : java.util.Arrays.copyOf(normBytes, normBytes.length + 1);
+            if (!normalizedText.endsWith("\n"))
+              contentToSign[normBytes.length] = '\n';
           }
           byte[] sigBytes = TextSignerService.signRawSha256WithRsa(contentToSign, key, loaded.provider());
           String sigB64 = Base64.getEncoder().encodeToString(sigBytes);
 
           X509Certificate signingCert = matchedCert;
           X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
-              ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c).toArray(X509Certificate[]::new)
+              ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c)
+                  .toArray(X509Certificate[]::new)
               : null;
           CertificateValidator.validateForSigning(signingCert, x509Chain);
           String certB64 = Base64.getEncoder().encodeToString(signingCert.getEncoded());
 
           String signerVersion = (cfg.signerVersion() != null && !cfg.signerVersion().isBlank())
-              ? cfg.signerVersion() : "TrustSign";
+              ? cfg.signerVersion()
+              : "TrustSign";
 
           StringBuilder sb = new StringBuilder();
           sb.append(normalizedText);
-          if (!normalizedText.endsWith("\n")) sb.append("\n");
+          if (!normalizedText.endsWith("\n"))
+            sb.append("\n");
           sb.append("<START-SIGNATURE>").append(sigB64).append("</START-SIGNATURE>\n");
           sb.append("<START-CERTIFICATE>").append(certB64).append("</START-CERTIFICATE>\n");
           sb.append("<SIGNER-VERSION>").append(signerVersion).append("</SIGNER-VERSION>\n");
 
           resp.setStatus(200);
           resp.setContentType("text/plain; charset=UTF-8");
-          resp.setHeader("Content-Disposition", "attachment; filename=\"" + sanitizeFilename(mp.filename("file")) + "\"");
+          resp.setHeader("Content-Disposition",
+              "attachment; filename=\"" + sanitizeFilename(mp.filename("file")) + "\"");
           resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
           resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
           resp.getOutputStream().write(sb.toString().getBytes(StandardCharsets.UTF_8));
           return;
         }
 
+        // ── /verify-text
+        // ──────────────────────────────────────────────────────────
+        // Accepts only ONE file: file
+        // Returns: ok, reason, and full certificate details
         case "/verify-text" -> {
-          var mp = Multipart.read(req, 2 * 1024 * 1024);
-          byte[] data = mp.file("file");
-          if (data == null || data.length == 0) {
-            writeJson(resp, 400, Map.of("ok", false, "reason", "Missing text file field: file"));
+          var mp = Multipart.read(req, 5 * 1024 * 1024);
+
+          byte[] signedFileBytes = mp.file("file");
+
+          if (signedFileBytes == null || signedFileBytes.length == 0) {
+            writeJson(resp, 400, Map.of(
+                "ok", false,
+                "reason", "Missing file field: file"));
             return;
           }
-          String signed = new String(data, StandardCharsets.UTF_8);
-          TextVerifyService.Result result = TextVerifyService.verify(signed);
-          writeJson(resp, 200, Map.of("ok", result.ok(), "reason", result.reason()));
-          return;
+
+          TextVerifyService.Result result = TextVerifyService.verify(signedFileBytes);
+
+          // Build response — always include cert details if available
+          var body = new java.util.LinkedHashMap<String, Object>();
+          body.put("ok", result.ok());
+          body.put("reason", result.reason());
+
+          if (result.certificate() != null) {
+            var cert = result.certificate();
+            var certMap = new java.util.LinkedHashMap<String, Object>();
+            certMap.put("subject", cert.subject());
+            certMap.put("issuer", cert.issuer());
+            certMap.put("serialNumber", cert.serialNumber());
+            certMap.put("validFrom", cert.validFrom());
+            certMap.put("validTo", cert.validTo());
+            certMap.put("algorithm", cert.algorithm());
+            if (cert.email() != null) {
+              certMap.put("email", cert.email());
+            }
+            body.put("certificate", certMap);
+          }
+
+          writeJson(resp, result.ok() ? 200 : 422, body);
+        }
+
+        // ── /debug-bytes — REMOVE BEFORE PRODUCTION
+        // ───────────────────────────────────
+        case "/debug-bytes" -> {
+          var mp = Multipart.read(req, 5 * 1024 * 1024);
+
+          byte[] signedFileBytes = mp.file("signedFile");
+
+          if (signedFileBytes == null || signedFileBytes.length == 0) {
+            writeJson(resp, 400, Map.of(
+                "ok", false,
+                "reason", "Missing file field: signedFile"));
+            return;
+          }
+
+          writeJson(resp, 200, TextVerifyService.debugBytes(signedFileBytes));
         }
 
         case "/analyze-signed-file" -> {
@@ -657,13 +725,16 @@ public final class ApiServlet extends HttpServlet {
   }
 
   private static String normPath(String pathInfo) {
-    if (pathInfo == null || pathInfo.isBlank()) return "";
+    if (pathInfo == null || pathInfo.isBlank())
+      return "";
     return pathInfo.startsWith("/") ? pathInfo : "/" + pathInfo;
   }
 
   /**
-   * On Windows, searches common locations for PKCS#11 DLLs (pkcs11.dll or *pkcs*.dll / *p11*.dll)
-   * so the user can set preferredLibrary if the driver is installed in a non-standard path.
+   * On Windows, searches common locations for PKCS#11 DLLs (pkcs11.dll or
+   * *pkcs*.dll / *p11*.dll)
+   * so the user can set preferredLibrary if the driver is installed in a
+   * non-standard path.
    */
   private static List<Map<String, Object>> discoverPkcs11OnWindows() {
     List<Map<String, Object>> out = new java.util.ArrayList<>();
@@ -678,9 +749,11 @@ public final class ApiServlet extends HttpServlet {
     };
 
     for (String rootStr : roots) {
-      if (rootStr == null || rootStr.isBlank()) continue;
+      if (rootStr == null || rootStr.isBlank())
+        continue;
       Path root = Paths.get(rootStr);
-      if (!Files.isDirectory(root)) continue;
+      if (!Files.isDirectory(root))
+        continue;
 
       if (rootStr.contains("System32") || rootStr.contains("SysWOW64")) {
         addDllsInDir(root, seen, out);
@@ -690,18 +763,23 @@ public final class ApiServlet extends HttpServlet {
       int count = 0;
       try (var stream = Files.list(root)) {
         for (Path dir : stream.toList()) {
-          if (count >= 100) break;
-          if (!Files.isDirectory(dir)) continue;
+          if (count >= 100)
+            break;
+          if (!Files.isDirectory(dir))
+            continue;
           count++;
           for (String rel : new String[] { "", "bin/", "x64/", "x86/" }) {
             Path base = rel.isEmpty() ? dir : dir.resolve(rel);
-            if (!Files.isDirectory(base) && !rel.isEmpty()) continue;
-            if (rel.isEmpty() && !Files.isDirectory(base)) continue;
+            if (!Files.isDirectory(base) && !rel.isEmpty())
+              continue;
+            if (rel.isEmpty() && !Files.isDirectory(base))
+              continue;
             addDllsInDir(base, seen, out);
           }
         }
-      
-      } catch (Exception ignore) { }
+
+      } catch (Exception ignore) {
+      }
     }
     return out;
   }
@@ -709,9 +787,11 @@ public final class ApiServlet extends HttpServlet {
   private static void addDllsInDir(Path dir, java.util.Set<String> seen, List<Map<String, Object>> out) {
     try (var stream = Files.list(dir)) {
       for (Path p : stream.toList()) {
-        if (!Files.isRegularFile(p)) continue;
+        if (!Files.isRegularFile(p))
+          continue;
         String name = p.getFileName().toString().toLowerCase();
-        if (!name.endsWith(".dll")) continue;
+        if (!name.endsWith(".dll"))
+          continue;
         if (name.contains("pkcs") || name.contains("p11") || name.equals("pkcs11.dll")) {
           String path = p.toAbsolutePath().toString();
           if (seen.add(path)) {
@@ -719,8 +799,9 @@ public final class ApiServlet extends HttpServlet {
           }
         }
       }
-    
-    } catch (Exception ignore) { }
+
+    } catch (Exception ignore) {
+    }
   }
 
   private void writeJson(HttpServletResponse resp, int status, Object body) throws IOException {
@@ -732,7 +813,8 @@ public final class ApiServlet extends HttpServlet {
   /**
    * Loads one or more signer public keys from a configured location on disk.
    *
-   * Resolution order: trustsign.publicKey.path, config/public-key.pem, ../config/public-key.pem.
+   * Resolution order: trustsign.publicKey.path, config/public-key.pem,
+   * ../config/public-key.pem.
    * The target file may contain:
    * - a single PEM encoded public key ("-----BEGIN PUBLIC KEY-----")
    * - one or more PEM encoded X.509 certificates ("-----BEGIN CERTIFICATE-----")
@@ -750,14 +832,14 @@ public final class ApiServlet extends HttpServlet {
         if (f2.exists()) {
           path = f2.getPath();
         } else {
-              
-          throw new IOException("No configured public key file found (checked config/public-key.pem and ../config/public-key.pem)");
+
+          throw new IOException(
+              "No configured public key file found (checked config/public-key.pem and ../config/public-key.pem)");
         }
       }
     }
     String pem = java.nio.file.Files.readString(
-        java.nio.file.Paths.get(path),    java.nio.charset.StandardCharsets.UTF_8
-    );
+        java.nio.file.Paths.get(path), java.nio.charset.StandardCharsets.UTF_8);
     java.util.List<PublicKey> keys = parsePublicKeys(pem);
     if (keys.isEmpty()) {
       throw new IOException("Configured public key file did not contain any usable public keys");
@@ -781,8 +863,8 @@ public final class ApiServlet extends HttpServlet {
           .replaceAll("\\s", "");
       byte[] certDer = java.util.Base64.getDecoder().decode(certPem);
       java.security.cert.CertificateFactory cf = java.security.cert.CertificateFactory.getInstance("X.509");
-      java.security.cert.X509Certificate cert =
-          (java.security.cert.X509Certificate) cf.generateCertificate(new java.io.ByteArrayInputStream(certDer));
+      java.security.cert.X509Certificate cert = (java.security.cert.X509Certificate) cf
+          .generateCertificate(new java.io.ByteArrayInputStream(certDer));
       return cert.getPublicKey();
     }
 
@@ -800,7 +882,8 @@ public final class ApiServlet extends HttpServlet {
 
   /**
    * Parses one or more public keys from the given input.
-   * Supports multiple PEM blocks (certificates and/or public keys) in a single file
+   * Supports multiple PEM blocks (certificates and/or public keys) in a single
+   * file
    * as well as a single base64-encoded public key without PEM headers.
    */
   private static java.util.List<PublicKey> parsePublicKeys(String pemOrBase64) throws Exception {
@@ -811,7 +894,8 @@ public final class ApiServlet extends HttpServlet {
     }
 
     String upper = trimmed.toUpperCase(java.util.Locale.ROOT);
-    boolean hasPemMarkers = upper.contains("-----BEGIN CERTIFICATE-----") || upper.contains("-----BEGIN PUBLIC KEY-----");
+    boolean hasPemMarkers = upper.contains("-----BEGIN CERTIFICATE-----")
+        || upper.contains("-----BEGIN PUBLIC KEY-----");
 
     if (!hasPemMarkers) {
       // Single non-PEM base64-encoded key.
@@ -879,13 +963,13 @@ public final class ApiServlet extends HttpServlet {
   }
 
   /**
-   * Selects the first certificate on the token whose public key matches any of the
+   * Selects the first certificate on the token whose public key matches any of
+   * the
    * configured public keys. Returns null if no matching certificate is found.
    */
   private static CertificateSelection selectCertificateForPublicKeys(
       KeyStore ks,
-      java.util.List<PublicKey> requestedPublicKeys
-  ) throws Exception {
+      java.util.List<PublicKey> requestedPublicKeys) throws Exception {
     if (requestedPublicKeys == null || requestedPublicKeys.isEmpty()) {
       throw new IllegalArgumentException("No configured public keys");
     }
@@ -908,8 +992,10 @@ public final class ApiServlet extends HttpServlet {
   }
 
   /**
-   * Resolves the token PIN from: 1) env TRUSTSIGN_TOKEN_PIN, 2) config pkcs11.pin.
-   * Client can set either in config.json ("pkcs11": { "pin": "their-pin" }) or via environment variable.
+   * Resolves the token PIN from: 1) env TRUSTSIGN_TOKEN_PIN, 2) config
+   * pkcs11.pin.
+   * Client can set either in config.json ("pkcs11": { "pin": "their-pin" }) or
+   * via environment variable.
    */
   private char[] resolvePin(AgentConfig cfg) {
     String pinStr = System.getenv("TRUSTSIGN_TOKEN_PIN");
@@ -927,38 +1013,44 @@ public final class ApiServlet extends HttpServlet {
 
   private File resolveConfigFile() {
     File f1 = new File("config/config.json");
-    if (f1.exists()) return f1;
+    if (f1.exists())
+      return f1;
     File f2 = new File("../config/config.json");
-    if (f2.exists()) return f2;
+    if (f2.exists())
+      return f2;
     return f1;
   }
 
-  private static List<String>
-      resolvePkcs11Libraries(AgentConfig cfg) throws IOException {
-    if (cfg.pkcs11() == null) return List.of();
+  private static List<String> resolvePkcs11Libraries(AgentConfig cfg) throws IOException {
+    if (cfg.pkcs11() == null)
+      return List.of();
     return OsPkcs11Resolver.candidates(cfg);
   }
 
   private String safeMsg(Exception e) {
     String msg = e.getMessage();
-    if (msg == null || msg.isBlank()) return e.getClass().getSimpleName();
-    if (msg.length() > 300) return msg.substring(0, 300);
+    if (msg == null || msg.isBlank())
+      return e.getClass().getSimpleName();
+    if (msg.length() > 300)
+      return msg.substring(0, 300);
     return msg;
   }
 
   private static String buildTokenErrorDetail(RuntimeException e) {
     Throwable root = e;
-      
-    while (root.getCause() != null) root = root.getCause();
+
+    while (root.getCause() != null)
+      root = root.getCause();
     String causeMsg = root.getMessage();
     if (causeMsg != null && !causeMsg.isBlank()) {
       String out = causeMsg.length() > 400 ? causeMsg.substring(0, 400) : causeMsg;
-      if (root != e) return out + " (from " + root.getClass().getSimpleName() + ")";
+      if (root != e)
+        return out + " (from " + root.getClass().getSimpleName() + ")";
       return out;
     }
     String topMsg = e.getMessage();
-    if (topMsg != null && !topMsg.isBlank()) return topMsg;
+    if (topMsg != null && !topMsg.isBlank())
+      return topMsg;
     return "Connect your PKCS#11 token, check the library path and PIN, and try again.";
   }
 }
-

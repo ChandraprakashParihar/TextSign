@@ -1,8 +1,0 @@
-Before first run: set your token PIN so TrustSign can use the key.
-
-Option 1 - Edit config.json:
-  Open config\config.json and set "pin" inside "pkcs11" to your PIN, e.g.:
-  "pkcs11": { "pin": "your-token-pin", ... }
-
-Option 2 - Environment variable:
-  Set TRUSTSIGN_TOKEN_PIN=your-token-pin before running (e.g. in a batch file).

@@ -1,14 +1,10 @@
 package com.trustsign.core;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.trustsign.core.SignedFileAnalyzer;
 import com.trustsign.tools.DiscoverSignedContentFormat;
 import org.junit.jupiter.api.Test;
-
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class TextVerifyServiceTest {
@@ -22,14 +18,14 @@ class TextVerifyServiceTest {
 
   @Test
   void verifyReturnsFalseForEmptyString() {
-    TextVerifyService.Result r = TextVerifyService.verify("");
+    TextVerifyService.Result r = TextVerifyService.verify("".getBytes(StandardCharsets.UTF_8));
     assertFalse(r.ok());
     assertTrue(r.reason().toLowerCase().contains("empty"));
   }
 
   @Test
   void verifyReturnsFalseWhenSignatureMarkersMissing() {
-    TextVerifyService.Result r = TextVerifyService.verify("just some text\nno signature here");
+    TextVerifyService.Result r = TextVerifyService.verify("just some text\nno signature here".getBytes(StandardCharsets.UTF_8));
     assertFalse(r.ok());
     assertTrue(r.reason().toLowerCase().contains("marker") || r.reason().toLowerCase().contains("signature"));
   }
@@ -37,7 +33,7 @@ class TextVerifyServiceTest {
   @Test
   void verifyReturnsFalseWhenSignatureBlockEmpty() {
     String text = "hello\n<START-SIGNATURE></START-SIGNATURE>\n<START-CERTIFICATE>invalid</START-CERTIFICATE>\n";
-    TextVerifyService.Result r = TextVerifyService.verify(text);
+    TextVerifyService.Result r = TextVerifyService.verify(text.getBytes(StandardCharsets.UTF_8));
     assertFalse(r.ok());
   }
 

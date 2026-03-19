@@ -126,7 +126,7 @@ public final class SignedFileAnalyzer {
       }
     }
 
-    TextVerifyService.Result standardResult = TextVerifyService.verify(signedText);
+    TextVerifyService.Result standardResult = TextVerifyService.verify(signedText.getBytes(StandardCharsets.UTF_8));
 
     return new Result(
         "raw",
