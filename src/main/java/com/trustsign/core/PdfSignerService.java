@@ -19,8 +19,10 @@ import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.logging.Logger;
 
 public final class PdfSignerService {
+  private static final Logger LOG = Logger.getLogger(PdfSignerService.class.getName());
   private static final DateTimeFormatter TS_FMT = DateTimeFormatter
       .ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'")
       .withZone(ZoneOffset.UTC);
@@ -32,7 +34,8 @@ public final class PdfSignerService {
       Provider p11Provider,
       X509Certificate signingCert,
       String reason,
-      String location) throws Exception {
+      String location,
+      java.util.List<Integer> stampPageIndices) throws Exception {
     if (pdfBytes == null || pdfBytes.length == 0) {
       throw new IllegalArgumentException("pdfBytes is empty");
     }
@@ -55,7 +58,7 @@ public final class PdfSignerService {
       }
 
       Instant now = Instant.now();
-      addVisualSignatureStamp(doc, signingCert, now, reason, location);
+      addVisualSignatureStamp(doc, signingCert, now, reason, location, stampPageIndices);
 
       PDSignature signature = new PDSignature();
       signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
@@ -88,7 +91,9 @@ public final class PdfSignerService {
       doc.addSignature(signature, sigImpl, options);
 
       try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-        doc.saveIncremental(out);
+        // Use full save so all page content updates (multi-page stamping)
+        // are persisted into the signed PDF.
+        doc.save(out);
         return out.toByteArray();
       } finally {
         options.close();
@@ -101,62 +106,95 @@ public final class PdfSignerService {
       X509Certificate cert,
       Instant signedAt,
       String reason,
-      String location) throws Exception {
-    PDPage firstPage = doc.getPage(0);
-    PDRectangle mediaBox = firstPage.getMediaBox();
-
-    float boxWidth = (float) (mediaBox.getWidth() * 0.3);
-    float boxHeight = (float) (mediaBox.getHeight() * 0.08);
-    float margin = 24f;
-    float contentPad = 4f;
-    float x = mediaBox.getUpperRightX() - boxWidth - margin;
-    float y = margin;
-
+      String location,
+      java.util.List<Integer> stampPageIndices) throws Exception {
     String subject = extractDisplaySubject(cert);
     String when = TS_FMT.format(signedAt);
 
-    try (PDPageContentStream cs = new PDPageContentStream(
-        doc,
-        firstPage,
-        PDPageContentStream.AppendMode.APPEND,
-        true,
-        true)) {
-      cs.setStrokingColor(0.1f, 0.55f, 0.2f);
-      cs.setLineWidth(1.5f);
-      cs.addRect(x, y, boxWidth, boxHeight);
-      cs.stroke();
+    java.util.List<Integer> resolvedPages = resolveStampPages(doc, stampPageIndices);
+    LOG.info("PDF stamp pages resolved: " + resolvedPages);
+    for (Integer pageIndex : resolvedPages) {
+      PDPage page = doc.getPage(pageIndex);
+      PDRectangle mediaBox = page.getMediaBox();
 
-      cs.setNonStrokingColor(0.1f, 0.65f, 0.22f);
-      cs.setLineWidth(3.2f);
+      float boxWidth = (float) (mediaBox.getWidth() * 0.3);
+      float boxHeight = (float) (mediaBox.getHeight() * 0.08);
+      float margin = 24f;
+      float contentPad = 4f;
+      float x = mediaBox.getUpperRightX() - boxWidth - margin;
+      float y = margin;
       float contentLeftX = x + contentPad;
       float contentTopY = y + boxHeight - contentPad;
+
       float markerCenterX = x + (boxWidth / 2f);
       float markerCenterY = y + (boxHeight * 0.58f);
-      cs.moveTo(markerCenterX - 12f, markerCenterY + 2f);
-      cs.lineTo(markerCenterX - 3f, markerCenterY - 9f);
-      cs.lineTo(markerCenterX + 13f, markerCenterY + 10f);
-      cs.stroke();
 
-      writeLineBold(cs, "Signature Verified", contentLeftX, contentTopY - 9f);
+      try (PDPageContentStream cs = new PDPageContentStream(
+          doc,
+          page,
+          PDPageContentStream.AppendMode.APPEND,
+          true,
+          true)) {
+        cs.setStrokingColor(0.1f, 0.55f, 0.2f);
+        cs.setLineWidth(1.5f);
+        cs.addRect(x, y, boxWidth, boxHeight);
+        cs.stroke();
 
-      float textY = contentTopY - 20f;
-      for (String line : wrapSubjectLines(subject, 40)) {
-        writeLine(cs, line, x + contentPad, textY);
-        textY -= 6.5f;
+        cs.setNonStrokingColor(0.1f, 0.65f, 0.22f);
+        cs.setLineWidth(3.2f);
+        cs.moveTo(markerCenterX - 12f, markerCenterY + 2f);
+        cs.lineTo(markerCenterX - 3f, markerCenterY - 9f);
+        cs.lineTo(markerCenterX + 13f, markerCenterY + 10f);
+        cs.stroke();
+
+        writeLineBold(cs, "Signature Verified", contentLeftX, contentTopY - 9f);
+
+        float textY = contentTopY - 20f;
+        for (String line : wrapSubjectLines(subject, 40)) {
+          writeLine(cs, line, x + contentPad, textY);
+          textY -= 6.5f;
+        }
+        float detailsTopY = Math.max(y + contentPad + 8f, textY - 0.5f);
+        writeLine(cs, when, x + contentPad, detailsTopY);
+        float footerY = detailsTopY - 6.5f;
+        if (reason != null && !reason.isBlank()) {
+          writeLine(cs, "Reason: " + reason.trim(), x + contentPad, footerY);
+          footerY -= 6.5f;
+        }
+        if (location != null && !location.isBlank()) {
+          writeLine(cs, "Location: " + location.trim(), x + contentPad, footerY);
+          footerY -= 6.5f;
+        }
+        writeLine(cs, "Verified by TrustSign", x + contentPad, footerY);
       }
-      float detailsTopY = Math.max(y + contentPad + 8f, textY - 0.5f);
-      writeLine(cs, when, x + contentPad, detailsTopY);
-      float footerY = detailsTopY - 6.5f;
-      if (reason != null && !reason.isBlank()) {
-        writeLine(cs, "Reason: " + reason.trim(), x + contentPad, footerY);
-        footerY -= 6.5f;
-      }
-      if (location != null && !location.isBlank()) {
-        writeLine(cs, "Location: " + location.trim(), x + contentPad, footerY);
-        footerY -= 6.5f;
-      }
-      writeLine(cs, "Verified by TrustSign", x + contentPad, footerY);
     }
+  }
+
+  private static java.util.List<Integer> resolveStampPages(
+      PDDocument doc,
+      java.util.List<Integer> stampPageIndices) {
+    int pageCount = doc.getNumberOfPages();
+    if (stampPageIndices == null || stampPageIndices.isEmpty()) {
+      return java.util.List.of(0);
+    }
+    if (stampPageIndices.contains(-1)) {
+      java.util.List<Integer> all = new java.util.ArrayList<>();
+      for (int i = 0; i < pageCount; i++) {
+        all.add(i);
+      }
+      return all;
+    }
+    java.util.Set<Integer> unique = new java.util.LinkedHashSet<>();
+    for (Integer idx : stampPageIndices) {
+      if (idx == null) continue;
+      if (idx >= 0 && idx < pageCount) {
+        unique.add(idx);
+      }
+    }
+    if (unique.isEmpty()) {
+      return java.util.List.of(0);
+    }
+    return new java.util.ArrayList<>(unique);
   }
 
   private static void writeLine(PDPageContentStream cs, String value, float x, float y) throws Exception {

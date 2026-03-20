@@ -162,6 +162,79 @@ public final class ApiServlet extends HttpServlet {
     return base + "-signed.pdf";
   }
 
+  private static boolean parseBooleanLoose(String v) {
+    if (v == null) return false;
+    String t = v.trim().toLowerCase(java.util.Locale.ROOT);
+    return t.equals("true") || t.equals("1") || t.equals("yes") || t.equals("y");
+  }
+
+  private static Integer parsePositiveInt(String v) {
+    if (v == null) return null;
+    String t = v.trim();
+    if (t.isEmpty()) return null;
+    try {
+      int n = Integer.parseInt(t);
+      return n > 0 ? n : null;
+    } catch (Exception ignore) {
+      return null;
+    }
+  }
+
+  /**
+   * Parses comma-separated 1-based page numbers (e.g. "1,3,5") into 0-based indices.
+   */
+  private static java.util.List<Integer> parsePagesCsv1Based(String pagesCsv) {
+    if (pagesCsv == null || pagesCsv.isBlank()) {
+      return java.util.List.of();
+    }
+    java.util.List<Integer> out = new java.util.ArrayList<>();
+    for (String part : pagesCsv.split(",")) {
+      Integer p1 = parsePositiveInt(part);
+      if (p1 != null) {
+        out.add(p1 - 1);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Resolves which PDF pages should get the visible stamp.
+   * - `pages`: comma-separated list of 1-based page numbers (e.g. "1,3,5") overrides everything else
+   * - `allPages`: if true, stamps all pages
+   * - `page` or `startPage`: stamps only that page (1-based)
+   * - default: first page (page 1)
+   */
+  private static java.util.List<Integer> resolvePdfStampPages(Multipart.Data mp) {
+    String pagesCsv = mp.field("pages");
+    if (pagesCsv != null && !pagesCsv.isBlank()) {
+      java.util.List<Integer> pages = parsePagesCsv1Based(pagesCsv);
+      return pages.isEmpty() ? java.util.List.of(0) : pages;
+    }
+
+    String allPagesStr = mp.field("allPages");
+    if (allPagesStr == null) {
+      // Some clients may send text fields as "file" parts
+      byte[] ab = mp.file("allPages");
+      if (ab != null && ab.length > 0) {
+        allPagesStr = new String(ab, java.nio.charset.StandardCharsets.UTF_8);
+      }
+    }
+    boolean allPages = parseBooleanLoose(allPagesStr);
+    if (allPages) {
+      return java.util.List.of(-1);
+    }
+
+    Integer page1 = parsePositiveInt(mp.field("page"));
+    if (page1 == null) {
+      page1 = parsePositiveInt(mp.field("startPage"));
+    }
+    if (page1 != null) {
+      return java.util.List.of(page1 - 1);
+    }
+
+    return java.util.List.of(0);
+  }
+
   @Override
   protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
     if (!isClientIpAllowed(req)) {
@@ -452,16 +525,7 @@ public final class ApiServlet extends HttpServlet {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
-
-          LOG.info("multipart fields keys=" + (mp.fields() != null ? mp.fields().keySet() : "null")
-              + ", file keys=" + (mp.fileNames() != null ? mp.fileNames().keySet() : "null"));
-          LOG.info("reason(raw field)=" + mp.field("reason") + ", reason(raw file)="
-              + (mp.file("reason") != null ? ("len=" + mp.file("reason").length) : "null"));
-          LOG.info("location(raw field)=" + mp.field("location") + ", location(raw file)="
-              + (mp.file("location") != null ? ("len=" + mp.file("location").length) : "null"));
-
-          LOG.info("reason: " + reason);
-          LOG.info("location: " + location);
+          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -558,7 +622,15 @@ public final class ApiServlet extends HttpServlet {
                 .toArray(X509Certificate[]::new);
           }
           CertificateValidator.validateForSigning(signingCert, x509Chain);
-          byte[] signedPdf = PdfSignerService.signPdf(data, key, chain, loaded.provider(), signingCert, reason, location);
+          byte[] signedPdf = PdfSignerService.signPdf(
+              data,
+              key,
+              chain,
+              loaded.provider(),
+              signingCert,
+              reason,
+              location,
+              stampPages);
 
           String inputFilename = mp.filename("file");
           if (inputFilename == null || inputFilename.isBlank()) {
@@ -573,7 +645,8 @@ public final class ApiServlet extends HttpServlet {
               "format", "pdf",
               "subjectDn", signingCert.getSubjectX500Principal().getName(),
               "serialNumber", signingCert.getSerialNumber().toString(16),
-              "outputPath", outFile.getAbsolutePath()));
+              "outputPath", outFile.getAbsolutePath(),
+              "stampedPages", stampPages));
           return;
         }
 
@@ -715,13 +788,8 @@ public final class ApiServlet extends HttpServlet {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
+          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
 
-          LOG.info("multipart fields keys=" + (mp.fields() != null ? mp.fields().keySet() : "null")
-              + ", file keys=" + (mp.fileNames() != null ? mp.fileNames().keySet() : "null"));
-          LOG.info("reason(raw field)=" + mp.field("reason") + ", reason(raw file)="
-              + (mp.file("reason") != null ? ("len=" + mp.file("reason").length) : "null"));
-          LOG.info("location(raw field)=" + mp.field("location") + ", location(raw file)="
-              + (mp.file("location") != null ? ("len=" + mp.file("location").length) : "null"));
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
             return;
@@ -785,10 +853,19 @@ public final class ApiServlet extends HttpServlet {
                   .toArray(X509Certificate[]::new)
               : null;
           CertificateValidator.validateForSigning(signingCert, x509Chain);
-          byte[] signedPdf = PdfSignerService.signPdf(data, key, chain, loaded.provider(), signingCert, reason, location);
+          byte[] signedPdf = PdfSignerService.signPdf(
+              data,
+              key,
+              chain,
+              loaded.provider(),
+              signingCert,
+              reason,
+              location,
+              stampPages);
 
           resp.setStatus(200);
           resp.setContentType("application/pdf");
+          resp.setHeader("X-Stamped-Pages", String.valueOf(stampPages));
           resp.setHeader("Content-Disposition",
               "attachment; filename=\"" + buildSignedPdfFilename(mp.filename("file")) + "\"");
           resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
