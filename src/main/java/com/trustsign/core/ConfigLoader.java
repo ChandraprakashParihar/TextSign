@@ -1,6 +1,7 @@
 package com.trustsign.core;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -25,6 +26,24 @@ public final class ConfigLoader {
       if (json == null || json.isBlank()) {
         throw new IllegalStateException("Config file is empty: " + file.getAbsolutePath());
       }
+
+      // Validate pkcs11.pin shape before mapping into records so users get a
+      // clear error (e.g. they must use quotes in JSON).
+      JsonNode root = MAPPER.readTree(json);
+      JsonNode pinNode = root.path("pkcs11").path("pin");
+      if (pinNode.isMissingNode() || pinNode.isNull()) {
+        throw new IllegalStateException("Missing config field: pkcs11.pin (use a quoted string PIN, e.g. \"12345678\")");
+      }
+      if (!pinNode.isTextual()) {
+        throw new IllegalStateException(
+            "Invalid config field: pkcs11.pin must be a quoted JSON string (e.g. \"12345678\").");
+      }
+      String pinText = pinNode.asText();
+      String pinTrim = pinText == null ? "" : pinText.trim();
+      if (pinTrim.isEmpty()) {
+        throw new IllegalStateException("Invalid config field: pkcs11.pin must not be empty.");
+      }
+
       AgentConfig cfg = MAPPER.readValue(json, AgentConfig.class);
 
       if (cfg.allowedOrigins() == null || cfg.allowedOrigins().isEmpty()) {

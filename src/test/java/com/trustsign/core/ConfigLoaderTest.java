@@ -41,7 +41,7 @@ class ConfigLoaderTest {
   @Test
   void loadThrowsWhenAllowedOriginsMissing() throws Exception {
     String json = """
-        {"port": 31927, "pkcs11": {"pin": "1234"}}
+        {"port": 31927, "pkcs11": {"pin": "12345678"}}
         """;
     Path f = tempDir.resolve("cfg.json");
     Files.writeString(f, json);
@@ -63,7 +63,7 @@ class ConfigLoaderTest {
   @Test
   void loadThrowsWhenPortOutOfRange() throws Exception {
     String json = """
-        {"port": 70000, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {"pin": "1234"}}
+        {"port": 70000, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {"pin": "12345678"}}
         """;
     Path f = tempDir.resolve("cfg.json");
     Files.writeString(f, json);
@@ -74,7 +74,7 @@ class ConfigLoaderTest {
   @Test
   void loadSucceedsWithValidConfig() throws Exception {
     String json = """
-        {"port": 31927, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {"pin": "1234"}}
+        {"port": 31927, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {"pin": "12345678"}}
         """;
     Path f = tempDir.resolve("cfg.json");
     Files.writeString(f, json);
@@ -88,7 +88,7 @@ class ConfigLoaderTest {
   @Test
   void portOrDefaultWhenPortZeroUsesDefault() throws Exception {
     String json = """
-        {"port": 0, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {}}
+        {"port": 0, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {"pin": "12345678"}}
         """;
     Path f = tempDir.resolve("cfg.json");
     Files.writeString(f, json);

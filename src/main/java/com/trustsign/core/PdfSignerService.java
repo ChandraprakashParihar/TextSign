@@ -112,7 +112,9 @@ public final class PdfSignerService {
     String when = TS_FMT.format(signedAt);
 
     java.util.List<Integer> resolvedPages = resolveStampPages(doc, stampPageIndices);
-    LOG.info("PDF stamp pages resolved: " + resolvedPages);
+    if (Boolean.getBoolean("trustsign.debugPdfStamp")) {
+      LOG.info("PDF stamp pages resolved: " + resolvedPages);
+    }
     for (Integer pageIndex : resolvedPages) {
       PDPage page = doc.getPage(pageIndex);
       PDRectangle mediaBox = page.getMediaBox();

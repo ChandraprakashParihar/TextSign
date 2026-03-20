@@ -120,7 +120,20 @@ public final class ApiServlet extends HttpServlet {
         throw new SecurityException("outputDir must be under configured outputBaseDir (" + allowedBase + ")");
       }
     }
-    return resolved.toFile();
+    File dir = resolved.toFile();
+    if (dir.exists() && !dir.isDirectory()) {
+      throw new IllegalArgumentException("outputDir must be a directory (but is a file): " + dir.getAbsolutePath());
+    }
+    if (!dir.exists()) {
+      boolean created = dir.mkdirs();
+      if (!created && !dir.exists()) {
+        throw new IllegalArgumentException("outputDir cannot be created or is not writable: " + dir.getAbsolutePath());
+      }
+    }
+    if (!dir.canWrite()) {
+      throw new IllegalArgumentException("outputDir is not writable: " + dir.getAbsolutePath());
+    }
+    return dir;
   }
 
   /**
@@ -1372,17 +1385,24 @@ public final class ApiServlet extends HttpServlet {
    * via environment variable.
    */
   private char[] resolvePin(AgentConfig cfg) {
-    String pinStr = System.getenv("TRUSTSIGN_TOKEN_PIN");
-    if (pinStr == null || pinStr.isBlank()) {
-      if (cfg.pkcs11() != null && cfg.pkcs11().pin() != null && !cfg.pkcs11().pin().isBlank()) {
-        pinStr = cfg.pkcs11().pin();
-      }
+    String envPin = System.getenv("TRUSTSIGN_TOKEN_PIN");
+    if (envPin != null && !envPin.isBlank()) {
+      return envPin.toCharArray();
     }
-    if (pinStr == null || pinStr.isBlank()) {
+
+    String cfgPin = (cfg.pkcs11() != null && cfg.pkcs11().pin() != null) ? cfg.pkcs11().pin() : null;
+    if (cfgPin == null || cfgPin.isBlank()) {
       throw new SecurityException(
           "Token PIN not configured. Set it in config.json (pkcs11.pin) or set environment variable TRUSTSIGN_TOKEN_PIN.");
     }
-    return pinStr.toCharArray();
+
+    String trimmed = cfgPin.trim();
+    if (trimmed.isEmpty()) {
+      throw new SecurityException(
+          "Token PIN is empty. Check config.json (pkcs11.pin) or set environment variable TRUSTSIGN_TOKEN_PIN.");
+    }
+
+    return trimmed.toCharArray();
   }
 
   private File resolveConfigFile() {
