@@ -91,14 +91,14 @@ public final class PdfSignerService {
     PDPage firstPage = doc.getPage(0);
     PDRectangle mediaBox = firstPage.getMediaBox();
 
-    float boxWidth = 250f;
-    float boxHeight = 95f;
+    float boxWidth = (float) (mediaBox.getWidth() * 0.3);
+    float boxHeight = (float) (mediaBox.getHeight() * 0.08);
     float margin = 24f;
+    float contentPad = 4f;
     float x = mediaBox.getUpperRightX() - boxWidth - margin;
     float y = margin;
 
-    String subject = cert.getSubjectX500Principal().getName();
-    String serial = cert.getSerialNumber().toString(16);
+    String subject = extractDisplaySubject(cert);
     String when = TS_FMT.format(signedAt);
 
     try (PDPageContentStream cs = new PDPageContentStream(
@@ -113,44 +113,85 @@ public final class PdfSignerService {
       cs.stroke();
 
       cs.setNonStrokingColor(0.1f, 0.65f, 0.22f);
-      cs.setLineWidth(3f);
-      cs.moveTo(x + 14f, y + 56f);
-      cs.lineTo(x + 24f, y + 44f);
-      cs.lineTo(x + 40f, y + 66f);
+      cs.setLineWidth(3.2f);
+      float contentLeftX = x + contentPad;
+      float contentTopY = y + boxHeight - contentPad;
+      float markerCenterX = x + (boxWidth / 2f);
+      float markerCenterY = y + (boxHeight * 0.58f);
+      cs.moveTo(markerCenterX - 12f, markerCenterY + 2f);
+      cs.lineTo(markerCenterX - 3f, markerCenterY - 9f);
+      cs.lineTo(markerCenterX + 13f, markerCenterY + 10f);
       cs.stroke();
 
-      cs.beginText();
-      cs.setNonStrokingColor(0f, 0f, 0f);
-      cs.setFont(PDType1Font.HELVETICA_BOLD, 10f);
-      cs.newLineAtOffset(x + 50f, y + 72f);
-      cs.showText("Digitally Signed");
-      cs.endText();
+      writeLineBold(cs, "Signature Verified", contentLeftX, contentTopY - 9f);
 
-      writeLine(cs, "Subject: " + trim(subject, 38), x + 12f, y + 56f);
-      writeLine(cs, "Serial: " + trim(serial, 38), x + 12f, y + 44f);
-      writeLine(cs, "Date: " + when, x + 12f, y + 32f);
-      writeLine(cs, "Verified by TrustSign", x + 12f, y + 20f);
+      float textY = contentTopY - 20f;
+      for (String line : wrapSubjectLines(subject, 40)) {
+        writeLine(cs, line, x + contentPad, textY);
+        textY -= 6.5f;
+      }
+      float detailsTopY = Math.max(y + contentPad + 8f, textY - 0.5f);
+      writeLine(cs, when, x + contentPad, detailsTopY);
+      writeLine(cs, "Verified by TrustSign", x + contentPad, detailsTopY - 6.5f);
     }
   }
 
   private static void writeLine(PDPageContentStream cs, String value, float x, float y) throws Exception {
     cs.beginText();
-    cs.setFont(PDType1Font.HELVETICA, 8f);
+    cs.setFont(PDType1Font.HELVETICA, 7f);
     cs.setNonStrokingColor(0f, 0f, 0f);
     cs.newLineAtOffset(x, y);
     cs.showText(value);
     cs.endText();
   }
 
-  private static String trim(String v, int max) {
-    if (v == null) {
-      return "";
-    }
-    if (v.length() <= max) {
-      return v;
-    }
-    return v.substring(0, Math.max(0, max - 3)) + "...";
+  private static void writeLineBold(PDPageContentStream cs, String value, float x, float y) throws Exception {
+    cs.beginText();
+    cs.setFont(PDType1Font.HELVETICA_BOLD, 8f);
+    cs.setNonStrokingColor(0f, 0f, 0f);
+    cs.newLineAtOffset(x, y);
+    cs.showText(value);
+    cs.endText();
   }
 
-  private PdfSignerService() {}
+  private static java.util.List<String> wrapSubjectLines(String value, int maxCharsPerLine) {
+    java.util.List<String> lines = new java.util.ArrayList<>();
+    if (value == null || value.isBlank()) {
+      lines.add("Subject:");
+      return lines;
+    }
+    String[] words = value.trim().split("\\s+");
+    StringBuilder current = new StringBuilder();
+    for (String word : words) {
+      if (current.isEmpty()) {
+        current.append(word);
+        continue;
+      }
+      if (current.length() + 1 + word.length() <= maxCharsPerLine) {
+        current.append(" ").append(word);
+      } else {
+        lines.add(current.toString());
+        current = new StringBuilder(word);
+      }
+    }
+    if (!current.isEmpty()) {
+      lines.add(current.toString());
+    }
+    return lines;
+  }
+
+  private static String extractDisplaySubject(X509Certificate cert) {
+    String dn = cert.getSubjectX500Principal().getName();
+    for (String part : dn.split(",")) {
+      String p = part.trim();
+      if (p.regionMatches(true, 0, "CN=", 0, 3)) {
+        String cn = p.substring(3).trim();
+        return cn.isBlank() ? dn : cn;
+      }
+    }
+    return dn;
+  }
+
+  private PdfSignerService() {
+  }
 }
