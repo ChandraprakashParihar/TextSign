@@ -24,8 +24,13 @@ public final class Multipart {
 
     for (Part p : req.getParts()) {
       String name = p.getName();
+      if (name != null) {
+        name = name.trim();
+      }
       String submitted = p.getSubmittedFileName();
-      if (submitted != null) {
+      // Some clients (e.g. Postman) may send text fields with filename=""
+      // which returns non-null submittedFileName. Treat empty filename as a field.
+      if (submitted != null && !submitted.isBlank()) {
         files.put(name, readAll(p.getInputStream(), maxBytes));
         fileNames.put(name, submitted);
       } else {

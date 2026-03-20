@@ -30,7 +30,9 @@ public final class PdfSignerService {
       PrivateKey privateKey,
       Certificate[] chain,
       Provider p11Provider,
-      X509Certificate signingCert) throws Exception {
+      X509Certificate signingCert,
+      String reason,
+      String location) throws Exception {
     if (pdfBytes == null || pdfBytes.length == 0) {
       throw new IllegalArgumentException("pdfBytes is empty");
     }
@@ -53,13 +55,20 @@ public final class PdfSignerService {
       }
 
       Instant now = Instant.now();
-      addVisualSignatureStamp(doc, signingCert, now);
+      addVisualSignatureStamp(doc, signingCert, now, reason, location);
 
       PDSignature signature = new PDSignature();
       signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
       signature.setSubFilter(PDSignature.SUBFILTER_ADBE_PKCS7_DETACHED);
       signature.setName(signingCert.getSubjectX500Principal().getName());
-      signature.setReason("TrustSign digital signature");
+      if (reason != null && !reason.isBlank()) {
+        signature.setReason(reason.trim());
+      } else {
+        signature.setReason("TrustSign digital signature");
+      }
+      if (location != null && !location.isBlank()) {
+        signature.setLocation(location.trim());
+      }
       signature.setSignDate(java.util.Calendar.getInstance());
 
       SignatureInterface sigImpl = new SignatureInterface() {
@@ -87,7 +96,12 @@ public final class PdfSignerService {
     }
   }
 
-  private static void addVisualSignatureStamp(PDDocument doc, X509Certificate cert, Instant signedAt) throws Exception {
+  private static void addVisualSignatureStamp(
+      PDDocument doc,
+      X509Certificate cert,
+      Instant signedAt,
+      String reason,
+      String location) throws Exception {
     PDPage firstPage = doc.getPage(0);
     PDRectangle mediaBox = firstPage.getMediaBox();
 
@@ -132,7 +146,16 @@ public final class PdfSignerService {
       }
       float detailsTopY = Math.max(y + contentPad + 8f, textY - 0.5f);
       writeLine(cs, when, x + contentPad, detailsTopY);
-      writeLine(cs, "Verified by TrustSign", x + contentPad, detailsTopY - 6.5f);
+      float footerY = detailsTopY - 6.5f;
+      if (reason != null && !reason.isBlank()) {
+        writeLine(cs, "Reason: " + reason.trim(), x + contentPad, footerY);
+        footerY -= 6.5f;
+      }
+      if (location != null && !location.isBlank()) {
+        writeLine(cs, "Location: " + location.trim(), x + contentPad, footerY);
+        footerY -= 6.5f;
+      }
+      writeLine(cs, "Verified by TrustSign", x + contentPad, footerY);
     }
   }
 

@@ -436,6 +436,32 @@ public final class ApiServlet extends HttpServlet {
         case "/auto-sign-pdf" -> {
           var mp = Multipart.read(req, 10 * 1024 * 1024);
           byte[] data = mp.file("file");
+          String reason = mp.field("reason");
+          String location = mp.field("location");
+          // Some clients send text fields as "file" parts with filename present/empty.
+          // Fall back to interpreting them as text when mp.field(...) is null.
+          if (reason == null) {
+            byte[] rb = mp.file("reason");
+            if (rb != null && rb.length > 0) {
+              reason = new String(rb, java.nio.charset.StandardCharsets.UTF_8).trim();
+            }
+          }
+          if (location == null) {
+            byte[] lb = mp.file("location");
+            if (lb != null && lb.length > 0) {
+              location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
+            }
+          }
+
+          LOG.info("multipart fields keys=" + (mp.fields() != null ? mp.fields().keySet() : "null")
+              + ", file keys=" + (mp.fileNames() != null ? mp.fileNames().keySet() : "null"));
+          LOG.info("reason(raw field)=" + mp.field("reason") + ", reason(raw file)="
+              + (mp.file("reason") != null ? ("len=" + mp.file("reason").length) : "null"));
+          LOG.info("location(raw field)=" + mp.field("location") + ", location(raw file)="
+              + (mp.file("location") != null ? ("len=" + mp.file("location").length) : "null"));
+
+          LOG.info("reason: " + reason);
+          LOG.info("location: " + location);
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -532,7 +558,7 @@ public final class ApiServlet extends HttpServlet {
                 .toArray(X509Certificate[]::new);
           }
           CertificateValidator.validateForSigning(signingCert, x509Chain);
-          byte[] signedPdf = PdfSignerService.signPdf(data, key, chain, loaded.provider(), signingCert);
+          byte[] signedPdf = PdfSignerService.signPdf(data, key, chain, loaded.provider(), signingCert, reason, location);
 
           String inputFilename = mp.filename("file");
           if (inputFilename == null || inputFilename.isBlank()) {
@@ -675,6 +701,27 @@ public final class ApiServlet extends HttpServlet {
           // requireSession(req);
           var mp = Multipart.read(req, 10 * 1024 * 1024);
           byte[] data = mp.file("file");
+          String reason = mp.field("reason");
+          String location = mp.field("location");
+          if (reason == null) {
+            byte[] rb = mp.file("reason");
+            if (rb != null && rb.length > 0) {
+              reason = new String(rb, java.nio.charset.StandardCharsets.UTF_8).trim();
+            }
+          }
+          if (location == null) {
+            byte[] lb = mp.file("location");
+            if (lb != null && lb.length > 0) {
+              location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
+            }
+          }
+
+          LOG.info("multipart fields keys=" + (mp.fields() != null ? mp.fields().keySet() : "null")
+              + ", file keys=" + (mp.fileNames() != null ? mp.fileNames().keySet() : "null"));
+          LOG.info("reason(raw field)=" + mp.field("reason") + ", reason(raw file)="
+              + (mp.file("reason") != null ? ("len=" + mp.file("reason").length) : "null"));
+          LOG.info("location(raw field)=" + mp.field("location") + ", location(raw file)="
+              + (mp.file("location") != null ? ("len=" + mp.file("location").length) : "null"));
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
             return;
@@ -738,7 +785,7 @@ public final class ApiServlet extends HttpServlet {
                   .toArray(X509Certificate[]::new)
               : null;
           CertificateValidator.validateForSigning(signingCert, x509Chain);
-          byte[] signedPdf = PdfSignerService.signPdf(data, key, chain, loaded.provider(), signingCert);
+          byte[] signedPdf = PdfSignerService.signPdf(data, key, chain, loaded.provider(), signingCert, reason, location);
 
           resp.setStatus(200);
           resp.setContentType("application/pdf");
