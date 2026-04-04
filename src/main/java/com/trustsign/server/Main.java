@@ -40,6 +40,7 @@ public final class Main {
     }
 
     Server server = ServerBootstrap.buildServer(cfg, licenceEnforcer);
+    server.setStopTimeout(AgentConfig.ServerConfig.gracefulStopTimeoutMsOrDefault(cfg.server()));
     server.start();
 
     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -51,7 +52,7 @@ public final class Main {
       }
     }));
 
-    LOG.info("TrustSign text server listening on http://localhost:" + cfg.portOrDefault() + "/v1");
+    LOG.info("TrustSign API at http://0.0.0.0:" + cfg.portOrDefault() + "/v1 — for very high load run many instances behind a load balancer; each JVM is bounded by signing hardware throughput.");
     server.join();
   }
 

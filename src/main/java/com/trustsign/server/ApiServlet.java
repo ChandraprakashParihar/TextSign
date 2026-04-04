@@ -1,9 +1,11 @@
 package com.trustsign.server;
 
 import com.trustsign.core.AgentConfig;
+import com.trustsign.core.AgentConfig.ServerConfig;
 import com.trustsign.core.ConfigLoader;
 import com.trustsign.core.HsmPdfSignerService;
 import com.trustsign.core.PdfSignerService;
+import com.trustsign.core.PdfSignerService.PdfSigningOptions;
 import com.trustsign.core.PdfVerifyService;
 import com.trustsign.core.Pkcs11Token;
 import com.trustsign.core.OsPkcs11Resolver;
@@ -13,6 +15,7 @@ import com.trustsign.core.TextSignerService;
 import com.trustsign.core.TextVerifyService;
 import com.trustsign.core.CertificateValidator;
 import com.trustsign.core.LicenceEnforcer;
+import com.trustsign.hsm.HsmPkcs11ConfigurationService;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -32,9 +35,11 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class ApiServlet extends HttpServlet {
@@ -43,10 +48,29 @@ public final class ApiServlet extends HttpServlet {
 
   private final SessionManager sessions;
   private final LicenceEnforcer licenceEnforcer;
+  private final SigningConcurrencyGate signingGate;
+  private final int multipartPdfMaxBytes;
+  private final int multipartTextMaxBytes;
+  /** Former 5 MiB cap for verify-text / debug; bounded by PDF limit. */
+  private final int multipartMediumMaxBytes;
 
-  public ApiServlet(SessionManager sessions, LicenceEnforcer licenceEnforcer) {
+  public ApiServlet(SessionManager sessions, LicenceEnforcer licenceEnforcer, SigningConcurrencyGate signingGate) {
+    this(sessions, licenceEnforcer, signingGate, null);
+  }
+
+  public ApiServlet(
+      SessionManager sessions,
+      LicenceEnforcer licenceEnforcer,
+      SigningConcurrencyGate signingGate,
+      ServerConfig serverLimits) {
     this.sessions = sessions;
     this.licenceEnforcer = licenceEnforcer;
+    this.signingGate = signingGate != null ? signingGate : SigningConcurrencyGate.unlimited();
+    int pdfMb = ServerConfig.multipartPdfMaxFileMbOrDefault(serverLimits);
+    int textMb = ServerConfig.multipartTextMaxFileMbOrDefault(serverLimits);
+    this.multipartPdfMaxBytes = pdfMb * 1024 * 1024;
+    this.multipartTextMaxBytes = textMb * 1024 * 1024;
+    this.multipartMediumMaxBytes = Math.min(multipartPdfMaxBytes, Math.max(multipartTextMaxBytes, 5 * 1024 * 1024));
   }
 
   /**
@@ -157,6 +181,11 @@ public final class ApiServlet extends HttpServlet {
     if (filename != null && filename.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) {
       return true;
     }
+    return looksLikePdfHeader(data);
+  }
+
+  /** True when bytes start with a PDF file header ({@code %PDF-}). */
+  private static boolean looksLikePdfHeader(byte[] data) {
     return data != null
         && data.length >= 5
         && data[0] == '%'
@@ -166,12 +195,105 @@ public final class ApiServlet extends HttpServlet {
         && data[4] == '-';
   }
 
+  /**
+   * For auto-sign PDF routes: the next signature is chained from the previous numbered output when present
+   * ({@code stem-signed.pdf} → {@code stem-signed1.pdf} → …) so earlier signatures stay valid.
+   * Multipart {@code signFromUpload} true/1/yes/y forces signing the uploaded file only (no chain).
+   */
+  private static byte[] resolveAutoSignIncrementalInput(byte[] uploadedPdf, File targetSignedFile, Multipart.Data mp)
+      throws IOException {
+    if (parseBooleanLoose(readMultipartString(mp, "signFromUpload", true))) {
+      return uploadedPdf;
+    }
+    File chainSource = predecessorAutoSignPdfOutput(targetSignedFile);
+    if (chainSource == null || !chainSource.isFile() || chainSource.length() == 0) {
+      return uploadedPdf;
+    }
+    byte[] existing = Files.readAllBytes(chainSource.toPath());
+    if (looksLikePdfHeader(existing)) {
+      return existing;
+    }
+    return uploadedPdf;
+  }
+
+  private static String stripPdfExtension(String sanitizedName) {
+    int dot = sanitizedName.lastIndexOf('.');
+    if (dot <= 0) {
+      return sanitizedName;
+    }
+    if (sanitizedName.substring(dot).equalsIgnoreCase(".pdf")) {
+      return sanitizedName.substring(0, dot);
+    }
+    return sanitizedName.substring(0, dot);
+  }
+
+  /**
+   * Base name for auto-sign PDF outputs: strips {@code .pdf} and repeated trailing {@code -signed} / {@code -signedN}
+   * so an upload {@code test-signed.pdf} still maps to stem {@code test} (avoids {@code test-signed-signed.pdf}).
+   */
+  private static String pdfStemForAutoSignOutput(String uploadFilename) {
+    String safe = sanitizeFilename(uploadFilename);
+    String base = stripPdfExtension(safe);
+    while (base.matches("(?i).+-signed\\d*")) {
+      base = base.replaceFirst("(?i)-signed\\d*$", "");
+    }
+    return base.isBlank() ? "document" : base;
+  }
+
+  private static final Pattern AUTO_SIGN_PDF_NUMBERED = Pattern.compile("(?i)^(.+)-signed(\\d+)$");
+
+  /**
+   * Previous file in the numbered sequence: {@code stem-signedN.pdf} → {@code stem-signed(N-1).pdf},
+   * {@code stem-signed1.pdf} → {@code stem-signed.pdf}. Unnumbered target has no predecessor.
+   */
+  private static File predecessorAutoSignPdfOutput(File targetOutFile) {
+    String name = targetOutFile.getName();
+    if (name.length() < 5 || !name.substring(name.length() - 4).equalsIgnoreCase(".pdf")) {
+      return null;
+    }
+    String base = name.substring(0, name.length() - 4);
+    Matcher m = AUTO_SIGN_PDF_NUMBERED.matcher(base);
+    if (!m.matches()) {
+      return null;
+    }
+    String stem = m.group(1);
+    int n = Integer.parseInt(m.group(2));
+    File dir = targetOutFile.getParentFile();
+    if (n <= 1) {
+      return new File(dir, stem + "-signed.pdf");
+    }
+    return new File(dir, stem + "-signed" + (n - 1) + ".pdf");
+  }
+
+  /**
+   * First free output path: {@code stem-signed.pdf}, then {@code stem-signed1.pdf}, {@code stem-signed2.pdf}, …
+   */
+  private static File resolveNextAutoSignPdfOutput(File outDir, String uploadFilename) {
+    String stem = pdfStemForAutoSignOutput(uploadFilename);
+    File first = new File(outDir, stem + "-signed.pdf");
+    if (!first.exists()) {
+      return first;
+    }
+    for (int n = 1; ; n++) {
+      if (n > 99_999) {
+        throw new IllegalStateException("Too many signed PDF variants for stem: " + stem);
+      }
+      File fn = new File(outDir, stem + "-signed" + n + ".pdf");
+      if (!fn.exists()) {
+        return fn;
+      }
+    }
+  }
+
+  /** Suggested download name for streaming sign endpoints (single file, not numbered). */
   private static String buildSignedPdfFilename(String filename) {
     String safe = sanitizeFilename(filename);
-    String base = safe;
-    int dot = safe.lastIndexOf('.');
-    if (dot > 0) {
-      base = safe.substring(0, dot);
+    String base = stripPdfExtension(safe);
+    while (base.matches("(?i).+-signed\\d*")) {
+      base = base.replaceFirst("(?i)-signed\\d*$", "");
+    }
+    if (base.isBlank()) {
+      base = "document";
     }
     return base + "-signed.pdf";
   }
@@ -180,6 +302,18 @@ public final class ApiServlet extends HttpServlet {
     if (v == null) return false;
     String t = v.trim().toLowerCase(java.util.Locale.ROOT);
     return t.equals("true") || t.equals("1") || t.equals("yes") || t.equals("y");
+  }
+
+  /** Multipart field or file part {@code finalVersion} (true/1/yes/y). */
+  private static boolean parseFinalVersionMultipart(Multipart.Data mp) {
+    String v = mp.field("finalVersion");
+    if (v == null) {
+      byte[] b = mp.file("finalVersion");
+      if (b != null && b.length > 0) {
+        v = new String(b, StandardCharsets.UTF_8).trim();
+      }
+    }
+    return parseBooleanLoose(v);
   }
 
   private static Integer parsePositiveInt(String v) {
@@ -200,12 +334,36 @@ public final class ApiServlet extends HttpServlet {
   private static String readMultipartString(Multipart.Data mp, String name, boolean trimBody) {
     String v = mp.field(name);
     if (v != null && !v.isEmpty()) {
-      return trimBody ? v.trim() : v;
+      v = trimBody ? v.trim() : v;
+    } else {
+      byte[] b = mp.file(name);
+      if (b != null && b.length > 0) {
+        v = new String(b, StandardCharsets.UTF_8);
+        v = trimBody ? v.trim() : v;
+      } else {
+        v = null;
+      }
     }
-    byte[] b = mp.file(name);
-    if (b != null && b.length > 0) {
-      String s = new String(b, StandardCharsets.UTF_8);
-      return trimBody ? s.trim() : s;
+    if (v == null || v.isEmpty()) {
+      return null;
+    }
+    if (v.charAt(0) == '\uFEFF') {
+      v = v.substring(1).trim();
+    }
+    return v.isEmpty() ? null : v;
+  }
+
+  /**
+   * HSM signer certificate: prefers raw file part {@code cer} (PEM or DER), else form field text as UTF-8.
+   */
+  private static byte[] readMultipartCerPayload(Multipart.Data mp) {
+    byte[] filePart = mp.file("cer");
+    if (filePart != null && filePart.length > 0) {
+      return filePart;
+    }
+    String field = mp.field("cer");
+    if (field != null && !field.isEmpty()) {
+      return field.getBytes(StandardCharsets.UTF_8);
     }
     return null;
   }
@@ -229,34 +387,27 @@ public final class ApiServlet extends HttpServlet {
 
   /**
    * Resolves which PDF pages should get the visible stamp.
-   * - `pages`: comma-separated list of 1-based page numbers (e.g. "1,3,5") overrides everything else
-   * - `allPages`: if true, stamps all pages
-   * - `page` or `startPage`: stamps only that page (1-based)
-   * - default: first page (page 1)
+   * - {@code allPages}: if true, stamps all pages (evaluated before {@code pages} so a default hidden {@code pages=1}
+   *   does not cancel {@code allPages=true})
+   * - {@code pages}: comma-separated 1-based page numbers (e.g. {@code 1,3,5})
+   * - {@code page} or {@code startPage}: single 1-based page (field or file part, like other multipart text)
+   * - default: page 1 only (no config; use {@code allPages}, {@code pages}, {@code page}, or {@code startPage} to change)
    */
   private static java.util.List<Integer> resolvePdfStampPages(Multipart.Data mp) {
-    String pagesCsv = mp.field("pages");
+    String allPagesStr = readMultipartString(mp, "allPages", true);
+    if (parseBooleanLoose(allPagesStr)) {
+      return java.util.List.of(-1);
+    }
+
+    String pagesCsv = readMultipartString(mp, "pages", true);
     if (pagesCsv != null && !pagesCsv.isBlank()) {
       java.util.List<Integer> pages = parsePagesCsv1Based(pagesCsv);
       return pages.isEmpty() ? java.util.List.of(0) : pages;
     }
 
-    String allPagesStr = mp.field("allPages");
-    if (allPagesStr == null) {
-      // Some clients may send text fields as "file" parts
-      byte[] ab = mp.file("allPages");
-      if (ab != null && ab.length > 0) {
-        allPagesStr = new String(ab, java.nio.charset.StandardCharsets.UTF_8);
-      }
-    }
-    boolean allPages = parseBooleanLoose(allPagesStr);
-    if (allPages) {
-      return java.util.List.of(-1);
-    }
-
-    Integer page1 = parsePositiveInt(mp.field("page"));
+    Integer page1 = parsePositiveInt(readMultipartString(mp, "page", true));
     if (page1 == null) {
-      page1 = parsePositiveInt(mp.field("startPage"));
+      page1 = parsePositiveInt(readMultipartString(mp, "startPage", true));
     }
     if (page1 != null) {
       return java.util.List.of(page1 - 1);
@@ -281,7 +432,14 @@ public final class ApiServlet extends HttpServlet {
     try {
       switch (path) {
         case "/health" -> {
-          writeJson(resp, 200, Map.of("status", "ok", "ts", Instant.now().toString()));
+          Map<String, Object> health = new LinkedHashMap<>();
+          health.put("status", "ok");
+          health.put("ts", Instant.now().toString());
+          if (signingGate.isLimited()) {
+            health.put("signingSlotsAvailable", signingGate.availablePermits());
+            health.put("signingSlotsTotal", signingGate.totalPermits());
+          }
+          writeJson(resp, 200, health);
           return;
         }
         case "/pkcs11/candidates" -> {
@@ -370,7 +528,7 @@ public final class ApiServlet extends HttpServlet {
 
         case "/auto-sign-text" -> {
           // requireSession(req);
-          var mp = Multipart.read(req, 2 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartTextMaxBytes);
           byte[] data = mp.file("file");
 
           if (data == null || data.length == 0) {
@@ -537,7 +695,7 @@ public final class ApiServlet extends HttpServlet {
         }
 
         case "/auto-sign-pdf" -> {
-          var mp = Multipart.read(req, 10 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
           String reason = mp.field("reason");
           String location = mp.field("location");
@@ -555,7 +713,6 @@ public final class ApiServlet extends HttpServlet {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
-          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -569,6 +726,10 @@ public final class ApiServlet extends HttpServlet {
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null)
             return;
+
+          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
+          boolean finalVersion = parseFinalVersionMultipart(mp);
+          PdfSigningOptions pdfOpts = new PdfSigningOptions(finalVersion);
 
           String outputDir = cfg.autoSignOutputDir();
           if (outputDir == null || outputDir.isBlank()) {
@@ -652,37 +813,44 @@ public final class ApiServlet extends HttpServlet {
                 .toArray(X509Certificate[]::new);
           }
           CertificateValidator.validateForSigning(signingCert, x509Chain);
+
+          String inputFilename = mp.filename("file");
+          if (inputFilename == null || inputFilename.isBlank()) {
+            inputFilename = "document.pdf";
+          }
+          File outFile = resolveNextAutoSignPdfOutput(outDirFile, inputFilename);
+          byte[] pdfToSign = resolveAutoSignIncrementalInput(data, outFile, mp);
+
           byte[] signedPdf = PdfSignerService.signPdf(
-              data,
+              pdfToSign,
               key,
               chain,
               loaded.provider(),
               signingCert,
               reason,
               location,
-              stampPages);
+              stampPages,
+              pdfOpts);
 
-          String inputFilename = mp.filename("file");
-          if (inputFilename == null || inputFilename.isBlank()) {
-            inputFilename = "document.pdf";
-          }
           outDirFile.mkdirs();
-          File outFile = new File(outDirFile, buildSignedPdfFilename(inputFilename));
           Files.write(outFile.toPath(), signedPdf);
 
-          writeJson(resp, 200, Map.of(
-              "ok", true,
-              "format", "pdf",
-              "subjectDn", signingCert.getSubjectX500Principal().getName(),
-              "serialNumber", signingCert.getSerialNumber().toString(16),
-              "outputPath", outFile.getAbsolutePath(),
-              "stampedPages", stampPages));
+          Map<String, Object> autoPdfBody = new LinkedHashMap<>();
+          autoPdfBody.put("ok", true);
+          autoPdfBody.put("format", "pdf");
+          autoPdfBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+          autoPdfBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+          autoPdfBody.put("outputPath", outFile.getAbsolutePath());
+          autoPdfBody.put("chainedFromExistingOutput", pdfToSign != data);
+          autoPdfBody.put("stampedPages", stampPages);
+          autoPdfBody.put("finalVersion", finalVersion);
+          writeJson(resp, 200, autoPdfBody);
           return;
         }
 
         case "/auto-sign-text-cms" -> {
           requireSession(req);
-          var mp = Multipart.read(req, 2 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartTextMaxBytes);
           byte[] data = mp.file("file");
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
@@ -802,7 +970,7 @@ public final class ApiServlet extends HttpServlet {
 
         case "/sign-pdf" -> {
           // requireSession(req);
-          var mp = Multipart.read(req, 10 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
           String reason = mp.field("reason");
           String location = mp.field("location");
@@ -818,7 +986,6 @@ public final class ApiServlet extends HttpServlet {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
-          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -832,6 +999,11 @@ public final class ApiServlet extends HttpServlet {
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null)
             return;
+
+          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
+          boolean finalVersion = parseFinalVersionMultipart(mp);
+          PdfSigningOptions pdfOpts = new PdfSigningOptions(finalVersion);
+
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
@@ -891,7 +1063,8 @@ public final class ApiServlet extends HttpServlet {
               signingCert,
               reason,
               location,
-              stampPages);
+              stampPages,
+              pdfOpts);
 
           resp.setStatus(200);
           resp.setContentType("application/pdf");
@@ -900,14 +1073,17 @@ public final class ApiServlet extends HttpServlet {
               "attachment; filename=\"" + buildSignedPdfFilename(mp.filename("file")) + "\"");
           resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
           resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
+          if (finalVersion) {
+            resp.setHeader("X-TrustSign-Final-Version", "true");
+          }
           resp.getOutputStream().write(signedPdf);
           return;
         }
 
         case "/hsm/sign-pdf" -> {
-          var mp = Multipart.read(req, 10 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
-          String publicKeyPem = readMultipartString(mp, "publicKey", false);
+          byte[] cerBytes = readMultipartCerPayload(mp);
           String pinStr = readMultipartString(mp, "pin", true);
           String reason = mp.field("reason");
           String location = mp.field("location");
@@ -923,7 +1099,6 @@ public final class ApiServlet extends HttpServlet {
               location = new String(lb, StandardCharsets.UTF_8).trim();
             }
           }
-          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -933,8 +1108,8 @@ public final class ApiServlet extends HttpServlet {
             writeJson(resp, 400, Map.of("error", "Uploaded file is not a PDF"));
             return;
           }
-          if (publicKeyPem == null || publicKeyPem.isBlank()) {
-            writeJson(resp, 400, Map.of("error", "Missing publicKey field (PEM public key or certificate)"));
+          if (cerBytes == null || cerBytes.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing cer field (signer .cer as file or PEM text)"));
             return;
           }
           if (pinStr == null || pinStr.isBlank()) {
@@ -945,6 +1120,11 @@ public final class ApiServlet extends HttpServlet {
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null)
             return;
+
+          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
+          boolean finalVersion = parseFinalVersionMultipart(mp);
+          PdfSigningOptions pdfOpts = new PdfSigningOptions(finalVersion);
+
           if (cfg.hsm() == null) {
             writeJson(resp, 500,
                 Map.of("error", "Configuration error", "details", "config.hsm is not configured (see config.json)"));
@@ -962,11 +1142,14 @@ public final class ApiServlet extends HttpServlet {
             hsmResult = HsmPdfSignerService.signPdfWithMetadata(
                 data,
                 pinChars,
-                publicKeyPem,
+                cerBytes,
                 libs,
+                HsmPkcs11ConfigurationService.normalizeSlotProbeCount(
+                    cfg.hsm().slotProbeCount() != null ? cfg.hsm().slotProbeCount() : 0),
                 reason,
                 location,
-                stampPages);
+                stampPages,
+                pdfOpts);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
             writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
@@ -988,14 +1171,17 @@ public final class ApiServlet extends HttpServlet {
               "attachment; filename=\"" + buildSignedPdfFilename(mp.filename("file")) + "\"");
           resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
           resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
+          if (finalVersion) {
+            resp.setHeader("X-TrustSign-Final-Version", "true");
+          }
           resp.getOutputStream().write(signedPdf);
           return;
         }
 
         case "/hsm/auto-sign-pdf" -> {
-          var mp = Multipart.read(req, 10 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
-          String publicKeyPem = readMultipartString(mp, "publicKey", false);
+          byte[] cerBytes = readMultipartCerPayload(mp);
           String pinStr = readMultipartString(mp, "pin", true);
           String reason = mp.field("reason");
           String location = mp.field("location");
@@ -1011,7 +1197,6 @@ public final class ApiServlet extends HttpServlet {
               location = new String(lb, StandardCharsets.UTF_8).trim();
             }
           }
-          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -1021,8 +1206,8 @@ public final class ApiServlet extends HttpServlet {
             writeJson(resp, 400, Map.of("error", "Uploaded file is not a PDF"));
             return;
           }
-          if (publicKeyPem == null || publicKeyPem.isBlank()) {
-            writeJson(resp, 400, Map.of("error", "Missing publicKey field (PEM public key or certificate)"));
+          if (cerBytes == null || cerBytes.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing cer field (signer .cer as file or PEM text)"));
             return;
           }
           if (pinStr == null || pinStr.isBlank()) {
@@ -1033,6 +1218,11 @@ public final class ApiServlet extends HttpServlet {
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null)
             return;
+
+          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
+          boolean finalVersion = parseFinalVersionMultipart(mp);
+          PdfSigningOptions pdfOpts = new PdfSigningOptions(finalVersion);
+
           if (cfg.hsm() == null) {
             writeJson(resp, 500,
                 Map.of("error", "Configuration error", "details", "config.hsm is not configured (see config.json)"));
@@ -1064,17 +1254,27 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
 
+          String inputFilename = mp.filename("file");
+          if (inputFilename == null || inputFilename.isBlank()) {
+            inputFilename = "document.pdf";
+          }
+          File outFile = resolveNextAutoSignPdfOutput(outDirFile, inputFilename);
+          byte[] pdfToSign = resolveAutoSignIncrementalInput(data, outFile, mp);
+
           char[] pinChars = pinStr.toCharArray();
           HsmPdfSignerService.SignResult hsmResult = null;
           try {
             hsmResult = HsmPdfSignerService.signPdfWithMetadata(
-                data,
+                pdfToSign,
                 pinChars,
-                publicKeyPem,
+                cerBytes,
                 libs,
+                HsmPkcs11ConfigurationService.normalizeSlotProbeCount(
+                    cfg.hsm().slotProbeCount() != null ? cfg.hsm().slotProbeCount() : 0),
                 reason,
                 location,
-                stampPages);
+                stampPages,
+                pdfOpts);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
             writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
@@ -1090,26 +1290,24 @@ public final class ApiServlet extends HttpServlet {
           byte[] signedPdf = hsmResult.signedPdf();
           X509Certificate signingCert = hsmResult.signingCertificate();
 
-          String inputFilename = mp.filename("file");
-          if (inputFilename == null || inputFilename.isBlank()) {
-            inputFilename = "document.pdf";
-          }
           outDirFile.mkdirs();
-          File outFile = new File(outDirFile, buildSignedPdfFilename(inputFilename));
           Files.write(outFile.toPath(), signedPdf);
 
-          writeJson(resp, 200, Map.of(
-              "ok", true,
-              "format", "pdf",
-              "subjectDn", signingCert.getSubjectX500Principal().getName(),
-              "serialNumber", signingCert.getSerialNumber().toString(16),
-              "outputPath", outFile.getAbsolutePath(),
-              "stampedPages", stampPages));
+          Map<String, Object> hsmAutoBody = new LinkedHashMap<>();
+          hsmAutoBody.put("ok", true);
+          hsmAutoBody.put("format", "pdf");
+          hsmAutoBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+          hsmAutoBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+          hsmAutoBody.put("outputPath", outFile.getAbsolutePath());
+          hsmAutoBody.put("chainedFromExistingOutput", pdfToSign != data);
+          hsmAutoBody.put("stampedPages", stampPages);
+          hsmAutoBody.put("finalVersion", finalVersion);
+          writeJson(resp, 200, hsmAutoBody);
           return;
         }
 
         case "/verify-pdf" -> {
-          var mp = Multipart.read(req, 10 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("ok", false, "reason", "Missing PDF file field: file"));
@@ -1127,7 +1325,7 @@ public final class ApiServlet extends HttpServlet {
         case "/sign-text" -> {
           requireSession(req);
 
-          var mp = Multipart.read(req, 2 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartTextMaxBytes);
           byte[] data = mp.file("file");
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
@@ -1244,7 +1442,7 @@ public final class ApiServlet extends HttpServlet {
         // Accepts only ONE file: file
         // Returns: ok, reason, and full certificate details
         case "/verify-text" -> {
-          var mp = Multipart.read(req, 5 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartMediumMaxBytes);
 
           byte[] signedFileBytes = mp.file("file");
 
@@ -1283,7 +1481,7 @@ public final class ApiServlet extends HttpServlet {
         // ── /debug-bytes — REMOVE BEFORE PRODUCTION
         // ───────────────────────────────────
         case "/debug-bytes" -> {
-          var mp = Multipart.read(req, 5 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartMediumMaxBytes);
 
           byte[] signedFileBytes = mp.file("signedFile");
 
@@ -1298,7 +1496,7 @@ public final class ApiServlet extends HttpServlet {
         }
 
         case "/analyze-signed-file" -> {
-          var mp = Multipart.read(req, 2 * 1024 * 1024);
+          var mp = Multipart.read(req, multipartTextMaxBytes);
           byte[] data = mp.file("file");
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing file field: file"));

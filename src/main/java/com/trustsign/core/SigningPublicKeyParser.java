@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Parses PEM or base64-encoded public keys (and PEM certificates) for HSM certificate selection.
+ * Parses PEM or base64-encoded public keys (and PEM certificates) for token certificate selection.
  */
 public final class SigningPublicKeyParser {
 

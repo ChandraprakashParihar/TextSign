@@ -62,7 +62,7 @@ public final class Pkcs11Token {
 
     String safe = Integer.toHexString(libraryPath.hashCode());
     String cfg = "name=TrustSignToken_" + safe + "\n" +
-                 "library=" + libraryPath + "\n";
+                "library=" + libraryPath + "\n";
 
     Path tmp = Files.createTempFile("pkcs11-", ".cfg");
     Files.writeString(tmp, cfg, StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING);

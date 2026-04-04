@@ -31,10 +31,19 @@ public final class Multipart {
       // Some clients (e.g. Postman) may send text fields with filename=""
       // which returns non-null submittedFileName. Treat empty filename as a field.
       if (submitted != null && !submitted.isBlank()) {
-        files.put(name, readAll(p.getInputStream(), maxBytes));
-        fileNames.put(name, submitted);
+        byte[] newBytes = readAll(p.getInputStream(), maxBytes);
+        byte[] prev = files.get(name);
+        // Duplicate part names: do not replace a non-empty payload with an empty one (last part often wins).
+        if (prev == null || newBytes.length > 0) {
+          files.put(name, newBytes);
+          fileNames.put(name, submitted);
+        }
       } else {
-        fields.put(name, new String(readAll(p.getInputStream(), maxBytes), StandardCharsets.UTF_8));
+        String newVal = new String(readAll(p.getInputStream(), maxBytes), StandardCharsets.UTF_8);
+        String prev = fields.get(name);
+        if (prev == null || !newVal.isBlank()) {
+          fields.put(name, newVal);
+        }
       }
     }
     return new Data(files, fields, fileNames);

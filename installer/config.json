@@ -1,6 +1,17 @@
 {
   "port": 31927,
   "allowedOrigins": ["http://localhost:3000"],
+  "server": {
+    "jettyMaxThreads": 400,
+    "jettyMinThreads": 16,
+    "acceptQueueSize": 8192,
+    "maxTcpConnections": 0,
+    "maxConcurrentSigningOperations": 24,
+    "signingAcquireTimeoutMs": 300000,
+    "multipartPdfMaxFileMb": 25,
+    "multipartTextMaxFileMb": 4,
+    "gracefulStopTimeoutMs": 30000
+  },
   "autoSignOutputDir": "output",
   "truststore": {
     "path": "config/truststore.jks",
@@ -35,6 +46,7 @@
   },
   "hsm": {
     "preferredLibrary": null,
+    "slotProbeCount": 32,
     "windowsCandidates": [
       "%SystemRoot%\\System32\\eps2003csp11v2.dll",
       "%SystemRoot%\\System32\\eps2003csp11v2_s.dll",

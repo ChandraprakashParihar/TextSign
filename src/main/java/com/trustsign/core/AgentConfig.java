@@ -10,7 +10,7 @@ public record AgentConfig(
     Pkcs11Config pkcs11,
     /**
      * Optional. PKCS#11 settings used only by {@code /hsm/sign-pdf} and {@code /hsm/auto-sign-pdf}.
-     * Keeps HSM driver paths separate from the main {@code pkcs11} block; token PIN and signer public key are supplied per request.
+     * Keeps HSM driver paths separate from the main {@code pkcs11} block; token PIN and signer .cer are supplied per request.
      */
     @JsonProperty(required = false) HsmConfig hsm,
     /** Optional. When set, outputDir for /auto-sign-text must be under this path (absolute or relative to working dir). */
@@ -33,7 +33,13 @@ public record AgentConfig(
      * (for example: "127.0.0.1", "10.0.0.5").
      * When null or empty, all client IPs are allowed.
      */
-    @JsonProperty(required = false) List<String> allowedClientIps
+    @JsonProperty(required = false) List<String> allowedClientIps,
+    /**
+     * Optional. Jetty threading, TCP limits, multipart sizes, and signing concurrency.
+     * Very large concurrent user counts require many JVM instances behind a load balancer; tune {@code maxConcurrentSigningOperations}
+     * per HSM throughput and set {@code maxTcpConnections} to protect each instance.
+     */
+    @JsonProperty(required = false) ServerConfig server
 ) {
 
   public record TruststoreConfig(
@@ -68,11 +74,111 @@ public record AgentConfig(
       @JsonProperty(required = false) String preferredLibrary,
       @JsonProperty(required = false) List<String> windowsCandidates,
       @JsonProperty(required = false) List<String> macCandidates,
-      @JsonProperty(required = false) List<String> linuxCandidates
+      @JsonProperty(required = false) List<String> linuxCandidates,
+      /**
+       * Optional. For each library, PKCS#11 {@code slotListIndex} values {@code 0 .. slotProbeCount-1} are tried until the uploaded .cer matches.
+       * When omitted or non-positive, the server uses default probing (see {@code com.trustsign.hsm.HsmPkcs11ConfigurationService}).
+       */
+      @JsonProperty(required = false) Integer slotProbeCount
   ) {}
 
   public int portOrDefault() {
     return (port == null || port <= 0) ? 31927 : port;
+  }
+
+  /**
+   * Production server limits. All fields optional; static {@code *OrDefault} helpers apply safe bounds.
+   */
+  public record ServerConfig(
+      @JsonProperty(required = false) Integer jettyMaxThreads,
+      @JsonProperty(required = false) Integer jettyMinThreads,
+      @JsonProperty(required = false) Integer jettyThreadIdleTimeoutMs,
+      @JsonProperty(required = false) Integer acceptQueueSize,
+      @JsonProperty(required = false) Integer connectorIdleTimeoutMs,
+      /** When set and positive, {@link org.eclipse.jetty.server.ConnectionLimit} is applied. Zero or omitted = no global TCP cap. */
+      @JsonProperty(required = false) Integer maxTcpConnections,
+      /** Max concurrent PKCS#11 / signing requests. Omitted defaults to 16; {@code 0} means unlimited (use only with external throttling). */
+      @JsonProperty(required = false) Integer maxConcurrentSigningOperations,
+      @JsonProperty(required = false) Long signingAcquireTimeoutMs,
+      @JsonProperty(required = false) Integer requestHeaderSizeBytes,
+      @JsonProperty(required = false) Integer responseHeaderSizeBytes,
+      @JsonProperty(required = false) Integer multipartPdfMaxFileMb,
+      @JsonProperty(required = false) Integer multipartTextMaxFileMb,
+      @JsonProperty(required = false) Long gracefulStopTimeoutMs
+  ) {
+
+    public static int jettyMaxThreadsOrDefault(ServerConfig c) {
+      int v = c == null || c.jettyMaxThreads() == null ? 250 : c.jettyMaxThreads();
+      return Math.min(Math.max(v, 8), 20_000);
+    }
+
+    public static int jettyMinThreadsOrDefault(ServerConfig c) {
+      int max = jettyMaxThreadsOrDefault(c);
+      int v = c == null || c.jettyMinThreads() == null ? Math.min(10, max) : c.jettyMinThreads();
+      return Math.min(Math.max(v, 1), max);
+    }
+
+    public static int jettyThreadIdleTimeoutMsOrDefault(ServerConfig c) {
+      int v = c == null || c.jettyThreadIdleTimeoutMs() == null ? 60_000 : c.jettyThreadIdleTimeoutMs();
+      return Math.min(Math.max(v, 1000), 600_000);
+    }
+
+    public static int acceptQueueSizeOrDefault(ServerConfig c) {
+      int v = c == null || c.acceptQueueSize() == null ? 4096 : c.acceptQueueSize();
+      return Math.min(Math.max(v, 50), 1_000_000);
+    }
+
+    public static int connectorIdleTimeoutMsOrDefault(ServerConfig c) {
+      int v = c == null || c.connectorIdleTimeoutMs() == null ? 120_000 : c.connectorIdleTimeoutMs();
+      return Math.min(Math.max(v, 1000), 600_000);
+    }
+
+    public static int maxTcpConnectionsOrDefault(ServerConfig c) {
+      if (c == null || c.maxTcpConnections() == null) {
+        return 0;
+      }
+      return Math.min(Math.max(c.maxTcpConnections(), 0), 10_000_000);
+    }
+
+    /**
+     * @return 0 means unlimited signing concurrency (not recommended without external throttling).
+     */
+    public static int maxConcurrentSigningOrDefault(ServerConfig c) {
+      if (c == null || c.maxConcurrentSigningOperations() == null) {
+        return 16;
+      }
+      return Math.min(Math.max(c.maxConcurrentSigningOperations(), 0), 50_000);
+    }
+
+    public static long signingAcquireTimeoutMsOrDefault(ServerConfig c) {
+      long v = c == null || c.signingAcquireTimeoutMs() == null ? 300_000L : c.signingAcquireTimeoutMs();
+      return Math.min(Math.max(v, 0L), 3_600_000L);
+    }
+
+    public static int requestHeaderSizeBytesOrDefault(ServerConfig c) {
+      int v = c == null || c.requestHeaderSizeBytes() == null ? 8192 : c.requestHeaderSizeBytes();
+      return Math.min(Math.max(v, 4096), 1_048_576);
+    }
+
+    public static int responseHeaderSizeBytesOrDefault(ServerConfig c) {
+      int v = c == null || c.responseHeaderSizeBytes() == null ? 8192 : c.responseHeaderSizeBytes();
+      return Math.min(Math.max(v, 4096), 1_048_576);
+    }
+
+    public static int multipartPdfMaxFileMbOrDefault(ServerConfig c) {
+      int v = c == null || c.multipartPdfMaxFileMb() == null ? 25 : c.multipartPdfMaxFileMb();
+      return Math.min(Math.max(v, 1), 500);
+    }
+
+    public static int multipartTextMaxFileMbOrDefault(ServerConfig c) {
+      int v = c == null || c.multipartTextMaxFileMb() == null ? 4 : c.multipartTextMaxFileMb();
+      return Math.min(Math.max(v, 1), 100);
+    }
+
+    public static long gracefulStopTimeoutMsOrDefault(ServerConfig c) {
+      long v = c == null || c.gracefulStopTimeoutMs() == null ? 30_000L : c.gracefulStopTimeoutMs();
+      return Math.min(Math.max(v, 1000L), 300_000L);
+    }
   }
 }
 

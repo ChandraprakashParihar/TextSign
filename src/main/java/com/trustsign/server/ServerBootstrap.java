@@ -3,32 +3,68 @@ package com.trustsign.server;
 import com.trustsign.core.AgentConfig;
 import com.trustsign.core.LicenceEnforcer;
 import com.trustsign.core.SessionManager;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.MultipartConfigElement;
+import org.eclipse.jetty.server.ConnectionLimit;
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.util.thread.QueuedThreadPool;
+
+import java.util.EnumSet;
+import java.util.logging.Logger;
 
 public final class ServerBootstrap {
 
+  private static final Logger LOG = Logger.getLogger(ServerBootstrap.class.getName());
+
   public static Server buildServer(AgentConfig cfg, LicenceEnforcer licenceEnforcer) {
+    AgentConfig.ServerConfig sc = cfg.server();
     SessionManager sessions = new SessionManager();
 
-    Server server = new Server();
+    QueuedThreadPool pool = new QueuedThreadPool();
+    pool.setName("trustsign-http");
+    pool.setMaxThreads(AgentConfig.ServerConfig.jettyMaxThreadsOrDefault(sc));
+    pool.setMinThreads(AgentConfig.ServerConfig.jettyMinThreadsOrDefault(sc));
+    pool.setIdleTimeout(AgentConfig.ServerConfig.jettyThreadIdleTimeoutMsOrDefault(sc));
 
-    ServerConnector connector = new ServerConnector(server);
-    // Bind to all interfaces so the API can be reached from other servers.
+    Server server = new Server(pool);
+
+    int maxTcp = AgentConfig.ServerConfig.maxTcpConnectionsOrDefault(sc);
+    if (maxTcp > 0) {
+      server.addBean(new ConnectionLimit(maxTcp, server));
+    }
+
+    HttpConfiguration httpConfig = new HttpConfiguration();
+    httpConfig.setRequestHeaderSize(AgentConfig.ServerConfig.requestHeaderSizeBytesOrDefault(sc));
+    httpConfig.setResponseHeaderSize(AgentConfig.ServerConfig.responseHeaderSizeBytesOrDefault(sc));
+    HttpConnectionFactory httpFactory = new HttpConnectionFactory(httpConfig);
+
+    ServerConnector connector = new ServerConnector(server, httpFactory);
     connector.setHost("0.0.0.0");
     connector.setPort(cfg.portOrDefault());
+    connector.setIdleTimeout(AgentConfig.ServerConfig.connectorIdleTimeoutMsOrDefault(sc));
+    connector.setAcceptQueueSize(AgentConfig.ServerConfig.acceptQueueSizeOrDefault(sc));
     server.addConnector(connector);
+
+    SigningConcurrencyGate signingGate = SigningConcurrencyGate.create(sc);
 
     ServletContextHandler ctx = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
     ctx.setContextPath("/");
 
-    ServletHolder api = new ServletHolder(new ApiServlet(sessions, licenceEnforcer));
+    FilterHolder signFilter = new FilterHolder(new SigningConcurrencyFilter(signingGate, sc));
+    ctx.addFilter(signFilter, "/v1/*", EnumSet.of(DispatcherType.REQUEST));
 
-    int maxFile = 2 * 1024 * 1024;
-    long maxReq = maxFile + (1L * 1024 * 1024);
+    ServletHolder api = new ServletHolder(new ApiServlet(sessions, licenceEnforcer, signingGate, sc));
+
+    int pdfMb = AgentConfig.ServerConfig.multipartPdfMaxFileMbOrDefault(sc);
+    int textMb = AgentConfig.ServerConfig.multipartTextMaxFileMbOrDefault(sc);
+    int maxFile = Math.max(pdfMb, textMb) * 1024 * 1024;
+    long maxReq = maxFile + (2L * 1024 * 1024);
 
     api.getRegistration().setMultipartConfig(new MultipartConfigElement(
         System.getProperty("java.io.tmpdir"),
@@ -40,9 +76,18 @@ public final class ServerBootstrap {
     ctx.addServlet(api, "/v1/*");
 
     server.setHandler(ctx);
+
+    int signMax = AgentConfig.ServerConfig.maxConcurrentSigningOrDefault(sc);
+    LOG.info(String.format(
+        "TrustSign listener: port=%d jettyMaxThreads=%d acceptQueue=%d signingConcurrency=%s tcpConnectionCap=%s",
+        cfg.portOrDefault(),
+        pool.getMaxThreads(),
+        connector.getAcceptQueueSize(),
+        signMax <= 0 ? "unlimited" : String.valueOf(signMax),
+        maxTcp <= 0 ? "none" : String.valueOf(maxTcp)));
+
     return server;
   }
 
   private ServerBootstrap() {}
 }
-

@@ -1,15 +1,17 @@
 package com.trustsign.core;
 
+import com.trustsign.hsm.HsmPkcs11ConfigurationService;
+
 import java.security.KeyStore;
 import java.security.PrivateKey;
-import java.security.PublicKey;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.Arrays;
 import java.util.List;
 
 /**
- * PDF signing via PKCS#11 using libraries from {@code config.hsm}, with PIN and signer public key supplied per request.
+ * PDF signing via PKCS#11 using libraries from {@code config.hsm}, with PIN and signer certificate (.cer) supplied per request.
+ * Slot selection and PKCS#11 configuration are handled by {@link HsmPkcs11ConfigurationService} (multi-slot HSM).
  * Delegates PDF construction to {@link PdfSignerService} after resolving key material from the token.
  */
 public final class HsmPdfSignerService {
@@ -19,19 +21,23 @@ public final class HsmPdfSignerService {
   public static SignResult signPdfWithMetadata(
       byte[] pdfBytes,
       char[] pin,
-      String publicKeyPemOrBase64,
+      byte[] cerBytes,
       List<String> libraryCandidates,
+      int slotProbeCount,
       String reason,
       String location,
-      List<Integer> stampPages) throws Exception {
-    validateRequest(pdfBytes, pin, publicKeyPemOrBase64, libraryCandidates);
+      List<Integer> stampPages,
+      PdfSignerService.PdfSigningOptions signingOptions) throws Exception {
+    validateRequest(pdfBytes, pin, cerBytes, libraryCandidates);
 
     char[] pinCopy = Arrays.copyOf(pin, pin.length);
     try {
-      PdfSignerService.PdfSigningMaterial material = loadSigningMaterial(pinCopy, publicKeyPemOrBase64, libraryCandidates);
+      PdfSignerService.PdfSigningMaterial material = loadSigningMaterial(pinCopy, cerBytes, libraryCandidates, slotProbeCount);
       CertificateValidator.validateForSigning(material.signingCertificate(), material.x509ChainOrNull());
 
-      byte[] signed = PdfSignerService.signPdf(pdfBytes, material, reason, location, stampPages);
+      PdfSignerService.PdfSigningOptions opts =
+          signingOptions != null ? signingOptions : PdfSignerService.PdfSigningOptions.DEFAULT;
+      byte[] signed = PdfSignerService.signPdf(pdfBytes, material, reason, location, stampPages, opts);
       return new SignResult(signed, material.signingCertificate());
     } finally {
       Arrays.fill(pinCopy, '\0');
@@ -41,7 +47,7 @@ public final class HsmPdfSignerService {
   private static void validateRequest(
       byte[] pdfBytes,
       char[] pin,
-      String publicKeyPemOrBase64,
+      byte[] cerBytes,
       List<String> libraryCandidates) {
     if (pdfBytes == null || pdfBytes.length == 0) {
       throw new IllegalArgumentException("pdfBytes is empty");
@@ -49,8 +55,8 @@ public final class HsmPdfSignerService {
     if (pin == null || pin.length == 0) {
       throw new IllegalArgumentException("pin is required");
     }
-    if (publicKeyPemOrBase64 == null || publicKeyPemOrBase64.isBlank()) {
-      throw new IllegalArgumentException("publicKey is required");
+    if (cerBytes == null || cerBytes.length == 0) {
+      throw new IllegalArgumentException("cer is required");
     }
     if (libraryCandidates == null || libraryCandidates.isEmpty()) {
       throw new IllegalStateException(
@@ -60,20 +66,18 @@ public final class HsmPdfSignerService {
 
   private static PdfSignerService.PdfSigningMaterial loadSigningMaterial(
       char[] pinCopy,
-      String publicKeyPemOrBase64,
-      List<String> libraryCandidates) throws Exception {
-    List<PublicKey> requested = SigningPublicKeyParser.parsePublicKeys(publicKeyPemOrBase64);
-    if (requested.isEmpty()) {
-      throw new IllegalArgumentException("publicKey did not contain a usable RSA public key or certificate");
+      byte[] cerBytes,
+      List<String> libraryCandidates,
+      int slotProbeCount) throws Exception {
+    List<X509Certificate> provided = SigningCertificateParser.parseFromUpload(cerBytes);
+    if (provided.isEmpty()) {
+      throw new IllegalArgumentException("cer did not contain a usable X.509 certificate (PEM or DER)");
     }
 
-    Pkcs11Token.Loaded loaded = Pkcs11Token.load(pinCopy, libraryCandidates);
-    KeyStore ks = loaded.keyStore();
-
-    TokenCertificateSelector.Selection selection = TokenCertificateSelector.select(ks, requested);
-    if (selection == null) {
-      throw new IllegalStateException("No certificate on the HSM token matches the provided public key");
-    }
+    HsmPkcs11ConfigurationService.MatchedSlotLoad matched =
+        HsmPkcs11ConfigurationService.loadMatchingSlot(pinCopy, libraryCandidates, provided, slotProbeCount);
+    KeyStore ks = matched.keyStore();
+    TokenCertificateSelector.Selection selection = matched.selection();
 
     PrivateKey key = (PrivateKey) ks.getKey(selection.alias(), pinCopy);
     if (key == null) {
@@ -84,7 +88,7 @@ public final class HsmPdfSignerService {
     return new PdfSignerService.PdfSigningMaterial(
         key,
         chain,
-        loaded.provider(),
+        matched.provider(),
         selection.certificate());
   }
 

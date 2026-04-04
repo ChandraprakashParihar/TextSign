@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.SigningPublicKeyParserTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-04-04T06:11:58.079Z" hostname="Chandras-Mac-mini.local" time="0.003">
+<testsuite name="com.trustsign.core.SigningPublicKeyParserTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-04-04T09:55:43.866Z" hostname="Chandras-Mac-mini.local" time="0.002">
   <properties/>
-  <testcase name="parsesPemPublicKeyFile()" classname="com.trustsign.core.SigningPublicKeyParserTest" time="0.003"/>
+  <testcase name="parsesPemPublicKeyFile()" classname="com.trustsign.core.SigningPublicKeyParserTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>
