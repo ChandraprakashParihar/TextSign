@@ -11,7 +11,6 @@ import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureOptions;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.security.PrivateKey;
 import java.security.Provider;
 import java.security.cert.Certificate;
@@ -19,9 +18,54 @@ import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
 
+/**
+ * PAdES-style PDF signing (visible stamp + PKCS#7 detached) using a caller-supplied key and provider (e.g. SunPKCS11).
+ */
 public final class PdfSignerService {
+
+  /**
+   * Key material and provider required to produce the embedded PKCS#7 signature.
+   */
+  public record PdfSigningMaterial(
+      PrivateKey privateKey,
+      Certificate[] certificateChain,
+      Provider cryptoProvider,
+      X509Certificate signingCertificate) {
+
+    public PdfSigningMaterial {
+      if (privateKey == null) {
+        throw new IllegalArgumentException("privateKey is null");
+      }
+      if (certificateChain == null || certificateChain.length == 0) {
+        throw new IllegalArgumentException("certificateChain is empty");
+      }
+      if (cryptoProvider == null) {
+        throw new IllegalArgumentException("cryptoProvider is null");
+      }
+      if (signingCertificate == null) {
+        throw new IllegalArgumentException("signingCertificate is null");
+      }
+    }
+
+    /** Chain as {@link X509Certificate} entries only, or null if the chain does not start with an X.509 certificate. */
+    public X509Certificate[] x509ChainOrNull() {
+      if (!(certificateChain[0] instanceof X509Certificate)) {
+        return null;
+      }
+      return Stream.of(certificateChain)
+          .filter(X509Certificate.class::isInstance)
+          .map(X509Certificate.class::cast)
+          .toArray(X509Certificate[]::new);
+    }
+  }
+
   private static final Logger LOG = Logger.getLogger(PdfSignerService.class.getName());
   private static final DateTimeFormatter TS_FMT = DateTimeFormatter
       .ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'")
@@ -35,22 +79,22 @@ public final class PdfSignerService {
       X509Certificate signingCert,
       String reason,
       String location,
-      java.util.List<Integer> stampPageIndices) throws Exception {
-    if (pdfBytes == null || pdfBytes.length == 0) {
-      throw new IllegalArgumentException("pdfBytes is empty");
-    }
-    if (privateKey == null) {
-      throw new IllegalArgumentException("privateKey is null");
-    }
-    if (chain == null || chain.length == 0) {
-      throw new IllegalArgumentException("certificate chain is empty");
-    }
-    if (p11Provider == null) {
-      throw new IllegalArgumentException("p11Provider is null");
-    }
-    if (signingCert == null) {
-      throw new IllegalArgumentException("signingCert is null");
-    }
+      List<Integer> stampPageIndices) throws Exception {
+    return signPdf(
+        pdfBytes,
+        new PdfSigningMaterial(privateKey, chain, p11Provider, signingCert),
+        reason,
+        location,
+        stampPageIndices);
+  }
+
+  public static byte[] signPdf(
+      byte[] pdfBytes,
+      PdfSigningMaterial material,
+      String reason,
+      String location,
+      List<Integer> stampPageIndices) throws Exception {
+    requireNonEmptyPdf(pdfBytes);
 
     try (PDDocument doc = PDDocument.load(new ByteArrayInputStream(pdfBytes))) {
       if (doc.getNumberOfPages() == 0) {
@@ -58,31 +102,20 @@ public final class PdfSignerService {
       }
 
       Instant now = Instant.now();
-      addVisualSignatureStamp(doc, signingCert, now, reason, location, stampPageIndices);
+      addVisualSignatureStamp(doc, material.signingCertificate(), now, reason, location, stampPageIndices);
 
       PDSignature signature = new PDSignature();
-      signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
-      signature.setSubFilter(PDSignature.SUBFILTER_ADBE_PKCS7_DETACHED);
-      signature.setName(signingCert.getSubjectX500Principal().getName());
-      if (reason != null && !reason.isBlank()) {
-        signature.setReason(reason.trim());
-      } else {
-        signature.setReason("TrustSign digital signature");
-      }
-      if (location != null && !location.isBlank()) {
-        signature.setLocation(location.trim());
-      }
-      signature.setSignDate(java.util.Calendar.getInstance());
+      applySignatureMetadata(signature, material.signingCertificate(), reason, location);
 
-      SignatureInterface sigImpl = new SignatureInterface() {
-        @Override
-        public byte[] sign(InputStream content) throws java.io.IOException {
-          try {
-            byte[] signedContent = content.readAllBytes();
-            return TextSignerService.signDetached(signedContent, privateKey, chain, p11Provider);
-          } catch (Exception e) {
-            throw new java.io.IOException("PDF signature generation failed", e);
-          }
+      SignatureInterface sigImpl = content -> {
+        try {
+          return TextSignerService.signDetached(
+              content.readAllBytes(),
+              material.privateKey(),
+              material.certificateChain(),
+              material.cryptoProvider());
+        } catch (Exception e) {
+          throw new java.io.IOException("PDF signature generation failed", e);
         }
       };
 
@@ -91,8 +124,6 @@ public final class PdfSignerService {
       doc.addSignature(signature, sigImpl, options);
 
       try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-        // Use full save so all page content updates (multi-page stamping)
-        // are persisted into the signed PDF.
         doc.save(out);
         return out.toByteArray();
       } finally {
@@ -101,17 +132,42 @@ public final class PdfSignerService {
     }
   }
 
+  private static void requireNonEmptyPdf(byte[] pdfBytes) {
+    if (pdfBytes == null || pdfBytes.length == 0) {
+      throw new IllegalArgumentException("pdfBytes is empty");
+    }
+  }
+
+  private static void applySignatureMetadata(
+      PDSignature signature,
+      X509Certificate signingCert,
+      String reason,
+      String location) {
+    signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+    signature.setSubFilter(PDSignature.SUBFILTER_ADBE_PKCS7_DETACHED);
+    signature.setName(signingCert.getSubjectX500Principal().getName());
+    if (reason != null && !reason.isBlank()) {
+      signature.setReason(reason.trim());
+    } else {
+      signature.setReason("TrustSign digital signature");
+    }
+    if (location != null && !location.isBlank()) {
+      signature.setLocation(location.trim());
+    }
+    signature.setSignDate(java.util.Calendar.getInstance());
+  }
+
   private static void addVisualSignatureStamp(
       PDDocument doc,
       X509Certificate cert,
       Instant signedAt,
       String reason,
       String location,
-      java.util.List<Integer> stampPageIndices) throws Exception {
+      List<Integer> stampPageIndices) throws Exception {
     String subject = extractDisplaySubject(cert);
     String when = TS_FMT.format(signedAt);
 
-    java.util.List<Integer> resolvedPages = resolveStampPages(doc, stampPageIndices);
+    List<Integer> resolvedPages = resolveStampPages(doc, stampPageIndices);
     if (Boolean.getBoolean("trustsign.debugPdfStamp")) {
       LOG.info("PDF stamp pages resolved: " + resolvedPages);
     }
@@ -172,31 +228,31 @@ public final class PdfSignerService {
     }
   }
 
-  private static java.util.List<Integer> resolveStampPages(
-      PDDocument doc,
-      java.util.List<Integer> stampPageIndices) {
+  private static List<Integer> resolveStampPages(PDDocument doc, List<Integer> stampPageIndices) {
     int pageCount = doc.getNumberOfPages();
     if (stampPageIndices == null || stampPageIndices.isEmpty()) {
-      return java.util.List.of(0);
+      return List.of(0);
     }
     if (stampPageIndices.contains(-1)) {
-      java.util.List<Integer> all = new java.util.ArrayList<>();
+      List<Integer> all = new ArrayList<>();
       for (int i = 0; i < pageCount; i++) {
         all.add(i);
       }
       return all;
     }
-    java.util.Set<Integer> unique = new java.util.LinkedHashSet<>();
+    Set<Integer> unique = new LinkedHashSet<>();
     for (Integer idx : stampPageIndices) {
-      if (idx == null) continue;
+      if (idx == null) {
+        continue;
+      }
       if (idx >= 0 && idx < pageCount) {
         unique.add(idx);
       }
     }
     if (unique.isEmpty()) {
-      return java.util.List.of(0);
+      return List.of(0);
     }
-    return new java.util.ArrayList<>(unique);
+    return new ArrayList<>(unique);
   }
 
   private static void writeLine(PDPageContentStream cs, String value, float x, float y) throws Exception {
@@ -217,8 +273,8 @@ public final class PdfSignerService {
     cs.endText();
   }
 
-  private static java.util.List<String> wrapSubjectLines(String value, int maxCharsPerLine) {
-    java.util.List<String> lines = new java.util.ArrayList<>();
+  private static List<String> wrapSubjectLines(String value, int maxCharsPerLine) {
+    List<String> lines = new ArrayList<>();
     if (value == null || value.isBlank()) {
       lines.add("Subject:");
       return lines;
@@ -255,6 +311,5 @@ public final class PdfSignerService {
     return dn;
   }
 
-  private PdfSignerService() {
-  }
+  private PdfSignerService() {}
 }

@@ -38,8 +38,17 @@ public final class OsPkcs11Resolver {
   }
 
   public static List<String> candidates(AgentConfig cfg) {
+    return candidates(cfg.pkcs11());
+  }
+
+  /**
+   * Resolves PKCS#11 library paths from the main {@code pkcs11} config block.
+   */
+  public static List<String> candidates(AgentConfig.Pkcs11Config p) {
+    if (p == null) {
+      return List.of();
+    }
     var out = new ArrayList<String>();
-    var p = cfg.pkcs11();
 
     if (p.preferredLibrary() != null && !p.preferredLibrary().isBlank()) {
       out.add(expandWindowsPath(p.preferredLibrary().trim()));
@@ -62,6 +71,22 @@ public final class OsPkcs11Resolver {
         .filter(s -> !s.isBlank())
         .distinct()
         .toList();
+  }
+
+  /**
+   * Resolves PKCS#11 library paths from the optional {@code hsm} config block (separate from {@code pkcs11}).
+   */
+  public static List<String> hsmCandidates(AgentConfig.HsmConfig h) {
+    if (h == null) {
+      return List.of();
+    }
+    var synthetic = new AgentConfig.Pkcs11Config(
+        h.preferredLibrary(),
+        h.windowsCandidates(),
+        h.macCandidates(),
+        h.linuxCandidates(),
+        "");
+    return candidates(synthetic);
   }
 
   private static List<String> nullToEmpty(List<String> list) {

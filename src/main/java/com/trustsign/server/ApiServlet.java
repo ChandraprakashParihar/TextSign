@@ -2,6 +2,7 @@ package com.trustsign.server;
 
 import com.trustsign.core.AgentConfig;
 import com.trustsign.core.ConfigLoader;
+import com.trustsign.core.HsmPdfSignerService;
 import com.trustsign.core.PdfSignerService;
 import com.trustsign.core.PdfVerifyService;
 import com.trustsign.core.Pkcs11Token;
@@ -191,6 +192,22 @@ public final class ApiServlet extends HttpServlet {
     } catch (Exception ignore) {
       return null;
     }
+  }
+
+  /**
+   * Reads a text multipart field or a same-named file part (Postman-style). For PEM bodies, use {@code trimBody=false}.
+   */
+  private static String readMultipartString(Multipart.Data mp, String name, boolean trimBody) {
+    String v = mp.field(name);
+    if (v != null && !v.isEmpty()) {
+      return trimBody ? v.trim() : v;
+    }
+    byte[] b = mp.file(name);
+    if (b != null && b.length > 0) {
+      String s = new String(b, StandardCharsets.UTF_8);
+      return trimBody ? s.trim() : s;
+    }
+    return null;
   }
 
   /**
@@ -884,6 +901,210 @@ public final class ApiServlet extends HttpServlet {
           resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
           resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
           resp.getOutputStream().write(signedPdf);
+          return;
+        }
+
+        case "/hsm/sign-pdf" -> {
+          var mp = Multipart.read(req, 10 * 1024 * 1024);
+          byte[] data = mp.file("file");
+          String publicKeyPem = readMultipartString(mp, "publicKey", false);
+          String pinStr = readMultipartString(mp, "pin", true);
+          String reason = mp.field("reason");
+          String location = mp.field("location");
+          if (reason == null) {
+            byte[] rb = mp.file("reason");
+            if (rb != null && rb.length > 0) {
+              reason = new String(rb, StandardCharsets.UTF_8).trim();
+            }
+          }
+          if (location == null) {
+            byte[] lb = mp.file("location");
+            if (lb != null && lb.length > 0) {
+              location = new String(lb, StandardCharsets.UTF_8).trim();
+            }
+          }
+          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
+
+          if (data == null || data.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
+            return;
+          }
+          if (!isPdfUpload(data, mp.filename("file"))) {
+            writeJson(resp, 400, Map.of("error", "Uploaded file is not a PDF"));
+            return;
+          }
+          if (publicKeyPem == null || publicKeyPem.isBlank()) {
+            writeJson(resp, 400, Map.of("error", "Missing publicKey field (PEM public key or certificate)"));
+            return;
+          }
+          if (pinStr == null || pinStr.isBlank()) {
+            writeJson(resp, 400, Map.of("error", "Missing pin field (HSM token PIN)"));
+            return;
+          }
+
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null)
+            return;
+          if (cfg.hsm() == null) {
+            writeJson(resp, 500,
+                Map.of("error", "Configuration error", "details", "config.hsm is not configured (see config.json)"));
+            return;
+          }
+          List<String> libs = OsPkcs11Resolver.hsmCandidates(cfg.hsm());
+          if (libs.isEmpty()) {
+            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured under config.hsm for this OS"));
+            return;
+          }
+
+          char[] pinChars = pinStr.toCharArray();
+          HsmPdfSignerService.SignResult hsmResult = null;
+          try {
+            hsmResult = HsmPdfSignerService.signPdfWithMetadata(
+                data,
+                pinChars,
+                publicKeyPem,
+                libs,
+                reason,
+                location,
+                stampPages);
+          } catch (RuntimeException e) {
+            String detail = buildTokenErrorDetail(e);
+            writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
+            return;
+          } catch (Exception e) {
+            LOG.warning("/hsm/sign-pdf: " + e.getMessage());
+            writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
+            return;
+          } finally {
+            java.util.Arrays.fill(pinChars, '\0');
+          }
+
+          X509Certificate signingCert = hsmResult.signingCertificate();
+          byte[] signedPdf = hsmResult.signedPdf();
+          resp.setStatus(200);
+          resp.setContentType("application/pdf");
+          resp.setHeader("X-Stamped-Pages", String.valueOf(stampPages));
+          resp.setHeader("Content-Disposition",
+              "attachment; filename=\"" + buildSignedPdfFilename(mp.filename("file")) + "\"");
+          resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
+          resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
+          resp.getOutputStream().write(signedPdf);
+          return;
+        }
+
+        case "/hsm/auto-sign-pdf" -> {
+          var mp = Multipart.read(req, 10 * 1024 * 1024);
+          byte[] data = mp.file("file");
+          String publicKeyPem = readMultipartString(mp, "publicKey", false);
+          String pinStr = readMultipartString(mp, "pin", true);
+          String reason = mp.field("reason");
+          String location = mp.field("location");
+          if (reason == null) {
+            byte[] rb = mp.file("reason");
+            if (rb != null && rb.length > 0) {
+              reason = new String(rb, StandardCharsets.UTF_8).trim();
+            }
+          }
+          if (location == null) {
+            byte[] lb = mp.file("location");
+            if (lb != null && lb.length > 0) {
+              location = new String(lb, StandardCharsets.UTF_8).trim();
+            }
+          }
+          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
+
+          if (data == null || data.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
+            return;
+          }
+          if (!isPdfUpload(data, mp.filename("file"))) {
+            writeJson(resp, 400, Map.of("error", "Uploaded file is not a PDF"));
+            return;
+          }
+          if (publicKeyPem == null || publicKeyPem.isBlank()) {
+            writeJson(resp, 400, Map.of("error", "Missing publicKey field (PEM public key or certificate)"));
+            return;
+          }
+          if (pinStr == null || pinStr.isBlank()) {
+            writeJson(resp, 400, Map.of("error", "Missing pin field (HSM token PIN)"));
+            return;
+          }
+
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null)
+            return;
+          if (cfg.hsm() == null) {
+            writeJson(resp, 500,
+                Map.of("error", "Configuration error", "details", "config.hsm is not configured (see config.json)"));
+            return;
+          }
+          String outputDir = cfg.autoSignOutputDir();
+          if (outputDir == null || outputDir.isBlank()) {
+            writeJson(resp, 500,
+                Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
+            return;
+          }
+          Path outputBase = null;
+          if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+            outputBase = Paths.get(cfg.outputBaseDir());
+            if (!outputBase.isAbsolute()) {
+              outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+            }
+          }
+          File outDirFile;
+          try {
+            outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+          } catch (SecurityException | IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+            return;
+          }
+          List<String> libs = OsPkcs11Resolver.hsmCandidates(cfg.hsm());
+          if (libs.isEmpty()) {
+            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured under config.hsm for this OS"));
+            return;
+          }
+
+          char[] pinChars = pinStr.toCharArray();
+          HsmPdfSignerService.SignResult hsmResult = null;
+          try {
+            hsmResult = HsmPdfSignerService.signPdfWithMetadata(
+                data,
+                pinChars,
+                publicKeyPem,
+                libs,
+                reason,
+                location,
+                stampPages);
+          } catch (RuntimeException e) {
+            String detail = buildTokenErrorDetail(e);
+            writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
+            return;
+          } catch (Exception e) {
+            LOG.warning("/hsm/auto-sign-pdf: " + e.getMessage());
+            writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
+            return;
+          } finally {
+            java.util.Arrays.fill(pinChars, '\0');
+          }
+
+          byte[] signedPdf = hsmResult.signedPdf();
+          X509Certificate signingCert = hsmResult.signingCertificate();
+
+          String inputFilename = mp.filename("file");
+          if (inputFilename == null || inputFilename.isBlank()) {
+            inputFilename = "document.pdf";
+          }
+          outDirFile.mkdirs();
+          File outFile = new File(outDirFile, buildSignedPdfFilename(inputFilename));
+          Files.write(outFile.toPath(), signedPdf);
+
+          writeJson(resp, 200, Map.of(
+              "ok", true,
+              "format", "pdf",
+              "subjectDn", signingCert.getSubjectX500Principal().getName(),
+              "serialNumber", signingCert.getSerialNumber().toString(16),
+              "outputPath", outFile.getAbsolutePath(),
+              "stampedPages", stampPages));
           return;
         }
 

@@ -32,5 +32,24 @@
     ],
     "macCandidates": ["/usr/local/lib/libcastle_v2.1.0.0.dylib"],
     "linuxCandidates": []
+  },
+  "hsm": {
+    "preferredLibrary": null,
+    "windowsCandidates": [
+      "%SystemRoot%\\System32\\eps2003csp11v2.dll",
+      "%SystemRoot%\\System32\\eps2003csp11v2_s.dll",
+      "%SystemRoot%\\SysWOW64\\eps2003csp11v2.dll",
+      "%SystemRoot%\\SysWOW64\\eps2003csp11v2_s.dll",
+      "%ProgramFiles%\\HyperPKI\\bin\\pkcs11.dll",
+      "%ProgramFiles%\\HyperPKI\\pkcs11.dll",
+      "%ProgramFiles(x86)%\\HyperPKI\\bin\\pkcs11.dll",
+      "%ProgramFiles(x86)%\\HyperPKI\\pkcs11.dll",
+      "%ProgramFiles%\\ePass2003\\bin\\pkcs11.dll",
+      "%ProgramFiles(x86)%\\ePass2003\\bin\\pkcs11.dll",
+      "%ProgramFiles%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll",
+      "%ProgramFiles(x86)%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll"
+    ],
+    "macCandidates": ["/usr/local/lib/libcastle_v2.1.0.0.dylib"],
+    "linuxCandidates": []
   }
 }

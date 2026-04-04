@@ -8,6 +8,11 @@ public record AgentConfig(
     List<String> allowedOrigins,
     Integer port,
     Pkcs11Config pkcs11,
+    /**
+     * Optional. PKCS#11 settings used only by {@code /hsm/sign-pdf} and {@code /hsm/auto-sign-pdf}.
+     * Keeps HSM driver paths separate from the main {@code pkcs11} block; token PIN and signer public key are supplied per request.
+     */
+    @JsonProperty(required = false) HsmConfig hsm,
     /** Optional. When set, outputDir for /auto-sign-text must be under this path (absolute or relative to working dir). */
     @JsonProperty(required = false) String outputBaseDir,
     /** Optional. When set, signing certificates are validated against this trust store (chain validation). */
@@ -54,6 +59,16 @@ public record AgentConfig(
       List<String> macCandidates,
       List<String> linuxCandidates,
       String pin
+  ) {}
+
+  /**
+   * HSM / PKCS#11 library discovery for the dedicated HSM PDF endpoints. No PIN here — use the {@code pin} multipart field on the API.
+   */
+  public record HsmConfig(
+      @JsonProperty(required = false) String preferredLibrary,
+      @JsonProperty(required = false) List<String> windowsCandidates,
+      @JsonProperty(required = false) List<String> macCandidates,
+      @JsonProperty(required = false) List<String> linuxCandidates
   ) {}
 
   public int portOrDefault() {
