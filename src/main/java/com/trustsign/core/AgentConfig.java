@@ -21,6 +21,10 @@ public record AgentConfig(
     @JsonProperty(required = false) CertificateValidationConfig certificateValidation,
     /** Optional. Emitted as &lt;SIGNER-VERSION&gt; in signed output. Use e.g. "V-NCODE_01.05.2013" for Icegate verification. */
     @JsonProperty(required = false) String signerVersion,
+    /** Optional. RFC 3161 timestamping settings for PDF signatures. */
+    @JsonProperty(required = false) TsaConfig tsa,
+    /** Optional. Long-Term Validation (DSS: certs, OCSP, CRLs) settings for PDF signatures. */
+    @JsonProperty(required = false) LtvConfig ltv,
     /**
      * Optional. When set, /auto-sign-text and /auto-sign-text-cms will always write signed
      * files to this directory instead of taking outputDir from the HTTP request.
@@ -80,6 +84,31 @@ public record AgentConfig(
        * When omitted or non-positive, the server uses default probing (see {@code com.trustsign.hsm.HsmPkcs11ConfigurationService}).
        */
       @JsonProperty(required = false) Integer slotProbeCount
+  ) {}
+
+  /**
+   * RFC 3161 Time Stamping Authority settings.
+   * When {@code url} is blank or missing, TSA is disabled.
+   */
+  public record TsaConfig(
+      @JsonProperty(required = false) String url,
+      @JsonProperty(required = false) String hashAlgorithm,
+      @JsonProperty(required = false) Boolean failOnError,
+      @JsonProperty(required = false) Integer connectTimeoutMs,
+      @JsonProperty(required = false) Integer readTimeoutMs
+  ) {}
+
+  /**
+   * LTV embedding settings for PDF signatures.
+   */
+  public record LtvConfig(
+      @JsonProperty(required = false) Boolean enabled,
+      /** If true, signing fails when OCSP and CRL are both unavailable for any signer cert. */
+      @JsonProperty(required = false) Boolean failOnMissingRevocationData,
+      @JsonProperty(required = false) Integer ocspConnectTimeoutMs,
+      @JsonProperty(required = false) Integer ocspReadTimeoutMs,
+      @JsonProperty(required = false) Integer crlConnectTimeoutMs,
+      @JsonProperty(required = false) Integer crlReadTimeoutMs
   ) {}
 
   public int portOrDefault() {

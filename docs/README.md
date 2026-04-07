@@ -30,3 +30,18 @@ npx md-to-pdf TrustSign-Client-Manual.md -o TrustSign-Client-Manual.pdf
 ```
 
 You can give the PDF to your client together with the TrustSign ZIP package.
+  "tsa": {
+    "url": "http://timestamp.digicert.com",
+    "hashAlgorithm": "SHA-256",
+    "failOnError": false,
+    "connectTimeoutMs": 10000,
+    "readTimeoutMs": 15000
+  }
+  "ltv": {
+    "enabled": true,
+    "failOnMissingRevocationData": false,
+    "ocspConnectTimeoutMs": 10000,
+    "ocspReadTimeoutMs": 15000,
+    "crlConnectTimeoutMs": 10000,
+    "crlReadTimeoutMs": 15000
+  }

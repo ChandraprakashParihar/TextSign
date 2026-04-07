@@ -78,11 +78,23 @@ public final class PdfSignerService {
    *                                product; default blocks re-sign unless this
    *                                override is set.
    */
-  public record PdfSigningOptions(boolean finalVersion, boolean allowResignFinalVersion) {
-    public static final PdfSigningOptions DEFAULT = new PdfSigningOptions(false, false);
+  public record PdfSigningOptions(
+      boolean finalVersion,
+      boolean allowResignFinalVersion,
+      TsaClient.Config tsaConfig,
+      LtvEnabler.Config ltvConfig) {
+    public static final PdfSigningOptions DEFAULT = new PdfSigningOptions(
+        false,
+        false,
+        TsaClient.Config.DISABLED,
+        LtvEnabler.Config.DISABLED);
 
     public PdfSigningOptions(boolean finalVersion) {
-      this(finalVersion, false);
+      this(finalVersion, false, TsaClient.Config.DISABLED, LtvEnabler.Config.DISABLED);
+    }
+
+    public PdfSigningOptions(boolean finalVersion, boolean allowResignFinalVersion) {
+      this(finalVersion, allowResignFinalVersion, TsaClient.Config.DISABLED, LtvEnabler.Config.DISABLED);
     }
   }
 
@@ -215,6 +227,10 @@ public final class PdfSignerService {
         applyFinalVersionDocumentMetadata(doc);
       }
 
+      if (opts.ltvConfig() != null && opts.ltvConfig().enabled()) {
+        LtvEnabler.embedValidationData(doc, material.x509ChainOrNull(), opts.ltvConfig());
+      }
+
       maybeClearNeedAppearancesIfSafe(doc);
 
       List<Integer> resolvedPages = resolveStampPages(doc, stampPageIndices);
@@ -239,7 +255,8 @@ public final class PdfSignerService {
               content.readAllBytes(),
               material.privateKey(),
               material.certificateChain(),
-              material.cryptoProvider());
+              material.cryptoProvider(),
+              opts.tsaConfig());
         } catch (Exception e) {
           throw new java.io.IOException("PDF signature generation failed", e);
         }

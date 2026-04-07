@@ -17,11 +17,13 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.net.URL;
 import java.security.KeyStore;
+import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509CRL;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Enumeration;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -334,6 +336,30 @@ public final class CertificateValidator {
     } catch (Exception e) {
       throw new SecurityException("Certificate path validation failed: " + e.getMessage(), e);
     }
+  }
+
+  /**
+   * Looks up the issuer of {@code signer} in the configured trust store (same properties as path validation).
+   * Returns null when no trust store is configured, or no entry matches the signer's issuer DN.
+   */
+  public static X509Certificate findIssuerInConfiguredTruststore(X509Certificate signer) throws Exception {
+    if (signer == null) {
+      return null;
+    }
+    KeyStore ks = loadTrustStoreIfConfigured();
+    if (ks == null) {
+      return null;
+    }
+    var issuerDn = signer.getIssuerX500Principal();
+    Enumeration<String> aliases = ks.aliases();
+    while (aliases.hasMoreElements()) {
+      String alias = aliases.nextElement();
+      Certificate c = ks.getCertificate(alias);
+      if (c instanceof X509Certificate x509 && x509.getSubjectX500Principal().equals(issuerDn)) {
+        return x509;
+      }
+    }
+    return null;
   }
 
   /**

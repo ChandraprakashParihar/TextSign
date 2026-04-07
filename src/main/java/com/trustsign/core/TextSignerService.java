@@ -1,9 +1,16 @@
 package com.trustsign.core;
 
 import org.bouncycastle.cert.jcajce.JcaCertStore;
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.DERSet;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
 import org.bouncycastle.cms.CMSProcessableByteArray;
 import org.bouncycastle.cms.CMSSignedData;
 import org.bouncycastle.cms.CMSSignedDataGenerator;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.SignerInformationStore;
 import org.bouncycastle.cms.CMSTypedData;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
@@ -18,9 +25,11 @@ import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.Arrays;
 import java.util.List;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 public final class TextSignerService {
+  private static final Logger LOG = Logger.getLogger(TextSignerService.class.getName());
   static {
     if (Security.getProvider("BC") == null) {
       Security.addProvider(new BouncyCastleProvider());
@@ -37,6 +46,16 @@ public final class TextSignerService {
       PrivateKey privateKey,
       Certificate[] chain,
       Provider p11Provider
+  ) throws Exception {
+    return signDetached(content, privateKey, chain, p11Provider, null);
+  }
+
+  public static byte[] signDetached(
+      byte[] content,
+      PrivateKey privateKey,
+      Certificate[] chain,
+      Provider p11Provider,
+      TsaClient.Config tsaConfig
   ) throws Exception {
     if (content == null) throw new IllegalArgumentException("content is null");
     if (privateKey == null) throw new IllegalArgumentException("privateKey is null");
@@ -71,7 +90,41 @@ public final class TextSignerService {
     gen.addCertificates(new JcaCertStore(certs));
 
     CMSSignedData signedData = gen.generate(data, false); // detached
-    return signedData.getEncoded();
+    TsaClient.Config cfg = tsaConfig == null ? TsaClient.Config.DISABLED : tsaConfig;
+    if (!cfg.enabled()) {
+      return signedData.getEncoded();
+    }
+    try {
+      CMSSignedData tsData = addRfc3161SignatureTimestamp(signedData, cfg);
+      return tsData.getEncoded();
+    } catch (Exception e) {
+      if (cfg.failOnError()) {
+        throw e;
+      }
+      LOG.warning("TSA timestamp failed; continuing without timestamp: " + e.getMessage());
+      return signedData.getEncoded();
+    }
+  }
+
+  private static CMSSignedData addRfc3161SignatureTimestamp(CMSSignedData cms, TsaClient.Config cfg) throws Exception {
+    TsaClient tsa = new TsaClient(cfg);
+    java.util.List<SignerInformation> out = new java.util.ArrayList<>();
+    for (SignerInformation si : cms.getSignerInfos().getSigners()) {
+      byte[] token = tsa.requestTimestampToken(si.getSignature());
+      ASN1EncodableVector v = new ASN1EncodableVector();
+      AttributeTable unsigned = si.getUnsignedAttributes();
+      if (unsigned != null) {
+        for (Object key : unsigned.toHashtable().keySet()) {
+          ASN1ObjectIdentifier oid = (ASN1ObjectIdentifier) key;
+          v.add(unsigned.get(oid));
+        }
+      }
+      ASN1ObjectIdentifier tsOid = new ASN1ObjectIdentifier("1.2.840.113549.1.9.16.2.14"); // id-aa-signatureTimeStampToken 1.2.840.113549.1.9.16.2.14
+      v.add(new Attribute(tsOid, new DERSet(org.bouncycastle.asn1.ASN1Primitive.fromByteArray(token))));
+      SignerInformation replaced = SignerInformation.replaceUnsignedAttributes(si, new AttributeTable(v));
+      out.add(replaced);
+    }
+    return CMSSignedData.replaceSigners(cms, new SignerInformationStore(out));
   }
 
   /**

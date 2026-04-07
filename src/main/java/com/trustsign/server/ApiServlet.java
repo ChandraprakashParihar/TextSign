@@ -13,6 +13,8 @@ import com.trustsign.core.OsPkcs11Resolver;
 import com.trustsign.core.SessionManager;
 import com.trustsign.core.SignedPdfOutputPaths;
 import com.trustsign.core.SignedFileAnalyzer;
+import com.trustsign.core.LtvEnabler;
+import com.trustsign.core.TsaClient;
 import com.trustsign.core.TextSignerService;
 import com.trustsign.core.TextVerifyService;
 import com.trustsign.core.CertificateValidator;
@@ -241,9 +243,190 @@ public final class ApiServlet extends HttpServlet {
    * Builds PDF signing options from multipart: {@code finalVersion} and optional {@code allowResignFinalVersion}
    * (true/1/yes/y) to sign a PDF that already has ISO 32000 DocMDP P=1 (no changes permitted).
    */
-  private static PdfSigningOptions pdfSigningOptionsFromMultipart(Multipart.Data mp, boolean finalVersion) {
+  private static PdfSigningOptions pdfSigningOptionsFromMultipart(
+      Multipart.Data mp, boolean finalVersion, AgentConfig cfg) {
     boolean allowResign = parseBooleanLoose(readMultipartString(mp, "allowResignFinalVersion", true));
-    return new PdfSigningOptions(finalVersion, allowResign);
+    return new PdfSigningOptions(
+        finalVersion,
+        allowResign,
+        tsaConfigFromAgentConfig(cfg),
+        ltvConfigFromAgentConfig(cfg));
+  }
+
+  private static TsaClient.Config tsaConfigFromAgentConfig(AgentConfig cfg) {
+    AgentConfig.TsaConfig t = cfg != null ? cfg.tsa() : null;
+    if (t == null || t.url() == null || t.url().isBlank()) {
+      return TsaClient.Config.DISABLED;
+    }
+    String hashAlg = (t.hashAlgorithm() == null || t.hashAlgorithm().isBlank()) ? "SHA-256" : t.hashAlgorithm();
+    boolean failOnError = t.failOnError() != null && t.failOnError();
+    int connectTimeout = t.connectTimeoutMs() == null ? 10_000 : t.connectTimeoutMs();
+    int readTimeout = t.readTimeoutMs() == null ? 15_000 : t.readTimeoutMs();
+    return new TsaClient.Config(t.url().trim(), hashAlg, failOnError, connectTimeout, readTimeout);
+  }
+
+  private static LtvEnabler.Config ltvConfigFromAgentConfig(AgentConfig cfg) {
+    AgentConfig.LtvConfig l = cfg != null ? cfg.ltv() : null;
+    if (l == null || l.enabled() == null || !l.enabled()) {
+      return LtvEnabler.Config.DISABLED;
+    }
+    boolean fail = l.failOnMissingRevocationData() != null && l.failOnMissingRevocationData();
+    int ocspCt = l.ocspConnectTimeoutMs() == null ? 10_000 : l.ocspConnectTimeoutMs();
+    int ocspRt = l.ocspReadTimeoutMs() == null ? 15_000 : l.ocspReadTimeoutMs();
+    int crlCt = l.crlConnectTimeoutMs() == null ? 10_000 : l.crlConnectTimeoutMs();
+    int crlRt = l.crlReadTimeoutMs() == null ? 15_000 : l.crlReadTimeoutMs();
+    return new LtvEnabler.Config(true, fail, ocspCt, ocspRt, crlCt, crlRt);
+  }
+
+  private Map<String, Object> probeTsaHealth(AgentConfig cfg) {
+    TsaClient.Config tsa = tsaConfigFromAgentConfig(cfg);
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("configured", tsa.enabled());
+    out.put("url", tsa.url());
+    if (!tsa.enabled()) {
+      out.put("status", "disabled");
+      return out;
+    }
+    long startNs = System.nanoTime();
+    try {
+      byte[] dummySignatureValue = new byte[64];
+      new java.security.SecureRandom().nextBytes(dummySignatureValue);
+      byte[] token = new TsaClient(tsa).requestTimestampToken(dummySignatureValue);
+      long ms = Math.max(0L, (System.nanoTime() - startNs) / 1_000_000L);
+      out.put("status", "ok");
+      out.put("latencyMs", ms);
+      out.put("tokenBytes", token.length);
+      out.put("hashAlgorithm", tsa.normalizedHashAlgorithm());
+    } catch (Exception e) {
+      long ms = Math.max(0L, (System.nanoTime() - startNs) / 1_000_000L);
+      out.put("status", "error");
+      out.put("latencyMs", ms);
+      out.put("error", safeMsg(e));
+    }
+    return out;
+  }
+
+  /**
+   * OCSP/CRL reachability for the configured signer (PKCS#11 cert matching public-key.pem) and issuer
+   * (token chain or trust store). Same timeouts as {@code ltv} in config.
+   */
+  private Map<String, Object> probeLtvHealth(AgentConfig cfg) {
+    LtvEnabler.Config ltv = ltvConfigFromAgentConfig(cfg);
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("ts", Instant.now().toString());
+    if (!ltv.enabled()) {
+      out.put("status", "disabled");
+      out.put("configured", false);
+      return out;
+    }
+    out.put("configured", true);
+    out.put("failOnMissingRevocationData", ltv.failOnMissingRevocationData());
+
+    List<String> libs = OsPkcs11Resolver.candidates(cfg);
+    if (libs.isEmpty()) {
+      out.put("status", "error");
+      out.put("error", "No PKCS#11 libraries configured for this OS");
+      return out;
+    }
+
+    char[] pin;
+    try {
+      pin = resolvePin(cfg);
+    } catch (SecurityException e) {
+      out.put("status", "error");
+      out.put("error", safeMsg(e));
+      return out;
+    }
+
+    Pkcs11Token.Loaded loaded;
+    try {
+      loaded = Pkcs11Token.load(pin, libs);
+    } catch (RuntimeException e) {
+      out.put("status", "error");
+      out.put("error", "Token load failed");
+      out.put("details", buildTokenErrorDetail(e));
+      return out;
+    }
+
+    java.util.List<PublicKey> pks;
+    try {
+      pks = loadConfiguredPublicKeysOrThrow();
+    } catch (Exception e) {
+      out.put("status", "error");
+      out.put("error", "Failed to load configured public key(s)");
+      out.put("details", safeMsg(e));
+      return out;
+    }
+
+    CertificateSelection sel;
+    try {
+      sel = selectCertificateForPublicKeys(loaded.keyStore(), pks);
+    } catch (Exception e) {
+      out.put("status", "error");
+      out.put("error", "Failed to select certificate from token");
+      out.put("details", safeMsg(e));
+      return out;
+    }
+    if (sel == null) {
+      out.put("status", "error");
+      out.put("error", "No token certificate matches configured public keys");
+      return out;
+    }
+
+    out.put("alias", sel.alias);
+    out.put("signerSubject", sel.certificate.getSubjectX500Principal().getName());
+
+    X509Certificate issuer = null;
+    if (sel.chain != null && sel.chain.length > 1 && sel.chain[1] instanceof X509Certificate x) {
+      issuer = x;
+    }
+    if (issuer == null) {
+      try {
+        issuer = CertificateValidator.findIssuerInConfiguredTruststore(sel.certificate);
+      } catch (Exception e) {
+        out.put("status", "error");
+        out.put("error", "Trust store read failed while resolving issuer");
+        out.put("details", safeMsg(e));
+        return out;
+      }
+    }
+
+    if (issuer == null) {
+      out.put("status", "error");
+      out.put(
+          "error",
+          "Issuer certificate not found (no chain[1] on token and no matching entry in trust store)");
+      return out;
+    }
+    out.put("issuerSubject", issuer.getSubjectX500Principal().getName());
+
+    LtvEnabler.RevocationProbeResult probe = LtvEnabler.probeRevocation(sel.certificate, issuer, ltv);
+    out.put("ocspOk", probe.ocspOk());
+    if (probe.ocspLatencyMs() != null) {
+      out.put("ocspLatencyMs", probe.ocspLatencyMs());
+    }
+    if (probe.ocspError() != null) {
+      out.put("ocspError", probe.ocspError());
+    }
+    out.put("crlAttempted", probe.crlAttempted());
+    out.put("crlOk", probe.crlOk());
+    if (probe.crlLatencyMs() != null) {
+      out.put("crlLatencyMs", probe.crlLatencyMs());
+    }
+    if (probe.crlError() != null) {
+      out.put("crlError", probe.crlError());
+    }
+    if (probe.source() != null) {
+      out.put("revocationSource", probe.source());
+    }
+
+    if (probe.ok()) {
+      out.put("status", "ok");
+    } else {
+      out.put("status", "error");
+      out.put("error", "OCSP and CRL both failed for signer certificate");
+    }
+    return out;
   }
 
   /** Multipart field or file part {@code finalVersion} (true/1/yes/y). */
@@ -382,6 +565,22 @@ public final class ApiServlet extends HttpServlet {
             health.put("signingSlotsTotal", signingGate.totalPermits());
           }
           writeJson(resp, 200, health);
+          return;
+        }
+        case "/health/tsa" -> {
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) return;
+          Map<String, Object> tsaHealth = probeTsaHealth(cfg);
+          int status = "error".equals(String.valueOf(tsaHealth.get("status"))) ? 503 : 200;
+          writeJson(resp, status, tsaHealth);
+          return;
+        }
+        case "/health/ltv" -> {
+          AgentConfig cfgLtv = loadConfig(resp);
+          if (cfgLtv == null) return;
+          Map<String, Object> ltvHealth = probeLtvHealth(cfgLtv);
+          int ltvStatus = "error".equals(String.valueOf(ltvHealth.get("status"))) ? 503 : 200;
+          writeJson(resp, ltvStatus, ltvHealth);
           return;
         }
         case "/pkcs11/candidates" -> {
@@ -684,7 +883,7 @@ public final class ApiServlet extends HttpServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion);
+          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
 
           String outputDir = cfg.autoSignOutputDir();
           if (outputDir == null || outputDir.isBlank()) {
@@ -1004,7 +1203,7 @@ public final class ApiServlet extends HttpServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion);
+          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
 
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
@@ -1134,7 +1333,7 @@ public final class ApiServlet extends HttpServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion);
+          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
 
           if (cfg.hsm() == null) {
             writeJson(resp, 500,
@@ -1238,7 +1437,7 @@ public final class ApiServlet extends HttpServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion);
+          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
 
           if (cfg.hsm() == null) {
             writeJson(resp, 500,

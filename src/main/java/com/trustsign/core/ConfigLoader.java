@@ -56,6 +56,12 @@ public final class ConfigLoader {
       if (port < MIN_PORT || port > MAX_PORT) {
         throw new IllegalStateException("port must be between " + MIN_PORT + " and " + MAX_PORT + ", got: " + port);
       }
+      if (cfg.tsa() != null && cfg.tsa().hashAlgorithm() != null && !cfg.tsa().hashAlgorithm().isBlank()) {
+        String alg = cfg.tsa().hashAlgorithm().trim().toUpperCase(java.util.Locale.ROOT);
+        if (!alg.equals("SHA-256") && !alg.equals("SHA256")) {
+          throw new IllegalStateException("tsa.hashAlgorithm must be SHA-256");
+        }
+      }
       return cfg;
     } catch (IllegalStateException e) {
       throw e;

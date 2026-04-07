@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.SigningCertificateParserTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-07T08:49:24.929Z" hostname="Chandras-Mac-mini.local" time="0.001">
+<testsuite name="com.trustsign.core.SigningCertificateParserTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-07T09:41:20.432Z" hostname="Chandras-Mac-mini.local" time="0.001">
   <properties/>
-  <testcase name="parseFromUploadEmpty()" classname="com.trustsign.core.SigningCertificateParserTest" time="0.001"/>
+  <testcase name="parseFromUploadEmpty()" classname="com.trustsign.core.SigningCertificateParserTest" time="0.0"/>
   <testcase name="parsesPemCertificateFile()" classname="com.trustsign.core.SigningCertificateParserTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
