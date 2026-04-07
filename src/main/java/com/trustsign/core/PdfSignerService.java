@@ -227,10 +227,6 @@ public final class PdfSignerService {
         applyFinalVersionDocumentMetadata(doc);
       }
 
-      if (opts.ltvConfig() != null && opts.ltvConfig().enabled()) {
-        LtvEnabler.embedValidationData(doc, material.x509ChainOrNull(), opts.ltvConfig());
-      }
-
       maybeClearNeedAppearancesIfSafe(doc);
 
       List<Integer> resolvedPages = resolveStampPages(doc, stampPageIndices);
@@ -278,7 +274,11 @@ public final class PdfSignerService {
 
       try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
         doc.saveIncremental(out);
-        return out.toByteArray();
+        byte[] signed = out.toByteArray();
+        if (opts.ltvConfig() != null && opts.ltvConfig().enabled()) {
+          return appendLtvRevision(signed, opts.ltvConfig());
+        }
+        return signed;
       } finally {
         signatureOptions.close();
       }
@@ -288,6 +288,18 @@ public final class PdfSignerService {
   private static void requireNonEmptyPdf(byte[] pdfBytes) {
     if (pdfBytes == null || pdfBytes.length == 0) {
       throw new IllegalArgumentException("pdfBytes is empty");
+    }
+  }
+
+  /**
+   * Adds DSS/VRI as a separate incremental update after signature bytes are present.
+   */
+  private static byte[] appendLtvRevision(byte[] signedPdfBytes, LtvEnabler.Config ltvConfig) throws Exception {
+    try (PDDocument signedDoc = PDDocument.load(signedPdfBytes);
+         ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+      LtvEnabler.enableLTV(signedDoc, ltvConfig);
+      signedDoc.saveIncremental(out);
+      return out.toByteArray();
     }
   }
 

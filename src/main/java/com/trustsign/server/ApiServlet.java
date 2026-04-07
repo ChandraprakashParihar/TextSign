@@ -14,6 +14,7 @@ import com.trustsign.core.SessionManager;
 import com.trustsign.core.SignedPdfOutputPaths;
 import com.trustsign.core.SignedFileAnalyzer;
 import com.trustsign.core.LtvEnabler;
+import com.trustsign.core.PdfLtvInspector;
 import com.trustsign.core.TsaClient;
 import com.trustsign.core.TextSignerService;
 import com.trustsign.core.TextVerifyService;
@@ -1562,6 +1563,22 @@ public final class ApiServlet extends HttpServlet {
             return;
           }
           PdfVerifyService.Result result = PdfVerifyService.verify(data);
+          writeJson(resp, result.ok() ? 200 : 422, result);
+          return;
+        }
+
+        case "/debug/pdf-ltv" -> {
+          var mp = Multipart.read(req, multipartPdfMaxBytes);
+          byte[] data = mp.file("file");
+          if (data == null || data.length == 0) {
+            writeJson(resp, 400, Map.of("ok", false, "reason", "Missing PDF file field: file"));
+            return;
+          }
+          if (!isPdfUpload(data, mp.filename("file"))) {
+            writeJson(resp, 400, Map.of("ok", false, "reason", "Uploaded file is not a PDF"));
+            return;
+          }
+          PdfLtvInspector.Result result = PdfLtvInspector.inspect(data);
           writeJson(resp, result.ok() ? 200 : 422, result);
           return;
         }

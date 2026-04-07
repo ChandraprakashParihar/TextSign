@@ -13,8 +13,10 @@ import org.bouncycastle.util.Selector;
 import java.io.ByteArrayInputStream;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -47,11 +49,14 @@ public final class LtvEnabler {
     Set<String> certDedup = new LinkedHashSet<>();
     Set<String> ocspDedup = new LinkedHashSet<>();
     Set<String> crlDedup = new LinkedHashSet<>();
+    Map<String, VriData> vri = new LinkedHashMap<>();
 
     for (PDSignature sig : document.getSignatureDictionaries()) {
       if (sig == null) continue;
       byte[] contents = sig.getContents();
       if (contents == null || contents.length == 0) continue;
+      String vriKey = signatureVriKey(contents);
+      VriData perSig = vri.computeIfAbsent(vriKey, k -> new VriData());
       CMSSignedData cms = new CMSSignedData(contents);
       var certStore = cms.getCertificates();
       for (SignerInformation si : cms.getSignerInfos().getSigners()) {
@@ -66,6 +71,7 @@ public final class LtvEnabler {
           byte[] cBytes = c.getEncoded();
           String key = java.util.Base64.getEncoder().encodeToString(cBytes);
           if (certDedup.add(key)) certs.add(cBytes);
+          perSig.certs.add(cBytes);
         }
 
         boolean revocationEmbedded = false;
@@ -75,6 +81,7 @@ public final class LtvEnabler {
             byte[] ocsp = OcspClient.fetchOcspResponse(signer, issuer, cfg.ocspConnectTimeoutMs(), cfg.ocspReadTimeoutMs());
             String k = java.util.Base64.getEncoder().encodeToString(ocsp);
             if (ocspDedup.add(k)) ocsps.add(ocsp);
+            perSig.ocsps.add(ocsp);
             revocationEmbedded = true;
           }
         } catch (Exception e) {
@@ -88,6 +95,7 @@ public final class LtvEnabler {
               byte[] crl = CrlFetcher.fetchCrl(signer, issuer, cfg.crlConnectTimeoutMs(), cfg.crlReadTimeoutMs());
               String k = java.util.Base64.getEncoder().encodeToString(crl);
               if (crlDedup.add(k)) crls.add(crl);
+              perSig.crls.add(crl);
               revocationEmbedded = true;
             }
           } catch (Exception e) {
@@ -102,7 +110,7 @@ public final class LtvEnabler {
       }
     }
 
-    upsertDss(document, certs, ocsps, crls);
+    upsertDss(document, certs, ocsps, crls, vri);
   }
 
   /** Used during signing before saveIncremental. */
@@ -135,10 +143,15 @@ public final class LtvEnabler {
     if (!revocationEmbedded && cfg.failOnMissingRevocationData()) {
       throw new IllegalStateException("LTV revocation data missing for signing certificate");
     }
-    upsertDss(document, certs, ocsps, crls);
+    upsertDss(document, certs, ocsps, crls, Map.of());
   }
 
-  private static void upsertDss(PDDocument doc, List<byte[]> certs, List<byte[]> ocsps, List<byte[]> crls)
+  private static void upsertDss(
+      PDDocument doc,
+      List<byte[]> certs,
+      List<byte[]> ocsps,
+      List<byte[]> crls,
+      Map<String, VriData> vriData)
       throws Exception {
     COSDictionary catalog = doc.getDocumentCatalog().getCOSObject();
     COSName DSS = COSName.getPDFName("DSS");
@@ -158,8 +171,41 @@ public final class LtvEnabler {
     dss.setItem(COSName.getPDFName("Certs"), certArr);
     dss.setItem(COSName.getPDFName("OCSPs"), ocspArr);
     dss.setItem(COSName.getPDFName("CRLs"), crlArr);
+    if (vriData != null && !vriData.isEmpty()) {
+      COSDictionary vri = new COSDictionary();
+      for (Map.Entry<String, VriData> e : vriData.entrySet()) {
+        COSDictionary entry = new COSDictionary();
+        COSArray vCert = new COSArray();
+        COSArray vOcsp = new COSArray();
+        COSArray vCrl = new COSArray();
+        for (byte[] b : e.getValue().certs) vCert.add(new PDStream(doc, new ByteArrayInputStream(b)).getCOSObject());
+        for (byte[] b : e.getValue().ocsps) vOcsp.add(new PDStream(doc, new ByteArrayInputStream(b)).getCOSObject());
+        for (byte[] b : e.getValue().crls) vCrl.add(new PDStream(doc, new ByteArrayInputStream(b)).getCOSObject());
+        entry.setItem(COSName.getPDFName("Cert"), vCert);
+        entry.setItem(COSName.getPDFName("OCSP"), vOcsp);
+        entry.setItem(COSName.getPDFName("CRL"), vCrl);
+        vri.setItem(COSName.getPDFName(e.getKey()), entry);
+      }
+      dss.setItem(COSName.getPDFName("VRI"), vri);
+    }
     dss.setNeedToBeUpdated(true);
     catalog.setNeedToBeUpdated(true);
+  }
+
+  private static String signatureVriKey(byte[] signatureContents) throws Exception {
+    java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-1");
+    byte[] digest = md.digest(signatureContents);
+    StringBuilder sb = new StringBuilder(digest.length * 2);
+    for (byte b : digest) {
+      sb.append(String.format("%02X", b));
+    }
+    return sb.toString();
+  }
+
+  private static final class VriData {
+    final List<byte[]> certs = new ArrayList<>();
+    final List<byte[]> ocsps = new ArrayList<>();
+    final List<byte[]> crls = new ArrayList<>();
   }
 
   private static List<X509Certificate> buildLikelyChain(
