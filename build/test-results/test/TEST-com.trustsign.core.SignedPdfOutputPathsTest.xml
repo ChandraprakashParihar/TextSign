@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.SignedPdfOutputPathsTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-04-07T06:10:36.186Z" hostname="Chandras-Mac-mini.local" time="0.025">
+<testsuite name="com.trustsign.core.SignedPdfOutputPathsTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-04-07T08:49:24.904Z" hostname="Chandras-Mac-mini.local" time="0.025">
   <properties/>
   <testcase name="stem_stripsSignedSuffixes()" classname="com.trustsign.core.SignedPdfOutputPathsTest" time="0.002"/>
   <testcase name="reserve_concurrent_uniquePaths()" classname="com.trustsign.core.SignedPdfOutputPathsTest" time="0.017"/>
   <testcase name="predecessor_numberedChain()" classname="com.trustsign.core.SignedPdfOutputPathsTest" time="0.001"/>
   <testcase name="reserve_firstThenNumbered()" classname="com.trustsign.core.SignedPdfOutputPathsTest" time="0.001"/>
-  <testcase name="reserveSignedText_thenCms_numbered()" classname="com.trustsign.core.SignedPdfOutputPathsTest" time="0.001"/>
+  <testcase name="reserveSignedText_thenCms_numbered()" classname="com.trustsign.core.SignedPdfOutputPathsTest" time="0.002"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

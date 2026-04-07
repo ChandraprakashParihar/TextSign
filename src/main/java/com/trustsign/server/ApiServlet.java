@@ -804,6 +804,9 @@ public final class ApiServlet extends HttpServlet {
             } catch (DocMdpNoChangesLockException e) {
               writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
               return;
+            } catch (IOException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
+              return;
             }
 
             Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
@@ -1069,6 +1072,9 @@ public final class ApiServlet extends HttpServlet {
           } catch (DocMdpNoChangesLockException e) {
             writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
             return;
+          } catch (IOException e) {
+            writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
+            return;
           }
 
           resp.setStatus(200);
@@ -1157,6 +1163,9 @@ public final class ApiServlet extends HttpServlet {
                 pdfOpts);
           } catch (DocMdpNoChangesLockException e) {
             writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+            return;
+          } catch (IOException e) {
+            writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
             return;
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
@@ -1298,6 +1307,9 @@ public final class ApiServlet extends HttpServlet {
                   pdfOpts);
             } catch (DocMdpNoChangesLockException e) {
               writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+              return;
+            } catch (IOException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
               return;
             } catch (RuntimeException e) {
               String detail = buildTokenErrorDetail(e);

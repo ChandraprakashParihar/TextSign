@@ -10,26 +10,30 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceDictionary;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceStream;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureInterface;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureOptions;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
-import org.apache.pdfbox.pdmodel.interactive.form.PDField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 
+import java.awt.Color;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.security.PrivateKey;
 import java.security.Provider;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -37,17 +41,23 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 /**
- * PAdES-style PDF signing (visible stamp + PKCS#7 detached) using a
- * caller-supplied key and provider (e.g. SunPKCS11).
- * When {@code pdfBytes} already contains a completed signature, the new
- * signature is appended with an incremental save
- * (earlier signatures remain). A visible stamp is drawn on each signing pass so
- * multiple signatures can overlap when re-signing the same pages.
+ * ISO 32000 digital signatures with {@code adbe.pkcs7.detached} (PKCS#7/CMS)
+ * and a
+ * <strong>visible signature field</strong> using PDFBox’s standard template
+ * flow
+ * ({@link SignatureOptions#setVisualSignature(InputStream)}), matching common
+ * tools
+ * (Apache PDFBox examples / typical Acrobat-style widgets).
+ * <p>
+ * Each signing pass adds one new signature via incremental update. Re-signing
+ * draws
+ * another widget at the same default position (bottom-right of the chosen
+ * page).
  * Optional {@linkplain PdfSigningOptions#finalVersion() final version} adds
- * metadata, a visible FINAL banner, and
- * (when this is the first signature on the document) a DocMDP transform with
- * P=1 so compliant viewers treat further
- * edits as invalidating the signature.
+ * metadata,
+ * a FINAL banner in the appearance, and (when allowed) DocMDP {@code P=1} on
+ * the
+ * first signature only.
  */
 public final class PdfSignerService {
 
@@ -205,25 +215,18 @@ public final class PdfSignerService {
         applyFinalVersionDocumentMetadata(doc);
       }
 
-      Instant now = Instant.now();
-      addVisualSignatureStamp(
-          doc,
-          material.signingCertificate(),
-          now,
-          reason,
-          location,
-          stampPageIndices,
-          opts.finalVersion());
-      // Extra safety for incremental save: ensure the update path starts at the catalog.
-      doc.getDocumentCatalog().getCOSObject().setNeedToBeUpdated(true);
-      doc.getPages().getCOSObject().setNeedToBeUpdated(true);
+      maybeClearNeedAppearancesIfSafe(doc);
+
+      List<Integer> resolvedPages = resolveStampPages(doc, stampPageIndices);
+      int signaturePageIndex = resolvedPages.get(0);
+      PDRectangle widgetRect = computeSignatureWidgetRect(doc, signaturePageIndex, opts.finalVersion());
 
       PDSignature signature = new PDSignature();
       applySignatureMetadata(signature, material.signingCertificate(), reason, location, opts.finalVersion());
 
       if (opts.finalVersion()) {
         if (!priorSigs) {
-          attachDocMdpNoChangesPermitted(signature);
+          attachDocMdpNoChangesPermitted(doc, signature);
         } else if (Boolean.getBoolean("trustsign.logFinalVersion")) {
           LOG.info(
               "Final version requested but PDF already had signatures; DocMDP P=1 omitted (incremental signature only).");
@@ -244,7 +247,17 @@ public final class PdfSignerService {
 
       SignatureOptions signatureOptions = new SignatureOptions();
       signatureOptions.setPreferredSignatureSize(SignatureOptions.DEFAULT_SIGNATURE_SIZE * 2);
-      doc.addSignature(signature, sigImpl, signatureOptions);
+      try (InputStream visTemplate = createStandardVisibleSignatureTemplate(
+          doc,
+          signaturePageIndex,
+          widgetRect,
+          signature,
+          material.signingCertificate(),
+          opts.finalVersion())) {
+        signatureOptions.setVisualSignature(visTemplate);
+        signatureOptions.setPage(signaturePageIndex);
+        doc.addSignature(signature, sigImpl, signatureOptions);
+      }
 
       try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
         doc.saveIncremental(out);
@@ -265,7 +278,7 @@ public final class PdfSignerService {
    * DocMDP P=1: no document changes permitted without invalidating the signature
    * (ISO 32000, compliant viewers).
    */
-  private static void attachDocMdpNoChangesPermitted(PDSignature signature) {
+  private static void attachDocMdpNoChangesPermitted(PDDocument doc, PDSignature signature) {
     COSDictionary refEntry = new COSDictionary();
     refEntry.setItem(COSName.TRANSFORM_METHOD, COSName.DOCMDP);
     COSDictionary params = new COSDictionary();
@@ -276,26 +289,44 @@ public final class PdfSignerService {
     COSArray refs = new COSArray();
     refs.add(refEntry);
     signature.getCOSObject().setItem(COSName.REFERENCE, refs);
+
+    // ISO 32000 certification link: Catalog /Perms /DocMDP must point to this
+    // signature dictionary so viewers enforce no-change certification.
+    COSDictionary catalog = doc.getDocumentCatalog().getCOSObject();
+    COSDictionary perms = catalog.getCOSDictionary(COSName.PERMS);
+    if (perms == null) {
+      perms = new COSDictionary();
+      catalog.setItem(COSName.PERMS, perms);
+    }
+    perms.setItem(COSName.DOCMDP, signature);
+    perms.setNeedToBeUpdated(true);
+    catalog.setNeedToBeUpdated(true);
   }
 
   /**
-   * True when {@code /Contents} looks like a real PKCS#7/CMS signature (DER), not an empty signature field
-   * whose {@code /Contents} is a long buffer of zero bytes (common in “sign later” templates).
+   * True when {@code /Contents} looks like a real PKCS#7/CMS signature (DER), not
+   * an empty signature field
+   * whose {@code /Contents} is a long buffer of zero bytes (common in “sign
+   * later” templates).
    */
   private static boolean signatureContentsLookSigned(byte[] contents) {
     if (contents == null || contents.length < 128) {
       return false;
     }
-    // CMS SignedData / PKCS#7 is a DER SEQUENCE (tag 0x30).
-    if (contents[0] != (byte) 0x30) {
-      return false;
-    }
-    for (byte b : contents) {
-      if (b != 0) {
-        return true;
+    // /Contents can be DER bytes padded with trailing zeros, and sometimes has leading
+    // zeros depending on writer/reservation behavior. Detect the first non-zero byte.
+    int firstNonZero = -1;
+    for (int i = 0; i < contents.length; i++) {
+      if (contents[i] != 0) {
+        firstNonZero = i;
+        break;
       }
     }
-    return false;
+    if (firstNonZero < 0) {
+      return false;
+    }
+    // CMS SignedData / PKCS#7 is a DER SEQUENCE (tag 0x30).
+    return contents[firstNonZero] == (byte) 0x30;
   }
 
   /**
@@ -306,16 +337,7 @@ public final class PdfSignerService {
    * Applies regardless of signing product (Adobe, TrustSign, etc.).
    */
   private static boolean documentHasDocMdpP1LockFromCompletedSignature(PDDocument doc) throws IOException {
-    PDAcroForm form = doc.getDocumentCatalog().getAcroForm(null);
-    if (form == null) {
-      return false;
-    }
-    for (Iterator<PDField> it = form.getFieldIterator(); it.hasNext();) {
-      PDField f = it.next();
-      if (!(f instanceof PDSignatureField sf)) {
-        continue;
-      }
-      PDSignature existing = sf.getSignature();
+    for (PDSignature existing : doc.getSignatureDictionaries()) {
       if (existing == null) {
         continue;
       }
@@ -367,20 +389,13 @@ public final class PdfSignerService {
   }
 
   private static boolean documentHasCompletedPriorSignatures(PDDocument doc) throws IOException {
-    PDAcroForm form = doc.getDocumentCatalog().getAcroForm(null);
-    if (form == null) {
-      return false;
-    }
-    for (Iterator<PDField> it = form.getFieldIterator(); it.hasNext();) {
-      PDField f = it.next();
-      if (f instanceof PDSignatureField sf) {
-        PDSignature existing = sf.getSignature();
-        if (existing != null) {
-          byte[] contents = existing.getContents();
-          if (signatureContentsLookSigned(contents)) {
-            return true;
-          }
-        }
+    for (PDSignature existing : doc.getSignatureDictionaries()) {
+      if (existing == null) {
+        continue;
+      }
+      byte[] contents = existing.getContents();
+      if (signatureContentsLookSigned(contents)) {
+        return true;
       }
     }
     return false;
@@ -434,140 +449,151 @@ public final class PdfSignerService {
     signature.setSignDate(java.util.Calendar.getInstance());
   }
 
-  private static void addVisualSignatureStamp(
-      PDDocument doc,
-      X509Certificate cert,
-      Instant signedAt,
-      String reason,
-      String location,
-      List<Integer> stampPageIndices,
-      boolean finalVersion) throws Exception {
-    String subject = extractDisplaySubject(cert);
-    String when = TS_FMT.format(signedAt);
-
-    List<Integer> resolvedPages = resolveStampPages(doc, stampPageIndices);
-    if (Boolean.getBoolean("trustsign.debugPdfStamp")) {
-      LOG.info("PDF stamp pages resolved: " + resolvedPages);
-    }
-    for (Integer pageIndex : resolvedPages) {
-      PDPage page = doc.getPage(pageIndex);
-      // Use crop box (visible area); media box can be larger so a bottom-right stamp
-      // would be off-page on some PDFs.
-      PDRectangle visible = page.getCropBox();
-      float vx = visible.getLowerLeftX();
-      float vy = visible.getLowerLeftY();
-      float vW = visible.getWidth();
-      float vH = visible.getHeight();
-
-      float boxWidth = (float) (vW * 0.34);
-      float boxHeight = (float) (vH * (finalVersion ? 0.14 : 0.08));
-      float margin = 24f;
-      float contentPad = 4f;
-      float x = vx + vW - boxWidth - margin;
-      float y = vy + margin;
-      float contentLeftX = x + contentPad;
-      float contentTopY = y + boxHeight - contentPad;
-      /**
-       * Keep body text left of this x so the checkmark does not overlap (timestamp,
-       * etc.).
-       */
-      float textRightMargin = x + boxWidth - 26f;
-
-      try (PDPageContentStream cs = new PDPageContentStream(
-          doc,
-          page,
-          PDPageContentStream.AppendMode.APPEND,
-          true,
-          true)) {
-        // cs.setStrokingColor(0.1f, 0.55f, 0.2f);
-        // cs.setLineWidth(1.5f);
-        // cs.addRect(x, y, boxWidth, boxHeight);
-        // cs.stroke();
-
-        float cursorY = contentTopY - 6f;
-        if (finalVersion) {
-          // addRect(x, y, w, h) uses lower-left (x,y); y increases upward.
-          float bannerH = 22f;
-          float bannerBottomY = cursorY - bannerH;
-          writeLineBoldRed(cs, "FINAL VERSION", contentLeftX, bannerBottomY + 14f);
-          writeLineSmall(cs, "No further edits permitted; changes invalidate signature.", contentLeftX,
-              bannerBottomY + 4f);
-          cursorY = bannerBottomY - 6f;
-        } else {
-          cursorY = contentTopY - 9f;
-        }
-
-        writeLineBold(cs, "Signature Verified", contentLeftX, cursorY);
-
-        float textY = cursorY - 10f;
-        for (String line : wrapSubjectLines(subject, 36)) {
-          writeLineClamped(cs, line, contentLeftX, textY, textRightMargin);
-          textY -= 6.6f;
-        }
-        // textY is the next line slot; last drawn baseline was textY + 6.6
-        float detailsTopY = Math.max(y + contentPad + 8f, textY - 3f);
-        writeLineClamped(cs, when, contentLeftX, detailsTopY, textRightMargin);
-        float footerY = detailsTopY - 6.6f;
-        if (reason != null && !reason.isBlank()) {
-          writeLineClamped(cs, "Reason: " + reason.trim(), contentLeftX, footerY, textRightMargin);
-          footerY -= 6.6f;
-        }
-        if (location != null && !location.isBlank()) {
-          writeLineClamped(cs, "Location: " + location.trim(), contentLeftX, footerY, textRightMargin);
-          footerY -= 6.6f;
-        }
-        // writeLineClamped(cs, "Verified by TrustSign", contentLeftX, footerY, textRightMargin);
-
-        // Small checkmark in upper-right; drawn last so it does not sit under body
-        // text.
-        float cx = x + boxWidth - 18f;
-        float cy = finalVersion ? contentTopY - 10f : contentTopY - 8f;
-        cs.setStrokingColor(0.1f, 0.65f, 0.22f);
-        cs.setLineWidth(2.2f);
-        cs.moveTo(cx - 8f, cy);
-        cs.lineTo(cx - 2f, cy - 6f);
-        cs.lineTo(cx + 9f, cy + 7f);
-        cs.stroke();
+  /**
+   * PDFBox / Adobe Reader: {@code /NeedAppearances true} can hide or distort
+   * visible signatures
+   * (PDFBOX-3738). Remove only when the form has no fields yet.
+   */
+  private static void maybeClearNeedAppearancesIfSafe(PDDocument doc) {
+    PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm(null);
+    if (acroForm != null && acroForm.getNeedAppearances()) {
+      if (acroForm.getFields().isEmpty()) {
+        acroForm.getCOSObject().removeItem(COSName.NEED_APPEARANCES);
+      } else {
+        LOG.warning(
+            "AcroForm /NeedAppearances is true; visible signature may not display correctly in some viewers");
       }
-      // Incremental save only follows objects marked for update from the catalog;
-      // without this,
-      // appended page content (the visible stamp) can be dropped while the signature
-      // is still embedded.
-      markPageRootPathForIncrementalSave(page);
     }
   }
 
   /**
-   * Marks this page and its ancestors in the page tree so
-   * {@link PDDocument#saveIncremental} writes
-   * content stream changes (see PDFBox javadoc: closed update path from catalog
-   * to page).
+   * Widget rectangle in page space (lower-left origin), bottom-right of crop box
+   * — same footprint as before.
    */
-  private static void markPageRootPathForIncrementalSave(PDPage page) {
-    page.getCOSObject().setNeedToBeUpdated(true);
-    COSDictionary parent = page.getCOSObject().getCOSDictionary(COSName.PARENT);
-    while (parent != null) {
-      parent.setNeedToBeUpdated(true);
-      parent = parent.getCOSDictionary(COSName.PARENT);
+  private static PDRectangle computeSignatureWidgetRect(PDDocument doc, int pageIndex, boolean finalVersion) {
+    PDPage page = doc.getPage(pageIndex);
+    PDRectangle visible = page.getCropBox();
+    float vx = visible.getLowerLeftX();
+    float vy = visible.getLowerLeftY();
+    float vW = visible.getWidth();
+    float vH = visible.getHeight();
+    // Keep default size close to common utility signatures, but leave enough
+    // vertical room so all appearance lines remain visible (especially FINAL mode).
+    float boxWidth = Math.max(190f, Math.min((float) (vW * 0.26), 250f));
+    float boxHeight = finalVersion
+        ? Math.max(78f, Math.min((float) (vH * 0.12), 108f))
+        : Math.max(56f, Math.min((float) (vH * 0.075), 78f));
+    float margin = 24f;
+    float x = vx + vW - boxWidth - margin;
+    float y = vy + margin;
+    PDRectangle rect = new PDRectangle();
+    rect.setLowerLeftX(x);
+    rect.setLowerLeftY(y);
+    rect.setUpperRightX(x + boxWidth);
+    rect.setUpperRightY(y + boxHeight);
+    return rect;
+  }
+
+  /**
+   * One-page template PDF consumed by
+   * {@link SignatureOptions#setVisualSignature(InputStream)} — same
+   * structure as Apache PDFBox {@code CreateVisibleSignature2} (form XObject +
+   * /AP).
+   */
+  private static InputStream createStandardVisibleSignatureTemplate(
+      PDDocument srcDoc,
+      int pageNum,
+      PDRectangle rect,
+      PDSignature signature,
+      X509Certificate signingCert,
+      boolean finalVersion) throws IOException {
+    String subject = extractDisplaySubject(signingCert);
+    java.util.Date signTime = signature.getSignDate() != null ? signature.getSignDate().getTime()
+        : new java.util.Date();
+    String when = TS_FMT.format(signTime.toInstant());
+
+    try (PDDocument doc = new PDDocument()) {
+      PDPage page = new PDPage(srcDoc.getPage(pageNum).getCropBox());
+      doc.addPage(page);
+
+      PDAcroForm acroForm = new PDAcroForm(doc);
+      doc.getDocumentCatalog().setAcroForm(acroForm);
+      acroForm.setSignaturesExist(true);
+      acroForm.setAppendOnly(true);
+      acroForm.getCOSObject().setDirect(true);
+
+      PDSignatureField signatureField = new PDSignatureField(acroForm);
+      signatureField.setPartialName("TrustSignSig" + System.nanoTime());
+      acroForm.getFields().add(signatureField);
+
+      PDAnnotationWidget widget = signatureField.getWidgets().get(0);
+      widget.setRectangle(rect);
+      widget.setPage(page);
+      page.getAnnotations().add(widget);
+
+      PDRectangle bbox = new PDRectangle(rect.getWidth(), rect.getHeight());
+      PDAppearanceDictionary appearance = new PDAppearanceDictionary();
+      appearance.getCOSObject().setDirect(true);
+      PDAppearanceStream appearanceStream = new PDAppearanceStream(doc);
+      appearanceStream.setResources(new PDResources());
+      appearanceStream.setBBox(bbox);
+      appearance.setNormalAppearance(appearanceStream);
+      widget.setAppearance(appearance);
+
+      try (PDPageContentStream cs = new PDPageContentStream(doc, appearanceStream)) {
+        cs.setStrokingColor(0.75f, 0.75f, 0.75f);
+        cs.setLineWidth(0.5f);
+        cs.addRect(0, 0, bbox.getWidth(), bbox.getHeight());
+        cs.stroke();
+        cs.setNonStrokingColor(0.97f, 0.97f, 0.97f);
+        cs.addRect(0.5f, 0.5f, bbox.getWidth() - 1f, bbox.getHeight() - 1f);
+        cs.fill();
+
+        float fontSize = 7f;
+        float leading = fontSize * 1.35f;
+        float tx = 4f;
+        float ty = bbox.getHeight() - leading;
+
+        cs.beginText();
+        cs.setLeading(leading);
+        cs.newLineAtOffset(tx, ty);
+        if (finalVersion) {
+          cs.setFont(PDType1Font.HELVETICA_BOLD, 8f);
+          cs.setNonStrokingColor(Color.RED);
+          cs.showText(truncateForPdfShowText("FINAL VERSION", 48));
+          cs.newLine();
+          cs.setFont(PDType1Font.HELVETICA, 6f);
+          cs.setNonStrokingColor(0.35f, 0.35f, 0.35f);
+          cs.showText(truncateForPdfShowText("No further edits permitted.", 72));
+          cs.newLine();
+        }
+        cs.setFont(PDType1Font.HELVETICA_BOLD, 8f);
+        cs.setNonStrokingColor(Color.BLACK);
+        cs.showText(truncateForPdfShowText("Digitally signed by", 40));
+        cs.newLine();
+        cs.setFont(PDType1Font.HELVETICA, fontSize);
+        for (String line : wrapSubjectLines(subject, 42)) {
+          cs.showText(truncateForPdfShowText(line, 64));
+          cs.newLine();
+        }
+        cs.showText(truncateForPdfShowText(when, 64));
+        cs.newLine();
+        String r = signature.getReason();
+        if (r != null && !r.isBlank()) {
+          cs.showText(truncateForPdfShowText("Reason: " + r.trim(), 64));
+          cs.newLine();
+        }
+        String loc = signature.getLocation();
+        if (loc != null && !loc.isBlank()) {
+          cs.showText(truncateForPdfShowText("Location: " + loc.trim(), 64));
+        }
+        cs.endText();
+      }
+
+      ByteArrayOutputStream baos = new ByteArrayOutputStream();
+      doc.save(baos);
+      return new ByteArrayInputStream(baos.toByteArray());
     }
-  }
-
-  private static void writeLineSmall(PDPageContentStream cs, String value, float fx, float fy) throws IOException {
-    cs.beginText();
-    cs.setFont(PDType1Font.HELVETICA, 6f);
-    cs.setNonStrokingColor(0.2f, 0.2f, 0.2f);
-    cs.newLineAtOffset(fx, fy);
-    cs.showText(truncateForPdfShowText(value, 90));
-    cs.endText();
-  }
-
-  private static void writeLineBoldRed(PDPageContentStream cs, String value, float fx, float fy) throws IOException {
-    cs.beginText();
-    cs.setFont(PDType1Font.HELVETICA_BOLD, 8f);
-    cs.setNonStrokingColor(0.55f, 0f, 0f);
-    cs.newLineAtOffset(fx, fy);
-    cs.showText(truncateForPdfShowText(value, 48));
-    cs.endText();
   }
 
   /** PDFWinAnsiEncoding: keep to basic Latin for Type1 fonts. */
@@ -613,26 +639,6 @@ public final class PdfSignerService {
       return List.of(0);
     }
     return new ArrayList<>(unique);
-  }
-
-  private static void writeLineClamped(PDPageContentStream cs, String value, float fx, float fy, float maxX)
-      throws IOException {
-    int maxChars = Math.max(10, (int) ((maxX - fx) / 3.6f));
-    cs.beginText();
-    cs.setFont(PDType1Font.HELVETICA, 7f);
-    cs.setNonStrokingColor(0f, 0f, 0f);
-    cs.newLineAtOffset(fx, fy);
-    cs.showText(truncateForPdfShowText(value, maxChars));
-    cs.endText();
-  }
-
-  private static void writeLineBold(PDPageContentStream cs, String value, float fx, float fy) throws IOException {
-    cs.beginText();
-    cs.setFont(PDType1Font.HELVETICA_BOLD, 8f);
-    cs.setNonStrokingColor(0f, 0f, 0f);
-    cs.newLineAtOffset(fx, fy);
-    cs.showText(truncateForPdfShowText(value, 48));
-    cs.endText();
   }
 
   private static List<String> wrapSubjectLines(String value, int maxCharsPerLine) {
