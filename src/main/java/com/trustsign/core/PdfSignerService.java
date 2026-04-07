@@ -1,9 +1,11 @@
 package com.trustsign.core;
 
 import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSInteger;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -39,8 +41,8 @@ import java.util.stream.Stream;
  * caller-supplied key and provider (e.g. SunPKCS11).
  * When {@code pdfBytes} already contains a completed signature, the new
  * signature is appended with an incremental save
- * (earlier signatures remain); the visible stamp is applied only on the first
- * signature pass.
+ * (earlier signatures remain). A visible stamp is drawn on each signing pass so
+ * multiple signatures can overlap when re-signing the same pages.
  * Optional {@linkplain PdfSigningOptions#finalVersion() final version} adds
  * metadata, a visible FINAL banner, and
  * (when this is the first signature on the document) a DocMDP transform with
@@ -56,11 +58,36 @@ public final class PdfSignerService {
   private static final COSName MDP_V = COSName.getPDFName("V");
 
   /**
-   * @param finalVersion When true, document is marked finalized (metadata +
-   *                     stamp; DocMDP P=1 when allowed by PDF rules).
+   * @param finalVersion            When true, document is marked finalized
+   *                                (metadata +
+   *                                stamp; DocMDP P=1 when allowed by PDF rules).
+   * @param allowResignFinalVersion When true, allows signing a PDF that already
+   *                                has a completed signature
+   *                                with ISO 32000 DocMDP {@code P=1} (no document
+   *                                changes permitted) from any
+   *                                product; default blocks re-sign unless this
+   *                                override is set.
    */
-  public record PdfSigningOptions(boolean finalVersion) {
-    public static final PdfSigningOptions DEFAULT = new PdfSigningOptions(false);
+  public record PdfSigningOptions(boolean finalVersion, boolean allowResignFinalVersion) {
+    public static final PdfSigningOptions DEFAULT = new PdfSigningOptions(false, false);
+
+    public PdfSigningOptions(boolean finalVersion) {
+      this(finalVersion, false);
+    }
+  }
+
+  /**
+   * Thrown when the PDF already contains a completed signature whose dictionary
+   * declares DocMDP
+   * {@code P=1} (ISO 32000: no document changes without invalidating that
+   * signature), and the request
+   * did not set {@link PdfSigningOptions#allowResignFinalVersion()}.
+   */
+  public static final class DocMdpNoChangesLockException extends IllegalArgumentException {
+    public DocMdpNoChangesLockException() {
+      super(
+          "This PDF is certified or locked with DocMDP P=1 (ISO 32000: no document changes permitted). ");
+    }
   }
 
   /**
@@ -168,6 +195,10 @@ public final class PdfSignerService {
         throw new IllegalArgumentException("PDF has no pages");
       }
 
+      if (documentHasDocMdpP1LockFromCompletedSignature(doc) && !opts.allowResignFinalVersion()) {
+        throw new DocMdpNoChangesLockException();
+      }
+
       boolean priorSigs = documentHasCompletedPriorSignatures(doc);
 
       if (opts.finalVersion()) {
@@ -175,18 +206,17 @@ public final class PdfSignerService {
       }
 
       Instant now = Instant.now();
-      // Second+ signatures on the same file: add crypto only; avoid stacking
-      // duplicate visible stamps.
-      if (!priorSigs) {
-        addVisualSignatureStamp(
-            doc,
-            material.signingCertificate(),
-            now,
-            reason,
-            location,
-            stampPageIndices,
-            opts.finalVersion());
-      }
+      addVisualSignatureStamp(
+          doc,
+          material.signingCertificate(),
+          now,
+          reason,
+          location,
+          stampPageIndices,
+          opts.finalVersion());
+      // Extra safety for incremental save: ensure the update path starts at the catalog.
+      doc.getDocumentCatalog().getCOSObject().setNeedToBeUpdated(true);
+      doc.getPages().getCOSObject().setNeedToBeUpdated(true);
 
       PDSignature signature = new PDSignature();
       applySignatureMetadata(signature, material.signingCertificate(), reason, location, opts.finalVersion());
@@ -248,6 +278,94 @@ public final class PdfSignerService {
     signature.getCOSObject().setItem(COSName.REFERENCE, refs);
   }
 
+  /**
+   * True when {@code /Contents} looks like a real PKCS#7/CMS signature (DER), not an empty signature field
+   * whose {@code /Contents} is a long buffer of zero bytes (common in “sign later” templates).
+   */
+  private static boolean signatureContentsLookSigned(byte[] contents) {
+    if (contents == null || contents.length < 128) {
+      return false;
+    }
+    // CMS SignedData / PKCS#7 is a DER SEQUENCE (tag 0x30).
+    if (contents[0] != (byte) 0x30) {
+      return false;
+    }
+    for (byte b : contents) {
+      if (b != 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * ISO 32000 DocMDP: any <em>completed</em> prior signature whose
+   * {@code Reference} array contains
+   * {@code /TransformMethod /DocMDP} with transform params {@code P=1} (no
+   * document changes permitted).
+   * Applies regardless of signing product (Adobe, TrustSign, etc.).
+   */
+  private static boolean documentHasDocMdpP1LockFromCompletedSignature(PDDocument doc) throws IOException {
+    PDAcroForm form = doc.getDocumentCatalog().getAcroForm(null);
+    if (form == null) {
+      return false;
+    }
+    for (Iterator<PDField> it = form.getFieldIterator(); it.hasNext();) {
+      PDField f = it.next();
+      if (!(f instanceof PDSignatureField sf)) {
+        continue;
+      }
+      PDSignature existing = sf.getSignature();
+      if (existing == null) {
+        continue;
+      }
+      byte[] contents = existing.getContents();
+      if (!signatureContentsLookSigned(contents)) {
+        continue;
+      }
+      if (signatureHasDocMdpP1(existing)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean signatureHasDocMdpP1(PDSignature sig) {
+    COSArray refs = sig.getCOSObject().getCOSArray(COSName.REFERENCE);
+    if (refs == null) {
+      return false;
+    }
+    for (int i = 0; i < refs.size(); i++) {
+      COSDictionary refDict = asCosDictionary(refs.get(i));
+      if (refDict == null) {
+        continue;
+      }
+      if (!COSName.DOCMDP.equals(refDict.getCOSName(COSName.TRANSFORM_METHOD))) {
+        continue;
+      }
+      COSDictionary params = refDict.getCOSDictionary(COSName.TRANSFORM_PARAMS);
+      if (params == null) {
+        continue;
+      }
+      int p = params.getInt(MDP_P, -1);
+      if (p == 1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static COSDictionary asCosDictionary(COSBase base) {
+    if (base instanceof COSDictionary d) {
+      return d;
+    }
+    if (base instanceof COSObject obj) {
+      COSBase resolved = obj.getObject();
+      return resolved instanceof COSDictionary d ? d : null;
+    }
+    return null;
+  }
+
   private static boolean documentHasCompletedPriorSignatures(PDDocument doc) throws IOException {
     PDAcroForm form = doc.getDocumentCatalog().getAcroForm(null);
     if (form == null) {
@@ -259,8 +377,7 @@ public final class PdfSignerService {
         PDSignature existing = sf.getSignature();
         if (existing != null) {
           byte[] contents = existing.getContents();
-          // PKCS#7 blobs are large; empty/placeholder fields are usually padding only.
-          if (contents != null && contents.length > 256) {
+          if (signatureContentsLookSigned(contents)) {
             return true;
           }
         }
@@ -362,20 +479,16 @@ public final class PdfSignerService {
           PDPageContentStream.AppendMode.APPEND,
           true,
           true)) {
-        cs.setStrokingColor(0.1f, 0.55f, 0.2f);
-        cs.setLineWidth(1.5f);
-        cs.addRect(x, y, boxWidth, boxHeight);
-        cs.stroke();
+        // cs.setStrokingColor(0.1f, 0.55f, 0.2f);
+        // cs.setLineWidth(1.5f);
+        // cs.addRect(x, y, boxWidth, boxHeight);
+        // cs.stroke();
 
         float cursorY = contentTopY - 6f;
         if (finalVersion) {
           // addRect(x, y, w, h) uses lower-left (x,y); y increases upward.
           float bannerH = 22f;
           float bannerBottomY = cursorY - bannerH;
-          cs.setStrokingColor(0.55f, 0.08f, 0.08f);
-          cs.setLineWidth(1.25f);
-          cs.addRect(x + 2f, bannerBottomY, boxWidth - 4f, bannerH);
-          cs.stroke();
           writeLineBoldRed(cs, "FINAL VERSION", contentLeftX, bannerBottomY + 14f);
           writeLineSmall(cs, "No further edits permitted; changes invalidate signature.", contentLeftX,
               bannerBottomY + 4f);
@@ -386,24 +499,24 @@ public final class PdfSignerService {
 
         writeLineBold(cs, "Signature Verified", contentLeftX, cursorY);
 
-        float textY = cursorY - 11f;
+        float textY = cursorY - 10f;
         for (String line : wrapSubjectLines(subject, 36)) {
           writeLineClamped(cs, line, contentLeftX, textY, textRightMargin);
-          textY -= 6.5f;
+          textY -= 6.6f;
         }
-        // textY is the next line slot; last drawn baseline was textY + 6.5
+        // textY is the next line slot; last drawn baseline was textY + 6.6
         float detailsTopY = Math.max(y + contentPad + 8f, textY - 3f);
         writeLineClamped(cs, when, contentLeftX, detailsTopY, textRightMargin);
-        float footerY = detailsTopY - 6.5f;
+        float footerY = detailsTopY - 6.6f;
         if (reason != null && !reason.isBlank()) {
           writeLineClamped(cs, "Reason: " + reason.trim(), contentLeftX, footerY, textRightMargin);
-          footerY -= 6.5f;
+          footerY -= 6.6f;
         }
         if (location != null && !location.isBlank()) {
           writeLineClamped(cs, "Location: " + location.trim(), contentLeftX, footerY, textRightMargin);
-          footerY -= 6.5f;
+          footerY -= 6.6f;
         }
-        writeLineClamped(cs, "Verified by TrustSign", contentLeftX, footerY, textRightMargin);
+        // writeLineClamped(cs, "Verified by TrustSign", contentLeftX, footerY, textRightMargin);
 
         // Small checkmark in upper-right; drawn last so it does not sit under body
         // text.

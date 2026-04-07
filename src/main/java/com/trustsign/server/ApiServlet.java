@@ -6,10 +6,12 @@ import com.trustsign.core.ConfigLoader;
 import com.trustsign.core.HsmPdfSignerService;
 import com.trustsign.core.PdfSignerService;
 import com.trustsign.core.PdfSignerService.PdfSigningOptions;
+import com.trustsign.core.PdfSignerService.DocMdpNoChangesLockException;
 import com.trustsign.core.PdfVerifyService;
 import com.trustsign.core.Pkcs11Token;
 import com.trustsign.core.OsPkcs11Resolver;
 import com.trustsign.core.SessionManager;
+import com.trustsign.core.SignedPdfOutputPaths;
 import com.trustsign.core.SignedFileAnalyzer;
 import com.trustsign.core.TextSignerService;
 import com.trustsign.core.TextVerifyService;
@@ -32,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.time.Instant;
 import java.util.Base64;
@@ -39,7 +42,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class ApiServlet extends HttpServlet {
@@ -196,16 +198,22 @@ public final class ApiServlet extends HttpServlet {
   }
 
   /**
-   * For auto-sign PDF routes: the next signature is chained from the previous numbered output when present
-   * ({@code stem-signed.pdf} → {@code stem-signed1.pdf} → …) so earlier signatures stay valid.
-   * Multipart {@code signFromUpload} true/1/yes/y forces signing the uploaded file only (no chain).
+   * For auto-sign PDF routes: by default signs the uploaded bytes only ({@code chainedFromExistingOutput}
+   * stays false), so re-signing an already-signed PDF adds a new signature and visible stamp on top of the
+   * prior one when the same stamp pages are used.
+   * <p>
+   * Set multipart {@code signFromUpload} to false/0/no to opt into chaining from the previous numbered
+   * output on disk when present ({@code stem-signed.pdf} ← {@code stem-signed1.pdf} ← …) so earlier
+   * signatures stay valid across incremental saves.
    */
   private static byte[] resolveAutoSignIncrementalInput(byte[] uploadedPdf, File targetSignedFile, Multipart.Data mp)
       throws IOException {
-    if (parseBooleanLoose(readMultipartString(mp, "signFromUpload", true))) {
+    String signFromUpload = readMultipartString(mp, "signFromUpload", true);
+    boolean useUploadedPdfOnly = signFromUpload == null || signFromUpload.isBlank() || parseBooleanLoose(signFromUpload);
+    if (useUploadedPdfOnly) {
       return uploadedPdf;
     }
-    File chainSource = predecessorAutoSignPdfOutput(targetSignedFile);
+    File chainSource = SignedPdfOutputPaths.predecessorForIncrementalChain(targetSignedFile);
     if (chainSource == null || !chainSource.isFile() || chainSource.length() == 0) {
       return uploadedPdf;
     }
@@ -216,92 +224,26 @@ public final class ApiServlet extends HttpServlet {
     return uploadedPdf;
   }
 
-  private static String stripPdfExtension(String sanitizedName) {
-    int dot = sanitizedName.lastIndexOf('.');
-    if (dot <= 0) {
-      return sanitizedName;
-    }
-    if (sanitizedName.substring(dot).equalsIgnoreCase(".pdf")) {
-      return sanitizedName.substring(0, dot);
-    }
-    return sanitizedName.substring(0, dot);
-  }
-
-  /**
-   * Base name for auto-sign PDF outputs: strips {@code .pdf} and repeated trailing {@code -signed} / {@code -signedN}
-   * so an upload {@code test-signed.pdf} still maps to stem {@code test} (avoids {@code test-signed-signed.pdf}).
-   */
-  private static String pdfStemForAutoSignOutput(String uploadFilename) {
-    String safe = sanitizeFilename(uploadFilename);
-    String base = stripPdfExtension(safe);
-    while (base.matches("(?i).+-signed\\d*")) {
-      base = base.replaceFirst("(?i)-signed\\d*$", "");
-    }
-    return base.isBlank() ? "document" : base;
-  }
-
-  private static final Pattern AUTO_SIGN_PDF_NUMBERED = Pattern.compile("(?i)^(.+)-signed(\\d+)$");
-
-  /**
-   * Previous file in the numbered sequence: {@code stem-signedN.pdf} → {@code stem-signed(N-1).pdf},
-   * {@code stem-signed1.pdf} → {@code stem-signed.pdf}. Unnumbered target has no predecessor.
-   */
-  private static File predecessorAutoSignPdfOutput(File targetOutFile) {
-    String name = targetOutFile.getName();
-    if (name.length() < 5 || !name.substring(name.length() - 4).equalsIgnoreCase(".pdf")) {
-      return null;
-    }
-    String base = name.substring(0, name.length() - 4);
-    Matcher m = AUTO_SIGN_PDF_NUMBERED.matcher(base);
-    if (!m.matches()) {
-      return null;
-    }
-    String stem = m.group(1);
-    int n = Integer.parseInt(m.group(2));
-    File dir = targetOutFile.getParentFile();
-    if (n <= 1) {
-      return new File(dir, stem + "-signed.pdf");
-    }
-    return new File(dir, stem + "-signed" + (n - 1) + ".pdf");
-  }
-
-  /**
-   * First free output path: {@code stem-signed.pdf}, then {@code stem-signed1.pdf}, {@code stem-signed2.pdf}, …
-   */
-  private static File resolveNextAutoSignPdfOutput(File outDir, String uploadFilename) {
-    String stem = pdfStemForAutoSignOutput(uploadFilename);
-    File first = new File(outDir, stem + "-signed.pdf");
-    if (!first.exists()) {
-      return first;
-    }
-    for (int n = 1; ; n++) {
-      if (n > 99_999) {
-        throw new IllegalStateException("Too many signed PDF variants for stem: " + stem);
-      }
-      File fn = new File(outDir, stem + "-signed" + n + ".pdf");
-      if (!fn.exists()) {
-        return fn;
-      }
-    }
-  }
-
   /** Suggested download name for streaming sign endpoints (single file, not numbered). */
   private static String buildSignedPdfFilename(String filename) {
     String safe = sanitizeFilename(filename);
-    String base = stripPdfExtension(safe);
-    while (base.matches("(?i).+-signed\\d*")) {
-      base = base.replaceFirst("(?i)-signed\\d*$", "");
-    }
-    if (base.isBlank()) {
-      base = "document";
-    }
-    return base + "-signed.pdf";
+    String stem = SignedPdfOutputPaths.stemForSignedOutput(safe);
+    return stem + "-signed.pdf";
   }
 
   private static boolean parseBooleanLoose(String v) {
     if (v == null) return false;
     String t = v.trim().toLowerCase(java.util.Locale.ROOT);
     return t.equals("true") || t.equals("1") || t.equals("yes") || t.equals("y");
+  }
+
+  /**
+   * Builds PDF signing options from multipart: {@code finalVersion} and optional {@code allowResignFinalVersion}
+   * (true/1/yes/y) to sign a PDF that already has ISO 32000 DocMDP P=1 (no changes permitted).
+   */
+  private static PdfSigningOptions pdfSigningOptionsFromMultipart(Multipart.Data mp, boolean finalVersion) {
+    boolean allowResign = parseBooleanLoose(readMultipartString(mp, "allowResignFinalVersion", true));
+    return new PdfSigningOptions(finalVersion, allowResign);
   }
 
   /** Multipart field or file part {@code finalVersion} (true/1/yes/y). */
@@ -671,26 +613,39 @@ public final class ApiServlet extends HttpServlet {
           if (inputFilename == null || inputFilename.isBlank()) {
             inputFilename = "text.txt";
           }
-          outDirFile.mkdirs();
-          String baseName = inputFilename;
-          String ext = "";
-          int dot = inputFilename.lastIndexOf('.');
-          if (dot > 0 && dot < inputFilename.length() - 1) {
-            baseName = inputFilename.substring(0, dot);
-            ext = inputFilename.substring(dot);
+
+          final Path reservedOutPath;
+          try {
+            reservedOutPath = SignedPdfOutputPaths.reserveNextSignedTextPath(
+                outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
+          } catch (IOException e) {
+            LOG.warning("/auto-sign-text: failed to reserve output path: " + e.getMessage());
+            writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+            return;
           }
-          File outFile = new File(outDirFile, baseName + "-signed" + ext);
 
-          java.nio.file.Files.writeString(
-              outFile.toPath(),
-              sb.toString(),
-              java.nio.charset.StandardCharsets.UTF_8);
-
-          writeJson(resp, 200, Map.of(
-              "ok", true,
-              "subjectDn", signingCert != null ? signingCert.getSubjectX500Principal().getName() : "",
-              "serialNumber", signingCert != null ? signingCert.getSerialNumber().toString(16) : "",
-              "outputPath", outFile.getAbsolutePath()));
+          boolean outputWritten = false;
+          try {
+            Files.writeString(
+                reservedOutPath,
+                sb.toString(),
+                java.nio.charset.StandardCharsets.UTF_8,
+                StandardOpenOption.TRUNCATE_EXISTING);
+            outputWritten = true;
+            writeJson(resp, 200, Map.of(
+                "ok", true,
+                "subjectDn", signingCert != null ? signingCert.getSubjectX500Principal().getName() : "",
+                "serialNumber", signingCert != null ? signingCert.getSerialNumber().toString(16) : "",
+                "outputPath", reservedOutPath.toAbsolutePath().toString()));
+          } finally {
+            if (!outputWritten) {
+              try {
+                Files.deleteIfExists(reservedOutPath);
+              } catch (IOException e) {
+                LOG.warning("/auto-sign-text: failed to delete reserved output: " + e.getMessage());
+              }
+            }
+          }
           return;
         }
 
@@ -729,7 +684,7 @@ public final class ApiServlet extends HttpServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = new PdfSigningOptions(finalVersion);
+          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion);
 
           String outputDir = cfg.autoSignOutputDir();
           if (outputDir == null || outputDir.isBlank()) {
@@ -818,33 +773,61 @@ public final class ApiServlet extends HttpServlet {
           if (inputFilename == null || inputFilename.isBlank()) {
             inputFilename = "document.pdf";
           }
-          File outFile = resolveNextAutoSignPdfOutput(outDirFile, inputFilename);
-          byte[] pdfToSign = resolveAutoSignIncrementalInput(data, outFile, mp);
 
-          byte[] signedPdf = PdfSignerService.signPdf(
-              pdfToSign,
-              key,
-              chain,
-              loaded.provider(),
-              signingCert,
-              reason,
-              location,
-              stampPages,
-              pdfOpts);
+          final Path reservedOutPath;
+          try {
+            reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
+                outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
+          } catch (IOException e) {
+            LOG.warning("/auto-sign-pdf: failed to reserve output path: " + e.getMessage());
+            writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+            return;
+          }
 
-          outDirFile.mkdirs();
-          Files.write(outFile.toPath(), signedPdf);
+          boolean outputWritten = false;
+          try {
+            File outFile = reservedOutPath.toFile();
+            byte[] pdfToSign = resolveAutoSignIncrementalInput(data, outFile, mp);
 
-          Map<String, Object> autoPdfBody = new LinkedHashMap<>();
-          autoPdfBody.put("ok", true);
-          autoPdfBody.put("format", "pdf");
-          autoPdfBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
-          autoPdfBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
-          autoPdfBody.put("outputPath", outFile.getAbsolutePath());
-          autoPdfBody.put("chainedFromExistingOutput", pdfToSign != data);
-          autoPdfBody.put("stampedPages", stampPages);
-          autoPdfBody.put("finalVersion", finalVersion);
-          writeJson(resp, 200, autoPdfBody);
+            byte[] signedPdf;
+            try {
+              signedPdf = PdfSignerService.signPdf(
+                  pdfToSign,
+                  key,
+                  chain,
+                  loaded.provider(),
+                  signingCert,
+                  reason,
+                  location,
+                  stampPages,
+                  pdfOpts);
+            } catch (DocMdpNoChangesLockException e) {
+              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+              return;
+            }
+
+            Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
+            outputWritten = true;
+
+            Map<String, Object> autoPdfBody = new LinkedHashMap<>();
+            autoPdfBody.put("ok", true);
+            autoPdfBody.put("format", "pdf");
+            autoPdfBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+            autoPdfBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+            autoPdfBody.put("outputPath", outFile.getAbsolutePath());
+            autoPdfBody.put("chainedFromExistingOutput", pdfToSign != data);
+            autoPdfBody.put("stampedPages", stampPages);
+            autoPdfBody.put("finalVersion", finalVersion);
+            writeJson(resp, 200, autoPdfBody);
+          } finally {
+            if (!outputWritten) {
+              try {
+                Files.deleteIfExists(reservedOutPath);
+              } catch (IOException e) {
+                LOG.warning("/auto-sign-pdf: failed to delete reserved output: " + e.getMessage());
+              }
+            }
+          }
           return;
         }
 
@@ -948,23 +931,39 @@ public final class ApiServlet extends HttpServlet {
             sb.append("\n");
           sb.append("<START-CMS-SIGNATURE>").append(cmsB64).append("</START-CMS-SIGNATURE>\n");
           String inputFilename = mp.filename("file");
-          if (inputFilename == null || inputFilename.isBlank())
+          if (inputFilename == null || inputFilename.isBlank()) {
             inputFilename = "text.txt";
-          outDirFile.mkdirs();
-          String baseName = inputFilename;
-          String ext = "";
-          int dot = inputFilename.lastIndexOf('.');
-          if (dot > 0 && dot < inputFilename.length() - 1) {
-            baseName = inputFilename.substring(0, dot);
-            ext = inputFilename.substring(dot);
           }
-          File outFile = new File(outDirFile, baseName + "-cms-signed" + ext);
-          java.nio.file.Files.writeString(outFile.toPath(), sb.toString(), StandardCharsets.UTF_8);
-          writeJson(resp, 200, Map.of(
-              "ok", true,
-              "subjectDn", signingCert.getSubjectX500Principal().getName(),
-              "serialNumber", signingCert.getSerialNumber().toString(16),
-              "outputPath", outFile.getAbsolutePath()));
+
+          final Path reservedOutPath;
+          try {
+            reservedOutPath = SignedPdfOutputPaths.reserveNextCmsSignedTextPath(
+                outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
+          } catch (IOException e) {
+            LOG.warning("/auto-sign-text-cms: failed to reserve output path: " + e.getMessage());
+            writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+            return;
+          }
+
+          boolean outputWritten = false;
+          try {
+            Files.writeString(
+                reservedOutPath, sb.toString(), StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING);
+            outputWritten = true;
+            writeJson(resp, 200, Map.of(
+                "ok", true,
+                "subjectDn", signingCert.getSubjectX500Principal().getName(),
+                "serialNumber", signingCert.getSerialNumber().toString(16),
+                "outputPath", reservedOutPath.toAbsolutePath().toString()));
+          } finally {
+            if (!outputWritten) {
+              try {
+                Files.deleteIfExists(reservedOutPath);
+              } catch (IOException e) {
+                LOG.warning("/auto-sign-text-cms: failed to delete reserved output: " + e.getMessage());
+              }
+            }
+          }
           return;
         }
 
@@ -1002,7 +1001,7 @@ public final class ApiServlet extends HttpServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = new PdfSigningOptions(finalVersion);
+          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion);
 
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
@@ -1055,16 +1054,22 @@ public final class ApiServlet extends HttpServlet {
                   .toArray(X509Certificate[]::new)
               : null;
           CertificateValidator.validateForSigning(signingCert, x509Chain);
-          byte[] signedPdf = PdfSignerService.signPdf(
-              data,
-              key,
-              chain,
-              loaded.provider(),
-              signingCert,
-              reason,
-              location,
-              stampPages,
-              pdfOpts);
+          byte[] signedPdf;
+          try {
+            signedPdf = PdfSignerService.signPdf(
+                data,
+                key,
+                chain,
+                loaded.provider(),
+                signingCert,
+                reason,
+                location,
+                stampPages,
+                pdfOpts);
+          } catch (DocMdpNoChangesLockException e) {
+            writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+            return;
+          }
 
           resp.setStatus(200);
           resp.setContentType("application/pdf");
@@ -1123,7 +1128,7 @@ public final class ApiServlet extends HttpServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = new PdfSigningOptions(finalVersion);
+          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion);
 
           if (cfg.hsm() == null) {
             writeJson(resp, 500,
@@ -1150,6 +1155,9 @@ public final class ApiServlet extends HttpServlet {
                 location,
                 stampPages,
                 pdfOpts);
+          } catch (DocMdpNoChangesLockException e) {
+            writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+            return;
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
             writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
@@ -1221,7 +1229,7 @@ public final class ApiServlet extends HttpServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = new PdfSigningOptions(finalVersion);
+          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion);
 
           if (cfg.hsm() == null) {
             writeJson(resp, 500,
@@ -1258,51 +1266,76 @@ public final class ApiServlet extends HttpServlet {
           if (inputFilename == null || inputFilename.isBlank()) {
             inputFilename = "document.pdf";
           }
-          File outFile = resolveNextAutoSignPdfOutput(outDirFile, inputFilename);
-          byte[] pdfToSign = resolveAutoSignIncrementalInput(data, outFile, mp);
 
-          char[] pinChars = pinStr.toCharArray();
-          HsmPdfSignerService.SignResult hsmResult = null;
+          final Path reservedOutPath;
           try {
-            hsmResult = HsmPdfSignerService.signPdfWithMetadata(
-                pdfToSign,
-                pinChars,
-                cerBytes,
-                libs,
-                HsmPkcs11ConfigurationService.normalizeSlotProbeCount(
-                    cfg.hsm().slotProbeCount() != null ? cfg.hsm().slotProbeCount() : 0),
-                reason,
-                location,
-                stampPages,
-                pdfOpts);
-          } catch (RuntimeException e) {
-            String detail = buildTokenErrorDetail(e);
-            writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
+            reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
+                outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
+          } catch (IOException e) {
+            LOG.warning("/hsm/auto-sign-pdf: failed to reserve output path: " + e.getMessage());
+            writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
             return;
-          } catch (Exception e) {
-            LOG.warning("/hsm/auto-sign-pdf: " + e.getMessage());
-            writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
-            return;
-          } finally {
-            java.util.Arrays.fill(pinChars, '\0');
           }
 
-          byte[] signedPdf = hsmResult.signedPdf();
-          X509Certificate signingCert = hsmResult.signingCertificate();
+          boolean outputWritten = false;
+          try {
+            File outFile = reservedOutPath.toFile();
+            byte[] pdfToSign = resolveAutoSignIncrementalInput(data, outFile, mp);
 
-          outDirFile.mkdirs();
-          Files.write(outFile.toPath(), signedPdf);
+            char[] pinChars = pinStr.toCharArray();
+            HsmPdfSignerService.SignResult hsmResult = null;
+            try {
+              hsmResult = HsmPdfSignerService.signPdfWithMetadata(
+                  pdfToSign,
+                  pinChars,
+                  cerBytes,
+                  libs,
+                  HsmPkcs11ConfigurationService.normalizeSlotProbeCount(
+                      cfg.hsm().slotProbeCount() != null ? cfg.hsm().slotProbeCount() : 0),
+                  reason,
+                  location,
+                  stampPages,
+                  pdfOpts);
+            } catch (DocMdpNoChangesLockException e) {
+              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+              return;
+            } catch (RuntimeException e) {
+              String detail = buildTokenErrorDetail(e);
+              writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
+              return;
+            } catch (Exception e) {
+              LOG.warning("/hsm/auto-sign-pdf: " + e.getMessage());
+              writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
+              return;
+            } finally {
+              java.util.Arrays.fill(pinChars, '\0');
+            }
 
-          Map<String, Object> hsmAutoBody = new LinkedHashMap<>();
-          hsmAutoBody.put("ok", true);
-          hsmAutoBody.put("format", "pdf");
-          hsmAutoBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
-          hsmAutoBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
-          hsmAutoBody.put("outputPath", outFile.getAbsolutePath());
-          hsmAutoBody.put("chainedFromExistingOutput", pdfToSign != data);
-          hsmAutoBody.put("stampedPages", stampPages);
-          hsmAutoBody.put("finalVersion", finalVersion);
-          writeJson(resp, 200, hsmAutoBody);
+            byte[] signedPdf = hsmResult.signedPdf();
+            X509Certificate signingCert = hsmResult.signingCertificate();
+
+            Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
+            outputWritten = true;
+
+            Map<String, Object> hsmAutoBody = new LinkedHashMap<>();
+            hsmAutoBody.put("ok", true);
+            hsmAutoBody.put("format", "pdf");
+            hsmAutoBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+            hsmAutoBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+            hsmAutoBody.put("outputPath", outFile.getAbsolutePath());
+            hsmAutoBody.put("chainedFromExistingOutput", pdfToSign != data);
+            hsmAutoBody.put("stampedPages", stampPages);
+            hsmAutoBody.put("finalVersion", finalVersion);
+            writeJson(resp, 200, hsmAutoBody);
+          } finally {
+            if (!outputWritten) {
+              try {
+                Files.deleteIfExists(reservedOutPath);
+              } catch (IOException e) {
+                LOG.warning("/hsm/auto-sign-pdf: failed to delete reserved output: " + e.getMessage());
+              }
+            }
+          }
           return;
         }
 
