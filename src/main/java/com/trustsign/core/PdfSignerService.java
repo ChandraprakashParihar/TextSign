@@ -297,7 +297,7 @@ public final class PdfSignerService {
   private static byte[] appendLtvRevision(byte[] signedPdfBytes, LtvEnabler.Config ltvConfig) throws Exception {
     try (PDDocument signedDoc = PDDocument.load(signedPdfBytes);
          ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-      LtvEnabler.enableLTV(signedDoc, ltvConfig);
+      LtvEnabler.enableLTV(signedDoc, signedPdfBytes, ltvConfig);
       signedDoc.saveIncremental(out);
       return out.toByteArray();
     }
