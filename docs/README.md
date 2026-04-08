@@ -45,3 +45,12 @@ You can give the PDF to your client together with the TrustSign ZIP package.
     "crlConnectTimeoutMs": 10000,
     "crlReadTimeoutMs": 15000
   }
+
+  {
+  "logging": {
+    "filePath": "/var/logs/myapp/app.log",
+    "level": "INFO",
+    "consoleEnabled": true,
+    "failOnError": false
+  }
+}

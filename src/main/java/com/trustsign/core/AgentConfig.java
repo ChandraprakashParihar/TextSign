@@ -8,6 +8,10 @@ public record AgentConfig(
     List<String> allowedOrigins,
     Integer port,
     Pkcs11Config pkcs11,
+    /** Optional. Shortcut for logging.filePath. Absolute or relative to config dir. */
+    @JsonProperty(required = false) String logFilePath,
+    /** Optional. Logging configuration (file/console, levels, strictness). */
+    @JsonProperty(required = false) LoggingConfig logging,
     /**
      * Optional. PKCS#11 settings used only by {@code /hsm/sign-pdf} and {@code /hsm/auto-sign-pdf}.
      * Keeps HSM driver paths separate from the main {@code pkcs11} block; token PIN and signer .cer are supplied per request.
@@ -96,6 +100,20 @@ public record AgentConfig(
       @JsonProperty(required = false) Boolean failOnError,
       @JsonProperty(required = false) Integer connectTimeoutMs,
       @JsonProperty(required = false) Integer readTimeoutMs
+  ) {}
+
+  /**
+   * Application logging settings. File logging is appended (never overwritten).
+   */
+  public record LoggingConfig(
+      /** Absolute or relative to config directory. */
+      @JsonProperty(required = false) String filePath,
+      /** When true, errors initializing file logging will fail startup. */
+      @JsonProperty(required = false) Boolean failOnError,
+      /** Default INFO. Values: SEVERE, WARNING, INFO, CONFIG, FINE, FINER, FINEST. */
+      @JsonProperty(required = false) String level,
+      /** Default true. */
+      @JsonProperty(required = false) Boolean consoleEnabled
   ) {}
 
   /**

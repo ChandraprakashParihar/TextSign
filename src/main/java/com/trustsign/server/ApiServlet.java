@@ -850,10 +850,11 @@ public final class ApiServlet extends HttpServlet {
         }
 
         case "/auto-sign-pdf" -> {
+          LOG.info("Auto-signing PDF request received");
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
           String reason = mp.field("reason");
-          String location = mp.field("location");
+          String location = mp.field("location");  
           // Some clients send text fields as "file" parts with filename present/empty.
           // Fall back to interpreting them as text when mp.field(...) is null.
           if (reason == null) {

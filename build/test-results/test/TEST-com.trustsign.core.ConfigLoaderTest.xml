@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.ConfigLoaderTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-04-08T06:03:57.049Z" hostname="Chandras-Mac-mini.local" time="0.106">
+<testsuite name="com.trustsign.core.ConfigLoaderTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-04-08T07:47:21.108Z" hostname="Chandras-Mac-mini.local" time="0.107">
   <properties/>
-  <testcase name="loadThrowsWhenFileIsEmpty()" classname="com.trustsign.core.ConfigLoaderTest" time="0.055"/>
+  <testcase name="loadThrowsWhenFileIsEmpty()" classname="com.trustsign.core.ConfigLoaderTest" time="0.057"/>
   <testcase name="loadThrowsWhenPkcs11Missing()" classname="com.trustsign.core.ConfigLoaderTest" time="0.007"/>
   <testcase name="loadThrowsWhenFileDoesNotExist()" classname="com.trustsign.core.ConfigLoaderTest" time="0.001"/>
-  <testcase name="loadThrowsWhenFileIsNull()" classname="com.trustsign.core.ConfigLoaderTest" time="0.001"/>
-  <testcase name="loadThrowsWhenAllowedOriginsMissing()" classname="com.trustsign.core.ConfigLoaderTest" time="0.027"/>
+  <testcase name="loadThrowsWhenFileIsNull()" classname="com.trustsign.core.ConfigLoaderTest" time="0.0"/>
+  <testcase name="loadThrowsWhenAllowedOriginsMissing()" classname="com.trustsign.core.ConfigLoaderTest" time="0.03"/>
   <testcase name="loadSucceedsWithValidConfig()" classname="com.trustsign.core.ConfigLoaderTest" time="0.001"/>
   <testcase name="portOrDefaultWhenPortZeroUsesDefault()" classname="com.trustsign.core.ConfigLoaderTest" time="0.001"/>
-  <testcase name="loadThrowsWhenPortOutOfRange()" classname="com.trustsign.core.ConfigLoaderTest" time="0.006"/>
+  <testcase name="loadThrowsWhenPortOutOfRange()" classname="com.trustsign.core.ConfigLoaderTest" time="0.002"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

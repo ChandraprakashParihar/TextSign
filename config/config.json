@@ -4,6 +4,7 @@
   "allowedClientIps": [
     "127.0.0.1"
   ],
+  "logFilePath": "/Users/jainnibha/output/logs/trustsign/app.log",
   "server": {
     "jettyMaxThreads": 400,
     "jettyMinThreads": 16,

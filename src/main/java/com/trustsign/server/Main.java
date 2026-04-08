@@ -29,6 +29,8 @@ public final class Main {
     LOG.info("Using config: " + configFile.getAbsolutePath());
 
     AgentConfig cfg = ConfigLoader.load(configFile);
+    // Initialize file/console logging as early as possible.
+    LoggingInitializer.initFromConfig(cfg, configFile);
     applyTruststoreConfig(configFile, cfg);
     applyCertificateValidationConfig(cfg);
 
