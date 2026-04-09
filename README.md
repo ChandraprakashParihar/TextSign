@@ -39,9 +39,103 @@ TRUSTSIGN_TOKEN_PIN=your-pin java -jar trustsign-0.1.0-all.jar --config=config/c
   - output: `build/client`
 - Windows installer (`.exe`):
   - `./gradlew buildInstaller`
+  - or `./gradlew packageWindowsExe` (jpackage, Windows host only)
+  - and `./gradlew packageWindowsMsi` (jpackage MSI, Windows host only)
 
 To calculate SHA-256 for any downloaded archive:
 
 ```bash
 ./gradlew printSha256 -Pfile=/absolute/path/to/archive.tar.gz
 ```
+
+## One-command Release
+
+- Build platform client zips in one command:
+  - `./gradlew releaseAllClients`
+  - outputs to `build/release`
+
+Artifacts produced:
+- `trustsign-client-windows-<version>.zip`
+- `trustsign-client-mac-<version>.zip`
+- `trustsign-client-linux-<version>.zip`
+
+Native packages (host OS only):
+- On macOS host: `.app` image and `.dmg`
+- On Linux host: `app-image`, `.deb`, `.rpm`
+- On Windows host: `.exe` via `buildInstaller` (Inno Setup), `.exe` via `packageWindowsExe`, and `.msi` via `packageWindowsMsi`
+
+Note: OS-native installers must be built on their respective OS hosts.
+
+### macOS signing + notarization (optional, recommended)
+
+Unsigned DMGs may be blocked by Gatekeeper on client machines. For trusted distribution:
+
+1. Build signed DMG:
+   - `./gradlew packageMacDmg -PmacJreSha256=<sha256> -PmacSignIdentity="Developer ID Application: <Your Name> (<TEAMID>)"`
+2. Notarize + staple:
+   - Create keychain profile once (Apple docs), then:
+   - `./gradlew notarizeMacDmg -PmacJreSha256=<sha256> -PmacSignIdentity="Developer ID Application: <Your Name> (<TEAMID>)" -PmacNotaryProfile=<profile>`
+3. Verify Gatekeeper acceptance:
+   - `./gradlew verifyMacDmgGatekeeper -PmacJreSha256=<sha256> -PmacSignIdentity="Developer ID Application: <Your Name> (<TEAMID>)"`
+
+Supported env vars:
+- `TRUSTSIGN_MAC_SIGN_IDENTITY`
+- `TRUSTSIGN_MAC_SIGNING_KEYCHAIN` (optional custom keychain)
+- `TRUSTSIGN_MAC_NOTARY_PROFILE`
+
+What’s now available
+In build.gradle:
+
+Native package tasks
+
+macOS:
+packageMacAppImage (.app)
+packageMacDmg (.dmg)
+Linux:
+packageLinuxAppImage
+packageLinuxDeb
+packageLinuxRpm
+Windows:
+existing buildInstaller (.exe)
+Per-platform bundled client zips
+
+releaseWindowsZip
+releaseMacZip
+releaseLinuxZip
+Single orchestrator
+
+releaseAllClients
+Builds all client zips + native packages supported on current host OS.
+Outputs to build/release.
+
+
+Implemented ✅ — macOS signing/notarization automation is now in your build.
+
+Added in build.gradle
+Optional signing support for:
+packageMacAppImage
+packageMacDmg
+New task:
+notarizeMacDmg
+submits DMG via xcrun notarytool --wait
+staples ticket via xcrun stapler
+New properties / env vars supported
+Signing identity:
+-PmacSignIdentity="Developer ID Application: ..."
+or TRUSTSIGN_MAC_SIGN_IDENTITY
+Optional keychain:
+-PmacSigningKeychain=/path/to/keychain-db
+or TRUSTSIGN_MAC_SIGNING_KEYCHAIN
+Notary profile:
+-PmacNotaryProfile=<profile>
+or TRUSTSIGN_MAC_NOTARY_PROFILE
+Usage
+./gradlew packageMacDmg \
+  -PmacJreSha256=<sha256> \
+  -PmacSignIdentity="Developer ID Application: Your Name (TEAMID)"
+Then:
+
+./gradlew notarizeMacDmg \
+  -PmacJreSha256=<sha256> \
+  -PmacSignIdentity="Developer ID Application: Your Name (TEAMID)" \
+  -PmacNotaryProfile=<profile>

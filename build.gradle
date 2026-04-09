@@ -146,6 +146,7 @@ tasks.register("extractWindowsJre") {
   def extractTo = windowsJreExtractDir
   outputs.dir(extractTo)
   doLast {
+    delete(extractTo)
     extractTo.mkdirs()
     copy {
       from(zipTree(windowsJreZip))
@@ -199,6 +200,7 @@ tasks.register("extractMacJre") {
   def extractTo = macJreExtractDir
   outputs.dir(extractTo)
   doLast {
+    delete(extractTo)
     extractTo.mkdirs()
     copy {
       from(tarTree(resources.gzip(macJreTarGz)))
@@ -252,6 +254,7 @@ tasks.register("extractLinuxJre") {
   def extractTo = linuxJreExtractDir
   outputs.dir(extractTo)
   doLast {
+    delete(extractTo)
     extractTo.mkdirs()
     copy {
       from(tarTree(resources.gzip(linuxJreTarGz)))
@@ -463,9 +466,11 @@ tasks.register("clientFolderWindows") {
     if (!jreDir.exists()) {
       throw new GradleException("Bundled Windows JRE not found after installDistWithJre: ${jreDir}")
     }
+    def targetJre = new File(clientDir, "jre")
+    delete(targetJre)
     copy {
       from(jreDir)
-      into(new File(clientDir, "jre"))
+      into(targetJre)
     }
   }
 }
@@ -556,6 +561,402 @@ tasks.register("printSha256") {
     }
     def sha = md.digest().encodeHex().toString()
     println("SHA256(${f})=${sha}")
+  }
+}
+
+def appName = "TrustSign"
+def appVersion = "${project.version}"
+def appVersionParts = appVersion.tokenize('.')
+def appVersionMajor = appVersionParts ? appVersionParts[0].toInteger() : 1
+def appVersionMinor = appVersionParts.size() > 1 ? appVersionParts[1].toInteger() : 0
+def appVersionPatch = appVersionParts.size() > 2 ? appVersionParts[2].toInteger() : 0
+def jpackageAppVersion = "${Math.max(1, appVersionMajor)}.${Math.max(0, appVersionMinor)}.${Math.max(0, appVersionPatch)}"
+def clientJarName = "trustsign-${project.version}-all.jar"
+def isMacOs = System.getProperty("os.name", "").toLowerCase().contains("mac")
+def isLinuxOs = System.getProperty("os.name", "").toLowerCase().contains("linux")
+def isWindowsOs = System.getProperty("os.name", "").toLowerCase().contains("windows")
+def releaseDir = file("$buildDir/release")
+def macSignIdentity = (findProperty("macSignIdentity") ?: System.getenv("TRUSTSIGN_MAC_SIGN_IDENTITY"))?.toString()
+def macSigningKeychain = (findProperty("macSigningKeychain") ?: System.getenv("TRUSTSIGN_MAC_SIGNING_KEYCHAIN"))?.toString()
+def macNotaryProfile = (findProperty("macNotaryProfile") ?: System.getenv("TRUSTSIGN_MAC_NOTARY_PROFILE"))?.toString()
+def macDmgPath = file("$buildDir/release/mac/TrustSign-${jpackageAppVersion}.dmg")
+
+tasks.register("packageMacAppImage") {
+  group = "distribution"
+  description = "Build macOS .app image via jpackage (macOS host only)"
+  dependsOn("clientFolderMac")
+  onlyIf { isMacOs }
+  doLast {
+    releaseDir.mkdirs()
+    def dest = new File(releaseDir, "mac")
+    dest.mkdirs()
+    def cmd = [
+      "jpackage",
+      "--type", "app-image",
+      "--name", appName,
+      "--app-version", jpackageAppVersion,
+      "--input", file("$buildDir/client").absolutePath,
+      "--main-jar", clientJarName,
+      "--main-class", "com.trustsign.server.Main",
+      "--runtime-image", file("$buildDir/client/jre").absolutePath,
+      "--dest", dest.absolutePath
+    ]
+    if (macSignIdentity != null && !macSignIdentity.isBlank()) {
+      cmd += ["--mac-sign", "--mac-signing-key-user-name", macSignIdentity]
+      if (macSigningKeychain != null && !macSigningKeychain.isBlank()) {
+        cmd += ["--mac-signing-keychain", macSigningKeychain]
+      }
+    }
+    def pb = new ProcessBuilder(cmd)
+    pb.directory(file("."))
+    pb.inheritIO()
+    def ret = pb.start().waitFor()
+    if (ret != 0) throw new GradleException("jpackage app-image failed with code $ret")
+  }
+}
+
+tasks.register("packageWindowsExe") {
+  group = "distribution"
+  description = "Build Windows .exe installer via jpackage (Windows host only)"
+  if (isWindowsOs) {
+    dependsOn("clientFolderWindows", "verifyInstallerInputs")
+  }
+  doLast {
+    if (!isWindowsOs) {
+      throw new GradleException("packageWindowsExe requires Windows host. Run this task on Windows.")
+    }
+    releaseDir.mkdirs()
+    def dest = new File(releaseDir, "windows")
+    dest.mkdirs()
+    def pb = new ProcessBuilder(
+      "jpackage",
+      "--type", "exe",
+      "--name", appName,
+      "--app-version", jpackageAppVersion,
+      "--input", file("$buildDir/client").absolutePath,
+      "--main-jar", clientJarName,
+      "--main-class", "com.trustsign.server.Main",
+      "--runtime-image", file("$buildDir/client/jre").absolutePath,
+      "--dest", dest.absolutePath,
+      "--win-menu",
+      "--win-shortcut",
+      "--win-dir-chooser"
+    )
+    pb.directory(file("."))
+    pb.inheritIO()
+    def ret = pb.start().waitFor()
+    if (ret != 0) throw new GradleException("jpackage windows exe failed with code $ret")
+  }
+}
+
+tasks.register("packageWindowsMsi") {
+  group = "distribution"
+  description = "Build Windows .msi installer via jpackage (Windows host only)"
+  if (isWindowsOs) {
+    dependsOn("clientFolderWindows", "verifyInstallerInputs")
+  }
+  doLast {
+    if (!isWindowsOs) {
+      throw new GradleException("packageWindowsMsi requires Windows host. Run this task on Windows.")
+    }
+    releaseDir.mkdirs()
+    def dest = new File(releaseDir, "windows")
+    dest.mkdirs()
+    def pb = new ProcessBuilder(
+      "jpackage",
+      "--type", "msi",
+      "--name", appName,
+      "--app-version", jpackageAppVersion,
+      "--input", file("$buildDir/client").absolutePath,
+      "--main-jar", clientJarName,
+      "--main-class", "com.trustsign.server.Main",
+      "--runtime-image", file("$buildDir/client/jre").absolutePath,
+      "--dest", dest.absolutePath,
+      "--win-menu",
+      "--win-shortcut",
+      "--win-dir-chooser"
+    )
+    pb.directory(file("."))
+    pb.inheritIO()
+    def ret = pb.start().waitFor()
+    if (ret != 0) throw new GradleException("jpackage windows msi failed with code $ret")
+  }
+}
+
+tasks.register("packageMacDmg") {
+  group = "distribution"
+  description = "Build macOS .dmg via jpackage (macOS host only)"
+  dependsOn("clientFolderMac")
+  onlyIf { isMacOs }
+  doLast {
+    releaseDir.mkdirs()
+    def dest = new File(releaseDir, "mac")
+    dest.mkdirs()
+    def cmd = [
+      "jpackage",
+      "--type", "dmg",
+      "--name", appName,
+      "--app-version", jpackageAppVersion,
+      "--input", file("$buildDir/client").absolutePath,
+      "--main-jar", clientJarName,
+      "--main-class", "com.trustsign.server.Main",
+      "--runtime-image", file("$buildDir/client/jre").absolutePath,
+      "--dest", dest.absolutePath
+    ]
+    if (macSignIdentity != null && !macSignIdentity.isBlank()) {
+      cmd += ["--mac-sign", "--mac-signing-key-user-name", macSignIdentity]
+      if (macSigningKeychain != null && !macSigningKeychain.isBlank()) {
+        cmd += ["--mac-signing-keychain", macSigningKeychain]
+      }
+    }
+    def pb = new ProcessBuilder(cmd)
+    pb.directory(file("."))
+    pb.inheritIO()
+    def ret = pb.start().waitFor()
+    if (ret != 0) throw new GradleException("jpackage dmg failed with code $ret")
+  }
+}
+
+tasks.register("notarizeMacDmg") {
+  group = "distribution"
+  description = "Submits mac DMG for notarization and staples ticket (macOS host only)"
+  dependsOn("packageMacDmg")
+  onlyIf { isMacOs }
+  doLast {
+    if (macNotaryProfile == null || macNotaryProfile.isBlank()) {
+      throw new GradleException(
+        "Missing mac notary profile. Set -PmacNotaryProfile=<keychain-profile> " +
+        "or TRUSTSIGN_MAC_NOTARY_PROFILE."
+      )
+    }
+    if (!macDmgPath.exists()) {
+      throw new GradleException("DMG not found: ${macDmgPath}")
+    }
+    def submit = new ProcessBuilder(
+      "xcrun", "notarytool", "submit", macDmgPath.absolutePath,
+      "--keychain-profile", macNotaryProfile,
+      "--wait"
+    )
+    submit.directory(file("."))
+    submit.inheritIO()
+    def submitRet = submit.start().waitFor()
+    if (submitRet != 0) {
+      throw new GradleException("notarytool submit failed with code $submitRet")
+    }
+
+    def staple = new ProcessBuilder("xcrun", "stapler", "staple", macDmgPath.absolutePath)
+    staple.directory(file("."))
+    staple.inheritIO()
+    def stapleRet = staple.start().waitFor()
+    if (stapleRet != 0) {
+      throw new GradleException("stapler failed with code $stapleRet")
+    }
+  }
+}
+
+tasks.register("verifyMacDmgGatekeeper") {
+  group = "distribution"
+  description = "Verifies macOS Gatekeeper assessment for generated DMG and bundled .app"
+  dependsOn("packageMacDmg")
+  onlyIf { isMacOs }
+  doLast {
+    if (!macDmgPath.exists()) {
+      throw new GradleException("DMG not found: ${macDmgPath}")
+    }
+
+    def verifyProc = new ProcessBuilder("hdiutil", "verify", macDmgPath.absolutePath)
+    verifyProc.directory(file("."))
+    verifyProc.inheritIO()
+    def verifyRet = verifyProc.start().waitFor()
+    if (verifyRet != 0) {
+      throw new GradleException("hdiutil verify failed with code $verifyRet")
+    }
+
+    def attachProc = new ProcessBuilder(
+      "hdiutil", "attach", macDmgPath.absolutePath, "-nobrowse", "-readonly"
+    )
+    attachProc.directory(file("."))
+    def attach = attachProc.start()
+    def attachOut = attach.inputStream.getText("UTF-8")
+    def attachErr = attach.errorStream.getText("UTF-8")
+    def attachRet = attach.waitFor()
+    if (attachRet != 0) {
+      throw new GradleException("Failed to mount DMG. stderr: ${attachErr}")
+    }
+
+    String mountedVolume = null
+    String device = null
+    for (String line : attachOut.readLines()) {
+      if (line.contains("/Volumes/")) {
+        def parts = line.trim().split(/\s+/)
+        if (parts.length >= 3) {
+          device = parts[0]
+          mountedVolume = parts[parts.length - 1]
+        }
+      }
+    }
+    if (mountedVolume == null) {
+      throw new GradleException("Unable to detect mounted volume from hdiutil output:\n${attachOut}")
+    }
+
+    try {
+      def appPath = "${mountedVolume}/${appName}.app"
+      def spctl = new ProcessBuilder("spctl", "-a", "-vv", appPath)
+      spctl.directory(file("."))
+      def sp = spctl.start()
+      def spOut = sp.inputStream.getText("UTF-8")
+      def spErr = sp.errorStream.getText("UTF-8")
+      def spRet = sp.waitFor()
+
+      println("Gatekeeper assessment output:")
+      if (spOut != null && !spOut.isBlank()) println(spOut.trim())
+      if (spErr != null && !spErr.isBlank()) println(spErr.trim())
+
+      if (spRet == 0) {
+        println("Gatekeeper check PASSED for ${appPath}")
+      } else {
+        throw new GradleException("Gatekeeper check FAILED for ${appPath}")
+      }
+    } finally {
+      if (device != null) {
+        def detachProc = new ProcessBuilder("hdiutil", "detach", device)
+        detachProc.directory(file("."))
+        detachProc.inheritIO()
+        detachProc.start().waitFor()
+      }
+    }
+  }
+}
+
+tasks.register("packageLinuxAppImage") {
+  group = "distribution"
+  description = "Build Linux AppImage-style app image via jpackage (Linux host only)"
+  dependsOn("clientFolderLinux")
+  onlyIf { isLinuxOs }
+  doLast {
+    releaseDir.mkdirs()
+    def dest = new File(releaseDir, "linux")
+    dest.mkdirs()
+    def pb = new ProcessBuilder(
+      "jpackage",
+      "--type", "app-image",
+      "--name", appName,
+      "--app-version", jpackageAppVersion,
+      "--input", file("$buildDir/client").absolutePath,
+      "--main-jar", clientJarName,
+      "--main-class", "com.trustsign.server.Main",
+      "--runtime-image", file("$buildDir/client/jre").absolutePath,
+      "--dest", dest.absolutePath
+    )
+    pb.directory(file("."))
+    pb.inheritIO()
+    def ret = pb.start().waitFor()
+    if (ret != 0) throw new GradleException("jpackage linux app-image failed with code $ret")
+  }
+}
+
+tasks.register("packageLinuxDeb") {
+  group = "distribution"
+  description = "Build Linux .deb package via jpackage (Linux host only)"
+  dependsOn("clientFolderLinux")
+  onlyIf { isLinuxOs }
+  doLast {
+    releaseDir.mkdirs()
+    def dest = new File(releaseDir, "linux")
+    dest.mkdirs()
+    def pb = new ProcessBuilder(
+      "jpackage",
+      "--type", "deb",
+      "--name", appName.toLowerCase(),
+      "--app-version", jpackageAppVersion,
+      "--input", file("$buildDir/client").absolutePath,
+      "--main-jar", clientJarName,
+      "--main-class", "com.trustsign.server.Main",
+      "--runtime-image", file("$buildDir/client/jre").absolutePath,
+      "--dest", dest.absolutePath
+    )
+    pb.directory(file("."))
+    pb.inheritIO()
+    def ret = pb.start().waitFor()
+    if (ret != 0) throw new GradleException("jpackage deb failed with code $ret")
+  }
+}
+
+tasks.register("packageLinuxRpm") {
+  group = "distribution"
+  description = "Build Linux .rpm package via jpackage (Linux host only)"
+  dependsOn("clientFolderLinux")
+  onlyIf { isLinuxOs }
+  doLast {
+    releaseDir.mkdirs()
+    def dest = new File(releaseDir, "linux")
+    dest.mkdirs()
+    def pb = new ProcessBuilder(
+      "jpackage",
+      "--type", "rpm",
+      "--name", appName.toLowerCase(),
+      "--app-version", jpackageAppVersion,
+      "--input", file("$buildDir/client").absolutePath,
+      "--main-jar", clientJarName,
+      "--main-class", "com.trustsign.server.Main",
+      "--runtime-image", file("$buildDir/client/jre").absolutePath,
+      "--dest", dest.absolutePath
+    )
+    pb.directory(file("."))
+    pb.inheritIO()
+    def ret = pb.start().waitFor()
+    if (ret != 0) throw new GradleException("jpackage rpm failed with code $ret")
+  }
+}
+
+tasks.register("releaseWindowsZip", Zip) {
+  group = "distribution"
+  description = "Creates Windows client zip (bundled JRE)"
+  dependsOn("clientFolderWindows")
+  archiveBaseName.set("trustsign-client-windows")
+  archiveVersion.set(project.version.toString())
+  destinationDirectory.set(releaseDir)
+  from("$buildDir/client")
+}
+
+tasks.register("releaseMacZip", Zip) {
+  group = "distribution"
+  description = "Creates macOS client zip (bundled JRE)"
+  dependsOn("clientFolderMac")
+  archiveBaseName.set("trustsign-client-mac")
+  archiveVersion.set(project.version.toString())
+  destinationDirectory.set(releaseDir)
+  from("$buildDir/client")
+}
+
+tasks.register("releaseLinuxZip", Zip) {
+  group = "distribution"
+  description = "Creates Linux client zip (bundled JRE)"
+  dependsOn("clientFolderLinux")
+  archiveBaseName.set("trustsign-client-linux")
+  archiveVersion.set(project.version.toString())
+  destinationDirectory.set(releaseDir)
+  from("$buildDir/client")
+}
+
+tasks.register("releaseAllClients") {
+  group = "distribution"
+  description = "Builds all platform client zips; also builds native package for current host OS when supported"
+  dependsOn("releaseWindowsZip", "releaseMacZip", "releaseLinuxZip")
+  if (isWindowsOs) {
+    dependsOn("buildInstaller", "packageWindowsExe", "packageWindowsMsi")
+  }
+  if (isMacOs) {
+    dependsOn("packageMacAppImage", "packageMacDmg")
+  }
+  if (isLinuxOs) {
+    dependsOn("packageLinuxAppImage", "packageLinuxDeb", "packageLinuxRpm")
+  }
+  doLast {
+    println("Release artifacts available in: ${releaseDir}")
+    if (!isWindowsOs) {
+      println("Windows .exe installer must be built on Windows host (buildInstaller task enforces this).")
+    }
   }
 }
 
