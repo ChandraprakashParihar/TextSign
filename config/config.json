@@ -13,6 +13,7 @@
     "connectorIdleTimeoutMs": 120000,
     "maxTcpConnections": 0,
     "maxConcurrentSigningOperations": 24,
+    "sessionIssueRateLimitPerMinute": 30,
     "signingAcquireTimeoutMs": 300000,
     "multipartPdfMaxFileMb": 25,
     "multipartTextMaxFileMb": 4,
@@ -33,7 +34,7 @@
   },
   "pkcs11": {
     "preferredLibrary": null,
-    "pin": "12345678",
+    "pin": null,
     "windowsCandidates": [
       "%SystemRoot%\\System32\\eps2003csp11v2.dll",
       "%SystemRoot%\\System32\\eps2003csp11v2_s.dll",

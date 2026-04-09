@@ -41,7 +41,7 @@ class ConfigLoaderTest {
   @Test
   void loadThrowsWhenAllowedOriginsMissing() throws Exception {
     String json = """
-        {"port": 31927, "pkcs11": {"pin": "12345678"}}
+        {"port": 31927, "pkcs11": {}}
         """;
     Path f = tempDir.resolve("cfg.json");
     Files.writeString(f, json);
@@ -63,7 +63,7 @@ class ConfigLoaderTest {
   @Test
   void loadThrowsWhenPortOutOfRange() throws Exception {
     String json = """
-        {"port": 70000, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {"pin": "12345678"}}
+        {"port": 70000, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {}}
         """;
     Path f = tempDir.resolve("cfg.json");
     Files.writeString(f, json);
@@ -74,7 +74,7 @@ class ConfigLoaderTest {
   @Test
   void loadSucceedsWithValidConfig() throws Exception {
     String json = """
-        {"port": 31927, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {"pin": "12345678"}}
+        {"port": 31927, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {}}
         """;
     Path f = tempDir.resolve("cfg.json");
     Files.writeString(f, json);
@@ -88,11 +88,22 @@ class ConfigLoaderTest {
   @Test
   void portOrDefaultWhenPortZeroUsesDefault() throws Exception {
     String json = """
-        {"port": 0, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {"pin": "12345678"}}
+        {"port": 0, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {}}
         """;
     Path f = tempDir.resolve("cfg.json");
     Files.writeString(f, json);
     AgentConfig cfg = ConfigLoader.load(f.toFile());
     assertEquals(31927, cfg.portOrDefault());
+  }
+
+  @Test
+  void loadThrowsWhenPkcs11PinIsNonTextual() throws Exception {
+    String json = """
+        {"port": 31927, "allowedOrigins": ["http://localhost:3000"], "pkcs11": {"pin": 1234}}
+        """;
+    Path f = tempDir.resolve("cfg.json");
+    Files.writeString(f, json);
+    IllegalStateException e = assertThrows(IllegalStateException.class, () -> ConfigLoader.load(f.toFile()));
+    assertTrue(e.getMessage().contains("pkcs11.pin"));
   }
 }

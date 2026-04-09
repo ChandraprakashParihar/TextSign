@@ -38,3 +38,16 @@ If you don’t have Inno Setup, you can still give clients the same content as a
 2. Or zip **build/client** and give that instead; they run `run-trustsign.bat`.
 
 Config is in `{InstallDir}\config\` (config.json, licence.json, public-key.pem, etc.).
+
+## Production Config Recommendation
+
+For production deployments, start from `config/config.production.json` (project root) instead of dev-style configs.
+
+- Copy it to your deployment config location as `config.json`.
+- Set strict values for:
+  - `allowedOrigins`
+  - `allowedClientIps`
+  - `server.maxTcpConnections`
+  - `server.maxConcurrentSigningOperations`
+- Keep `server.enableDebugEndpoints` as `false`.
+- Keep `pkcs11.pin` as `null` and provide PIN through `TRUSTSIGN_TOKEN_PIN`.

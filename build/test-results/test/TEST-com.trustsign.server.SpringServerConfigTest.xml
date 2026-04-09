@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.server.SpringServerConfigTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-04-09T08:58:27.637Z" hostname="Chandras-Mac-mini.local" time="0.006">
+<testsuite name="com.trustsign.server.SpringServerConfigTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-04-09T09:29:13.453Z" hostname="Chandras-Mac-mini.local" time="0.004">
   <properties/>
-  <testcase name="createsApiBeanFilterAndMultipartConfig()" classname="com.trustsign.server.SpringServerConfigTest" time="0.006"/>
+  <testcase name="createsApiBeanFilterAndMultipartConfig()" classname="com.trustsign.server.SpringServerConfigTest" time="0.003"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

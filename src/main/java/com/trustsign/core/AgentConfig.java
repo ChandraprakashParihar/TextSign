@@ -140,6 +140,7 @@ public record AgentConfig(
       @JsonProperty(required = false) Integer maxThreads,
       @JsonProperty(required = false) Integer minSpareThreads,
       @JsonProperty(required = false) Integer threadIdleTimeoutMs,
+      @JsonProperty(required = false) Boolean enableDebugEndpoints,
       @JsonProperty(required = false) Integer acceptQueueSize,
       @JsonProperty(required = false) Integer connectorIdleTimeoutMs,
       /** When set and positive, server connector max connections are capped. Zero or omitted = no global TCP cap. */
@@ -151,6 +152,8 @@ public record AgentConfig(
       @JsonProperty(required = false) Integer responseHeaderSizeBytes,
       @JsonProperty(required = false) Integer multipartPdfMaxFileMb,
       @JsonProperty(required = false) Integer multipartTextMaxFileMb,
+      /** Max /session token issuances per IP per minute. */
+      @JsonProperty(required = false) Integer sessionIssueRateLimitPerMinute,
       @JsonProperty(required = false) Long gracefulStopTimeoutMs
   ) {
 
@@ -176,6 +179,10 @@ public record AgentConfig(
     public static int acceptQueueSizeOrDefault(ServerConfig c) {
       int v = c == null || c.acceptQueueSize() == null ? 4096 : c.acceptQueueSize();
       return Math.min(Math.max(v, 50), 1_000_000);
+    }
+
+    public static boolean enableDebugEndpointsOrDefault(ServerConfig c) {
+      return c != null && Boolean.TRUE.equals(c.enableDebugEndpoints());
     }
 
     public static int connectorIdleTimeoutMsOrDefault(ServerConfig c) {
@@ -223,6 +230,14 @@ public record AgentConfig(
     public static int multipartTextMaxFileMbOrDefault(ServerConfig c) {
       int v = c == null || c.multipartTextMaxFileMb() == null ? 4 : c.multipartTextMaxFileMb();
       return Math.min(Math.max(v, 1), 100);
+    }
+
+    public static int sessionIssueRateLimitPerMinuteOrDefault(ServerConfig c) {
+      Integer fromProp = Integer.getInteger("trustsign.sessionRateLimitPerMinute");
+      int v = c == null || c.sessionIssueRateLimitPerMinute() == null
+          ? (fromProp == null ? 30 : fromProp)
+          : c.sessionIssueRateLimitPerMinute();
+      return Math.min(Math.max(v, 1), 10_000);
     }
 
     public static long gracefulStopTimeoutMsOrDefault(ServerConfig c) {

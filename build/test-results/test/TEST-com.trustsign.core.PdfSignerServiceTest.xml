@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.PdfSignerServiceTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-09T08:58:27.032Z" hostname="Chandras-Mac-mini.local" time="0.423">
+<testsuite name="com.trustsign.core.PdfSignerServiceTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-09T09:29:12.298Z" hostname="Chandras-Mac-mini.local" time="0.464">
   <properties/>
-  <testcase name="signatureContentsLookSigned_requiresSignedDataOid()" classname="com.trustsign.core.PdfSignerServiceTest" time="0.024"/>
-  <testcase name="multiPageSigning_placesWidgetRectsOnAllRequestedPages()" classname="com.trustsign.core.PdfSignerServiceTest" time="0.398"/>
+  <testcase name="signatureContentsLookSigned_requiresSignedDataOid()" classname="com.trustsign.core.PdfSignerServiceTest" time="0.026"/>
+  <testcase name="multiPageSigning_placesWidgetRectsOnAllRequestedPages()" classname="com.trustsign.core.PdfSignerServiceTest" time="0.437"/>
   <system-out><![CDATA[Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
-14:28:27.348 [Test worker] INFO com.trustsign.core.PdfSignerService -- Starting PDF signing. pages=3, finalVersion=false, tsaEnabled=false
-14:28:27.452 [Test worker] INFO com.trustsign.core.PdfSignerService -- PDF signing completed in 104 ms. timestamped=false, tsaFallback=false
+14:59:12.600 [Test worker] INFO com.trustsign.core.PdfSignerService -- Starting PDF signing. pages=3, finalVersion=false, tsaEnabled=false
+14:59:12.757 [Test worker] INFO com.trustsign.core.PdfSignerService -- PDF signing completed in 160 ms. timestamped=false, tsaFallback=false
 ]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

@@ -44,6 +44,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.regex.Pattern;
@@ -59,6 +60,10 @@ public final class ApiServlet {
   private final int multipartTextMaxBytes;
   /** Former 5 MiB cap for verify-text / debug; bounded by PDF limit. */
   private final int multipartMediumMaxBytes;
+  private final boolean debugEndpointsEnabled;
+  private final boolean exposeErrorDetails;
+  private final int sessionIssueRateLimitPerMinute;
+  private final ConcurrentHashMap<String, SessionIssueWindow> sessionIssueWindows = new ConcurrentHashMap<>();
 
   public ApiServlet(SessionManager sessions, LicenceEnforcer licenceEnforcer, SigningConcurrencyGate signingGate) {
     this(sessions, licenceEnforcer, signingGate, null);
@@ -77,6 +82,9 @@ public final class ApiServlet {
     this.multipartPdfMaxBytes = pdfMb * 1024 * 1024;
     this.multipartTextMaxBytes = textMb * 1024 * 1024;
     this.multipartMediumMaxBytes = Math.min(multipartPdfMaxBytes, Math.max(multipartTextMaxBytes, 5 * 1024 * 1024));
+    this.debugEndpointsEnabled = ServerConfig.enableDebugEndpointsOrDefault(serverLimits);
+    this.exposeErrorDetails = this.debugEndpointsEnabled || Boolean.getBoolean("trustsign.exposeErrorDetails");
+    this.sessionIssueRateLimitPerMinute = ServerConfig.sessionIssueRateLimitPerMinuteOrDefault(serverLimits);
   }
 
   /**
@@ -686,13 +694,17 @@ public final class ApiServlet {
     try {
       switch (path) {
         case "/session" -> {
+          if (!allowSessionIssue(req)) {
+            writeJson(resp, 429, Map.of("error", "Too many session requests"));
+            return;
+          }
           SessionManager.Session s = sessions.createSessionMinutes(10);
           writeJson(resp, 200, Map.of("token", s.token(), "expiresAt", s.expiresAt().toString()));
           return;
         }
 
         case "/auto-sign-text" -> {
-          // requireSession(req);
+          requireSession(req);
           var mp = Multipart.read(req, multipartTextMaxBytes);
           byte[] data = mp.file("file");
 
@@ -1217,7 +1229,7 @@ public final class ApiServlet {
         }
 
         case "/sign-pdf" -> {
-          // requireSession(req);
+          requireSession(req);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
           String reason = mp.field("reason");
@@ -1645,6 +1657,11 @@ public final class ApiServlet {
         }
 
         case "/debug/pdf-ltv" -> {
+          if (!debugEndpointsEnabled) {
+            writeJson(resp, 404, Map.of("error", "Not found"));
+            return;
+          }
+          requireSession(req);
           LOG.info("{} LTV debug request received", ctx);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
@@ -1822,6 +1839,11 @@ public final class ApiServlet {
         // ── /debug-bytes — REMOVE BEFORE PRODUCTION
         // ───────────────────────────────────
         case "/debug-bytes" -> {
+          if (!debugEndpointsEnabled) {
+            writeJson(resp, 404, Map.of("error", "Not found"));
+            return;
+          }
+          requireSession(req);
           var mp = Multipart.read(req, multipartMediumMaxBytes);
 
           byte[] signedFileBytes = mp.file("signedFile");
@@ -1954,7 +1976,76 @@ public final class ApiServlet {
   private void writeJson(HttpServletResponse resp, int status, Object body) throws IOException {
     resp.setStatus(status);
     resp.setContentType("application/json");
-    Json.MAPPER.writeValue(resp.getOutputStream(), body);
+    Object normalized = normalizeErrorShape(status, body);
+    Json.MAPPER.writeValue(resp.getOutputStream(), redactErrorDetails(normalized));
+  }
+
+  private Object normalizeErrorShape(int status, Object body) {
+    if (!(body instanceof Map<?, ?> original) || !original.containsKey("error") || original.containsKey("code")) {
+      return body;
+    }
+    Map<String, Object> normalized = new LinkedHashMap<>();
+    normalized.put("code", codeForStatus(status));
+    for (Map.Entry<?, ?> e : original.entrySet()) {
+      if (e.getKey() == null) {
+        continue;
+      }
+      normalized.put(String.valueOf(e.getKey()), e.getValue());
+    }
+    return normalized;
+  }
+
+  private static String codeForStatus(int status) {
+    return switch (status) {
+      case 400 -> "TS_BAD_REQUEST";
+      case 401 -> "TS_UNAUTHORIZED";
+      case 403 -> "TS_FORBIDDEN";
+      case 404 -> "TS_NOT_FOUND";
+      case 409 -> "TS_CONFLICT";
+      case 422 -> "TS_UNPROCESSABLE";
+      case 429 -> "TS_RATE_LIMITED";
+      default -> "TS_INTERNAL";
+    };
+  }
+
+  private Object redactErrorDetails(Object body) {
+    if (exposeErrorDetails || !(body instanceof Map<?, ?> original) || !original.containsKey("details")) {
+      return body;
+    }
+    Map<String, Object> sanitized = new LinkedHashMap<>();
+    for (Map.Entry<?, ?> e : original.entrySet()) {
+      if (e.getKey() == null) {
+        continue;
+      }
+      String key = String.valueOf(e.getKey());
+      if ("details".equals(key)) {
+        continue;
+      }
+      sanitized.put(key, e.getValue());
+    }
+    return sanitized;
+  }
+
+  private boolean allowSessionIssue(HttpServletRequest req) {
+    String ip = req.getRemoteAddr();
+    long nowMinute = System.currentTimeMillis() / 60_000L;
+    SessionIssueWindow window = sessionIssueWindows.compute(ip, (k, curr) -> {
+      if (curr == null || curr.minute != nowMinute) {
+        return new SessionIssueWindow(nowMinute, 1);
+      }
+      return new SessionIssueWindow(curr.minute, curr.count + 1);
+    });
+    return window != null && window.count <= sessionIssueRateLimitPerMinute;
+  }
+
+  private static final class SessionIssueWindow {
+    final long minute;
+    final int count;
+
+    SessionIssueWindow(long minute, int count) {
+      this.minute = minute;
+      this.count = count;
+    }
   }
 
   /**
@@ -2150,6 +2241,11 @@ public final class ApiServlet {
       return envPin.toCharArray();
     }
 
+    String dotEnvPin = readDotEnvValue("TRUSTSIGN_TOKEN_PIN");
+    if (dotEnvPin != null && !dotEnvPin.isBlank()) {
+      return dotEnvPin.toCharArray();
+    }
+
     String cfgPin = (cfg.pkcs11() != null && cfg.pkcs11().pin() != null) ? cfg.pkcs11().pin() : null;
     if (cfgPin == null || cfgPin.isBlank()) {
       throw new SecurityException(
@@ -2163,6 +2259,41 @@ public final class ApiServlet {
     }
 
     return trimmed.toCharArray();
+  }
+
+  private static String readDotEnvValue(String key) {
+    Path[] candidates = new Path[] { Paths.get(".env"), Paths.get("..", ".env") };
+    for (Path p : candidates) {
+      try {
+        if (!Files.isRegularFile(p)) {
+          continue;
+        }
+        for (String line : Files.readAllLines(p, StandardCharsets.UTF_8)) {
+          if (line == null) {
+            continue;
+          }
+          String trimmed = line.trim();
+          if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+            continue;
+          }
+          int idx = trimmed.indexOf('=');
+          if (idx <= 0) {
+            continue;
+          }
+          String k = trimmed.substring(0, idx).trim();
+          if (!key.equals(k)) {
+            continue;
+          }
+          String v = trimmed.substring(idx + 1).trim();
+          if ((v.startsWith("\"") && v.endsWith("\"")) || (v.startsWith("'") && v.endsWith("'"))) {
+            v = v.substring(1, v.length() - 1).trim();
+          }
+          return v;
+        }
+      } catch (Exception ignore) {
+      }
+    }
+    return null;
   }
 
   private File resolveConfigFile() {

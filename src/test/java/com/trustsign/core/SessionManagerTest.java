@@ -39,4 +39,16 @@ class SessionManagerTest {
     SessionManager.Session s = mgr.createSessionMinutes(10);
     assertDoesNotThrow(() -> mgr.requireValid(s.token()));
   }
+
+  @Test
+  void createSessionFailsWhenCapacityReached() {
+    System.setProperty("trustsign.maxSessions", "1");
+    try {
+      SessionManager mgr = new SessionManager();
+      mgr.createSessionMinutes(10);
+      assertThrows(SecurityException.class, () -> mgr.createSessionMinutes(10));
+    } finally {
+      System.clearProperty("trustsign.maxSessions");
+    }
+  }
 }

@@ -1,0 +1,83 @@
+{
+  "port": 8080,
+  "allowedOrigins": [
+    "https://your-frontend.example.com"
+  ],
+  "allowedClientIps": [
+    "10.0.0.10",
+    "10.0.0.11"
+  ],
+  "logFilePath": "/var/log/trustsign/app.log",
+  "server": {
+    "maxThreads": 400,
+    "minSpareThreads": 32,
+    "threadIdleTimeoutMs": 120000,
+    "enableDebugEndpoints": false,
+    "acceptQueueSize": 8192,
+    "connectorIdleTimeoutMs": 120000,
+    "maxTcpConnections": 50000,
+    "maxConcurrentSigningOperations": 24,
+    "sessionIssueRateLimitPerMinute": 30,
+    "signingAcquireTimeoutMs": 300000,
+    "multipartPdfMaxFileMb": 25,
+    "multipartTextMaxFileMb": 4,
+    "gracefulStopTimeoutMs": 30000
+  },
+  "autoSignOutputDir": "/var/lib/trustsign/output",
+  "signerVersion": "TrustSign_0.1.0",
+  "truststore": {
+    "path": "config/truststore.jks",
+    "password": "",
+    "enablePathValidation": true
+  },
+  "certificateValidation": {
+    "enableCcaRootSkiCheck": false,
+    "allowedRootSkis": "",
+    "enableClassValidation": false,
+    "allowedCertificatePolicyOids": ""
+  },
+  "pkcs11": {
+    "preferredLibrary": null,
+    "pin": null,
+    "windowsCandidates": [
+      "%SystemRoot%\\System32\\eps2003csp11v2.dll",
+      "%SystemRoot%\\System32\\eps2003csp11v2_s.dll",
+      "%SystemRoot%\\SysWOW64\\eps2003csp11v2.dll",
+      "%SystemRoot%\\SysWOW64\\eps2003csp11v2_s.dll",
+      "%ProgramFiles%\\HyperPKI\\bin\\pkcs11.dll",
+      "%ProgramFiles%\\HyperPKI\\pkcs11.dll",
+      "%ProgramFiles(x86)%\\HyperPKI\\bin\\pkcs11.dll",
+      "%ProgramFiles(x86)%\\HyperPKI\\pkcs11.dll",
+      "%ProgramFiles%\\ePass2003\\bin\\pkcs11.dll",
+      "%ProgramFiles(x86)%\\ePass2003\\bin\\pkcs11.dll",
+      "%ProgramFiles%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll",
+      "%ProgramFiles(x86)%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll"
+    ],
+    "macCandidates": [
+      "/usr/local/lib/libcastle_v2.1.0.0.dylib"
+    ],
+    "linuxCandidates": []
+  },
+  "hsm": {
+    "preferredLibrary": null,
+    "slotProbeCount": 32,
+    "windowsCandidates": [],
+    "macCandidates": [],
+    "linuxCandidates": []
+  },
+  "tsa": {
+    "url": "http://timestamp.digicert.com",
+    "hashAlgorithm": "SHA-256",
+    "failOnError": true,
+    "connectTimeoutMs": 10000,
+    "readTimeoutMs": 15000
+  },
+  "ltv": {
+    "enabled": true,
+    "failOnMissingRevocationData": true,
+    "ocspConnectTimeoutMs": 10000,
+    "ocspReadTimeoutMs": 15000,
+    "crlConnectTimeoutMs": 10000,
+    "crlReadTimeoutMs": 15000
+  }
+}

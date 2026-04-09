@@ -27,21 +27,20 @@ public final class ConfigLoader {
         throw new IllegalStateException("Config file is empty: " + file.getAbsolutePath());
       }
 
-      // Validate pkcs11.pin shape before mapping into records so users get a
-      // clear error (e.g. they must use quotes in JSON).
+      // Validate optional pkcs11.pin shape before mapping into records so users
+      // get a clear error when they do provide it.
       JsonNode root = MAPPER.readTree(json);
       JsonNode pinNode = root.path("pkcs11").path("pin");
-      if (pinNode.isMissingNode() || pinNode.isNull()) {
-        throw new IllegalStateException("Missing config field: pkcs11.pin (use a quoted string PIN, e.g. \"12345678\")");
-      }
-      if (!pinNode.isTextual()) {
+      if (!pinNode.isMissingNode() && !pinNode.isNull() && !pinNode.isTextual()) {
         throw new IllegalStateException(
             "Invalid config field: pkcs11.pin must be a quoted JSON string (e.g. \"12345678\").");
       }
-      String pinText = pinNode.asText();
-      String pinTrim = pinText == null ? "" : pinText.trim();
-      if (pinTrim.isEmpty()) {
-        throw new IllegalStateException("Invalid config field: pkcs11.pin must not be empty.");
+      if (!pinNode.isMissingNode() && !pinNode.isNull()) {
+        String pinText = pinNode.asText();
+        String pinTrim = pinText == null ? "" : pinText.trim();
+        if (pinTrim.isEmpty()) {
+          throw new IllegalStateException("Invalid config field: pkcs11.pin must not be empty when provided.");
+        }
       }
 
       AgentConfig cfg = MAPPER.readValue(json, AgentConfig.class);

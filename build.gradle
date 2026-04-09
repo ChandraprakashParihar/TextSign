@@ -76,6 +76,7 @@ tasks.processResources {
 def windowsJreZipUrl = "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.18%2B8/OpenJDK17U-jre_x64_windows_hotspot_17.0.18_8.zip"
 def windowsJreZip = file("$buildDir/jre-win/temurin17-jre-win-x64.zip")
 def windowsJreExtractDir = file("$buildDir/jre-win/extracted")
+def windowsJreSha256 = (findProperty("windowsJreSha256") ?: System.getenv("TRUSTSIGN_WINDOWS_JRE_SHA256"))?.toString()
 
 tasks.register("downloadWindowsJre", de.undercouch.gradle.tasks.download.Download) {
   group = "distribution"
@@ -86,10 +87,47 @@ tasks.register("downloadWindowsJre", de.undercouch.gradle.tasks.download.Downloa
   overwrite(false)
 }
 
+tasks.register("verifyWindowsJreChecksum") {
+  group = "distribution"
+  description = "Verifies SHA-256 of downloaded Windows JRE zip"
+  dependsOn("downloadWindowsJre")
+  doLast {
+    if (!windowsJreZip.exists()) {
+      throw new GradleException("Windows JRE archive missing: ${windowsJreZip}")
+    }
+    if (windowsJreSha256 == null || windowsJreSha256.isBlank()) {
+      throw new GradleException(
+        "Missing expected SHA-256 for Windows JRE. Set -PwindowsJreSha256=<sha256> " +
+        "or TRUSTSIGN_WINDOWS_JRE_SHA256 environment variable."
+      )
+    }
+    def md = java.security.MessageDigest.getInstance("SHA-256")
+    windowsJreZip.withInputStream { is ->
+      byte[] buf = new byte[8192]
+      int read
+      while ((read = is.read(buf)) != -1) {
+        md.update(buf, 0, read)
+      }
+    }
+    def actual = md.digest().encodeHex().toString()
+    if (!actual.equalsIgnoreCase(windowsJreSha256.trim())) {
+      throw new GradleException(
+        "Windows JRE SHA-256 mismatch. expected=${windowsJreSha256} actual=${actual}"
+      )
+    }
+  }
+}
+
+tasks.register("verifyInstallerInputs") {
+  group = "distribution"
+  description = "CI guard: validates installer prerequisites (including JRE checksum pin)"
+  dependsOn("verifyWindowsJreChecksum")
+}
+
 tasks.register("extractWindowsJre") {
   group = "distribution"
   description = "Extracts the Windows JRE zip (after download)"
-  dependsOn("downloadWindowsJre")
+  dependsOn("verifyWindowsJreChecksum")
   def extractTo = windowsJreExtractDir
   outputs.dir(extractTo)
   doLast {
@@ -129,7 +167,7 @@ tasks.register("installDistWithJre") {
 tasks.register("clientFolder") {
   group = "distribution"
   description = "Creates build/client/ with JAR, bundled Windows JRE, run script, config — ready to give to the client. Client does not need Java installed (Windows). Requires config/public-key.pem."
-  dependsOn("shadowJar", "installDistWithJre")
+  dependsOn("shadowJar", "installDistWithJre", "verifyInstallerInputs")
   def clientDir = file("$buildDir/client")
   outputs.dir(clientDir)
   // Re-run when any of these source files change so licence.json, config.json, etc. are always updated.
@@ -244,7 +282,7 @@ pause
 tasks.register("buildInstaller") {
   group = "distribution"
   description = "Builds the Windows installer with bundled JRE (requires Windows and Inno Setup 6). Packages the same files as clientFolder (build/client) so the installer and zip client match."
-  dependsOn("clientFolder")
+  dependsOn("clientFolder", "verifyInstallerInputs")
   doLast {
     if (!System.getProperty("os.name", "").toLowerCase().contains("windows")) {
       throw new GradleException(
