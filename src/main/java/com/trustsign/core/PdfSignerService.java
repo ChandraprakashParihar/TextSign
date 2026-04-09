@@ -70,7 +70,8 @@ public final class PdfSignerService {
 
   /**
    * Reserved space for embedded PKCS#7 bytes.
-   * Increased to handle larger envelopes with TSA, DSS/LTV material, and long certificate chains.
+   * Increased to handle larger envelopes with TSA, DSS/LTV material, and long
+   * certificate chains.
    */
   private static final int ESTIMATED_SIGNATURE_SIZE_BYTES = 262_144;
   private static final int SIGN_RETRY_MAX_ATTEMPTS = 3;
@@ -123,7 +124,8 @@ public final class PdfSignerService {
   }
 
   /**
-   * Thrown when PDF input bytes are invalid for signing (empty input, malformed structure,
+   * Thrown when PDF input bytes are invalid for signing (empty input, malformed
+   * structure,
    * or no pages). Caller should abort and ask the user for a valid PDF.
    */
   public static final class InvalidPdfException extends PdfSigningException {
@@ -137,7 +139,8 @@ public final class PdfSignerService {
   }
 
   /**
-   * Thrown when document-level permissions (DocMDP P=1) disallow further modifications.
+   * Thrown when document-level permissions (DocMDP P=1) disallow further
+   * modifications.
    * Caller should abort and inform the user that the document is locked.
    */
   public static non-sealed class DocMdpLockedException extends PdfSigningException {
@@ -210,13 +213,18 @@ public final class PdfSignerService {
   /**
    * Result wrapper for PDF signing.
    * <p>
-   * Callers MUST check {@link #isTimestamped()} before accepting output for long-term archival
-   * use cases (e.g., retention policies requiring RFC 3161 timestamp evidence at signing time).
+   * Callers MUST check {@link #isTimestamped()} before accepting output for
+   * long-term archival
+   * use cases (e.g., retention policies requiring RFC 3161 timestamp evidence at
+   * signing time).
    */
   public static final class PdfSigningResult {
     private final byte[] signedPdf;
     private final boolean timestamped;
-    /** Nullable: warning when TSA failed but failOnError=false fallback signing succeeded. */
+    /**
+     * Nullable: warning when TSA failed but failOnError=false fallback signing
+     * succeeded.
+     */
     private final TsaUnavailableException tsaWarning;
 
     public PdfSigningResult(byte[] signedPdf, boolean timestamped, TsaUnavailableException tsaWarning) {
@@ -278,7 +286,8 @@ public final class PdfSignerService {
   }
 
   /**
-   * Pages that receive the visible signature widget (0-based indices) with a matching rectangle
+   * Pages that receive the visible signature widget (0-based indices) with a
+   * matching rectangle
    * per page, plus whether the document already had completed signatures.
    */
   private record PreSignState(List<Integer> stampPageIndices0Based, List<PDRectangle> widgetRects,
@@ -304,28 +313,6 @@ public final class PdfSignerService {
       X509Certificate signingCert,
       String reason,
       String location,
-      List<Integer> stampPageIndices) throws PdfSigningException, IOException {
-    try {
-      return signPdf(
-          pdfBytes,
-          new PdfSigningMaterial(privateKey, chain, p11Provider, signingCert),
-          reason,
-          location,
-          stampPageIndices,
-          PdfSigningOptions.DEFAULT);
-    } catch (IllegalArgumentException e) {
-      throw new InvalidPdfException("Invalid signing input: " + safeMessage(e), e);
-    }
-  }
-
-  public static PdfSigningResult signPdf(
-      byte[] pdfBytes,
-      PrivateKey privateKey,
-      Certificate[] chain,
-      Provider p11Provider,
-      X509Certificate signingCert,
-      String reason,
-      String location,
       List<Integer> stampPageIndices,
       PdfSigningOptions options) throws PdfSigningException, IOException {
     try {
@@ -339,15 +326,6 @@ public final class PdfSignerService {
     } catch (IllegalArgumentException e) {
       throw new InvalidPdfException("Invalid signing input: " + safeMessage(e), e);
     }
-  }
-
-  public static PdfSigningResult signPdf(
-      byte[] pdfBytes,
-      PdfSigningMaterial material,
-      String reason,
-      String location,
-      List<Integer> stampPageIndices) throws PdfSigningException, IOException {
-    return signPdf(pdfBytes, material, reason, location, stampPageIndices, PdfSigningOptions.DEFAULT);
   }
 
   /**
@@ -587,10 +565,13 @@ public final class PdfSignerService {
   }
 
   /**
-   * iText's {@code PrivateKeySignature} uses {@link Signature#getInstance(String, String)}. If the
-   * JVM picks a different provider than the token, JCA may try to translate the PKCS#11 key via
+   * iText's {@code PrivateKeySignature} uses
+   * {@link Signature#getInstance(String, String)}. If the
+   * JVM picks a different provider than the token, JCA may try to translate the
+   * PKCS#11 key via
    * {@link PrivateKey#getEncoded()}, which is null for HSM keys and throws
-   * {@code InvalidKeyException: Missing key encoding}. Binding the {@link Signature} to the key's
+   * {@code InvalidKeyException: Missing key encoding}. Binding the
+   * {@link Signature} to the key's
    * {@link Provider} avoids that translation.
    */
   private static final class ProviderBoundPrivateKeySignature implements IExternalSignature {
@@ -754,7 +735,8 @@ public final class PdfSignerService {
       applyCertificationAndField(signer, pre, opts);
       // MultiWidgetPdfSigner (and iText PdfSigner) currently exposes only one shared
       // PdfSignatureAppearance object, not per-widget appearance accessors.
-      // TODO: If iText exposes per-widget appearance APIs, configure each widget index here.
+      // TODO: If iText exposes per-widget appearance APIs, configure each widget
+      // index here.
       configureSignatureAppearance(
           signer,
           material,
