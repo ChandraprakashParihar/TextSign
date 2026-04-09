@@ -37,8 +37,14 @@ public final class HsmPdfSignerService {
 
       PdfSignerService.PdfSigningOptions opts =
           signingOptions != null ? signingOptions : PdfSignerService.PdfSigningOptions.DEFAULT;
-      byte[] signed = PdfSignerService.signPdf(pdfBytes, material, reason, location, stampPages, opts);
-      return new SignResult(signed, material.signingCertificate());
+      PdfSignerService.PdfSigningResult signed = PdfSignerService.signPdf(
+          pdfBytes,
+          material,
+          reason,
+          location,
+          stampPages,
+          opts);
+      return new SignResult(signed.signedPdf(), material.signingCertificate());
     } finally {
       Arrays.fill(pinCopy, '\0');
     }

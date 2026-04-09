@@ -25,11 +25,12 @@ import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.Arrays;
 import java.util.List;
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.stream.Collectors;
 
 public final class TextSignerService {
-  private static final Logger LOG = Logger.getLogger(TextSignerService.class.getName());
+  private static final Logger LOG = LoggerFactory.getLogger(TextSignerService.class);
   static {
     if (Security.getProvider("BC") == null) {
       Security.addProvider(new BouncyCastleProvider());
@@ -101,7 +102,7 @@ public final class TextSignerService {
       if (cfg.failOnError()) {
         throw e;
       }
-      LOG.warning("TSA timestamp failed; continuing without timestamp: " + e.getMessage());
+      LOG.warn("TSA timestamp failed; continuing without timestamp: {}", e.getMessage());
       return signedData.getEncoded();
     }
   }

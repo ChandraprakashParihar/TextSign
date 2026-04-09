@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.SessionManagerTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-04-09T05:56:14.515Z" hostname="Chandras-Mac-mini.local" time="0.002">
+<testsuite name="com.trustsign.core.SessionManagerTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-04-09T06:47:53.185Z" hostname="Chandras-Mac-mini.local" time="0.003">
   <properties/>
   <testcase name="createSessionReturnsTokenAndExpiry()" classname="com.trustsign.core.SessionManagerTest" time="0.001"/>
   <testcase name="requireValidThrowsWhenTokenBlank()" classname="com.trustsign.core.SessionManagerTest" time="0.0"/>

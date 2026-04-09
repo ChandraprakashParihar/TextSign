@@ -9,11 +9,11 @@ import java.io.File;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.security.PublicKey;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class Main {
-  private static final Logger LOG = Logger.getLogger(Main.class.getName());
+  private static final Logger LOG = LoggerFactory.getLogger(Main.class);
   private static final String BUILD_TIME_RESOURCE = "/com/trustsign/build-time.txt";
   private static final String LICENCE_PUBLIC_KEY_RESOURCE = "/com/trustsign/licence-public-key.pem";
 
@@ -26,7 +26,7 @@ public final class Main {
       System.exit(1);
     }
 
-    LOG.info("Using config: " + configFile.getAbsolutePath());
+    LOG.info("Using config: {}", configFile.getAbsolutePath());
 
     AgentConfig cfg = ConfigLoader.load(configFile);
     // Initialize file/console logging as early as possible.
@@ -50,11 +50,12 @@ public final class Main {
       try {
         server.stop();
       } catch (Exception e) {
-        LOG.log(Level.WARNING, "Error stopping server", e);
+        LOG.warn("Error stopping server", e);
       }
     }));
 
-    LOG.info("TrustSign API at http://0.0.0.0:" + cfg.portOrDefault() + "/v1 — for very high load run many instances behind a load balancer; each JVM is bounded by signing hardware throughput.");
+    LOG.info("TrustSign API at http://0.0.0.0:{}/v1 — for very high load run many instances behind a load balancer; each JVM is bounded by signing hardware throughput.",
+        cfg.portOrDefault());
     server.join();
   }
 

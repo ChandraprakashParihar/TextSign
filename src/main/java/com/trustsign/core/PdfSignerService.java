@@ -25,6 +25,8 @@ import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.security.GeneralSecurityException;
 import java.security.InvalidKeyException;
 import java.security.PrivateKey;
@@ -35,13 +37,15 @@ import java.security.cert.X509Certificate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * iText-backed PDF signing with a visible signature appearance
@@ -55,7 +59,7 @@ public final class PdfSignerService {
   public static final String FINAL_VERSION_KEYWORD = "TrustSign:FinalVersion=true";
   public static final String FINAL_VERSION_REASON_SUFFIX = " | FINAL VERSION (no modifications permitted)";
 
-  private static final Logger LOG = Logger.getLogger(PdfSignerService.class.getName());
+  private static final Logger LOG = LoggerFactory.getLogger(PdfSignerService.class);
 
   private static final COSName MDP_P = COSName.getPDFName("P");
 
@@ -64,8 +68,12 @@ public final class PdfSignerService {
    */
   private static final String SIGNATURE_DIGEST_ALGORITHM = "SHA-256";
 
-  /** Reserved space for embedded PKCS#7 (bytes). */
-  private static final int ESTIMATED_SIGNATURE_SIZE_BYTES = 131_072;
+  /**
+   * Reserved space for embedded PKCS#7 bytes.
+   * Increased to handle larger envelopes with TSA, DSS/LTV material, and long certificate chains.
+   */
+  private static final int ESTIMATED_SIGNATURE_SIZE_BYTES = 262_144;
+  private static final int SIGN_RETRY_MAX_ATTEMPTS = 3;
 
   /**
    * Initial estimate for RFC 3161 token size when configuring
@@ -74,6 +82,10 @@ public final class PdfSignerService {
   private static final int TSA_TOKEN_SIZE_ESTIMATE_BYTES = 4096;
 
   private static final String SIGNATURE_FIELD_PREFIX = "TrustSignSig";
+  private static final byte[] SIGNED_DATA_OID = new byte[] {
+      (byte) 0x2a, (byte) 0x86, (byte) 0x48, (byte) 0x86, (byte) 0xf7, (byte) 0x0d, (byte) 0x01, (byte) 0x07,
+      (byte) 0x02
+  };
 
   private static final DateTimeFormatter APPEARANCE_TIMESTAMP_UTC = DateTimeFormatter
       .ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'")
@@ -99,7 +111,134 @@ public final class PdfSignerService {
     }
   }
 
-  public static final class DocMdpNoChangesLockException extends IllegalArgumentException {
+  public static sealed class PdfSigningException extends Exception
+      permits InvalidPdfException, DocMdpLockedException, CryptoSigningException, TimestampException, LtvException {
+    public PdfSigningException(String message) {
+      super(message);
+    }
+
+    public PdfSigningException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
+  /**
+   * Thrown when PDF input bytes are invalid for signing (empty input, malformed structure,
+   * or no pages). Caller should abort and ask the user for a valid PDF.
+   */
+  public static final class InvalidPdfException extends PdfSigningException {
+    public InvalidPdfException(String message) {
+      super(message);
+    }
+
+    public InvalidPdfException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
+  /**
+   * Thrown when document-level permissions (DocMDP P=1) disallow further modifications.
+   * Caller should abort and inform the user that the document is locked.
+   */
+  public static non-sealed class DocMdpLockedException extends PdfSigningException {
+    public DocMdpLockedException(String message) {
+      super(message);
+    }
+
+    public DocMdpLockedException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
+  /**
+   * Thrown for cryptographic signing failures (PKCS#11/JCA/provider errors).
+   * Caller may retry after token/provider remediation; otherwise alert the user.
+   */
+  public static final class CryptoSigningException extends PdfSigningException {
+    public CryptoSigningException(String message) {
+      super(message);
+    }
+
+    public CryptoSigningException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
+  /**
+   * Thrown when timestamping fails and the operation requires TSA success.
+   * Caller should retry later or surface a timestamp service outage.
+   */
+  public static non-sealed class TimestampException extends PdfSigningException {
+    public TimestampException(String message) {
+      super(message);
+    }
+
+    public TimestampException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
+  /**
+   * Thrown when post-sign LTV embedding fails.
+   * Caller should alert the user and decide whether non-LTV output is acceptable.
+   */
+  public static final class LtvException extends PdfSigningException {
+    public LtvException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
+  public static final class TsaUnavailableException extends TimestampException {
+    private final boolean signedWithoutTimestamp;
+    private final Throwable tsaCause;
+
+    public TsaUnavailableException(String message, boolean signedWithoutTimestamp, Throwable tsaCause) {
+      super(message, tsaCause);
+      this.signedWithoutTimestamp = signedWithoutTimestamp;
+      this.tsaCause = tsaCause;
+    }
+
+    public boolean signedWithoutTimestamp() {
+      return signedWithoutTimestamp;
+    }
+
+    public Throwable tsaCause() {
+      return tsaCause;
+    }
+  }
+
+  /**
+   * Result wrapper for PDF signing.
+   * <p>
+   * Callers MUST check {@link #isTimestamped()} before accepting output for long-term archival
+   * use cases (e.g., retention policies requiring RFC 3161 timestamp evidence at signing time).
+   */
+  public static final class PdfSigningResult {
+    private final byte[] signedPdf;
+    private final boolean timestamped;
+    /** Nullable: warning when TSA failed but failOnError=false fallback signing succeeded. */
+    private final TsaUnavailableException tsaWarning;
+
+    public PdfSigningResult(byte[] signedPdf, boolean timestamped, TsaUnavailableException tsaWarning) {
+      this.signedPdf = signedPdf;
+      this.timestamped = timestamped;
+      this.tsaWarning = tsaWarning;
+    }
+
+    public byte[] signedPdf() {
+      return signedPdf;
+    }
+
+    public boolean isTimestamped() {
+      return timestamped;
+    }
+
+    public TsaUnavailableException tsaWarning() {
+      return tsaWarning;
+    }
+  }
+
+  public static final class DocMdpNoChangesLockException extends DocMdpLockedException {
     public DocMdpNoChangesLockException() {
       super(
           "This PDF is certified or locked with DocMDP P=1 (ISO 32000: no document changes permitted). ");
@@ -154,7 +293,10 @@ public final class PdfSignerService {
     }
   }
 
-  public static byte[] signPdf(
+  private record DerLength(int value, int nextOffset) {
+  }
+
+  public static PdfSigningResult signPdf(
       byte[] pdfBytes,
       PrivateKey privateKey,
       Certificate[] chain,
@@ -162,17 +304,21 @@ public final class PdfSignerService {
       X509Certificate signingCert,
       String reason,
       String location,
-      List<Integer> stampPageIndices) throws Exception {
-    return signPdf(
-        pdfBytes,
-        new PdfSigningMaterial(privateKey, chain, p11Provider, signingCert),
-        reason,
-        location,
-        stampPageIndices,
-        PdfSigningOptions.DEFAULT);
+      List<Integer> stampPageIndices) throws PdfSigningException, IOException {
+    try {
+      return signPdf(
+          pdfBytes,
+          new PdfSigningMaterial(privateKey, chain, p11Provider, signingCert),
+          reason,
+          location,
+          stampPageIndices,
+          PdfSigningOptions.DEFAULT);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidPdfException("Invalid signing input: " + safeMessage(e), e);
+    }
   }
 
-  public static byte[] signPdf(
+  public static PdfSigningResult signPdf(
       byte[] pdfBytes,
       PrivateKey privateKey,
       Certificate[] chain,
@@ -181,22 +327,26 @@ public final class PdfSignerService {
       String reason,
       String location,
       List<Integer> stampPageIndices,
-      PdfSigningOptions options) throws Exception {
-    return signPdf(
-        pdfBytes,
-        new PdfSigningMaterial(privateKey, chain, p11Provider, signingCert),
-        reason,
-        location,
-        stampPageIndices,
-        options);
+      PdfSigningOptions options) throws PdfSigningException, IOException {
+    try {
+      return signPdf(
+          pdfBytes,
+          new PdfSigningMaterial(privateKey, chain, p11Provider, signingCert),
+          reason,
+          location,
+          stampPageIndices,
+          options);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidPdfException("Invalid signing input: " + safeMessage(e), e);
+    }
   }
 
-  public static byte[] signPdf(
+  public static PdfSigningResult signPdf(
       byte[] pdfBytes,
       PdfSigningMaterial material,
       String reason,
       String location,
-      List<Integer> stampPageIndices) throws Exception {
+      List<Integer> stampPageIndices) throws PdfSigningException, IOException {
     return signPdf(pdfBytes, material, reason, location, stampPageIndices, PdfSigningOptions.DEFAULT);
   }
 
@@ -207,36 +357,56 @@ public final class PdfSignerService {
    *                                      override is not set
    * @throws IllegalArgumentException     for invalid inputs
    */
-  public static byte[] signPdf(
+  public static PdfSigningResult signPdf(
       byte[] pdfBytes,
       PdfSigningMaterial material,
       String reason,
       String location,
       List<Integer> stampPageIndices,
-      PdfSigningOptions options) throws Exception {
-    requireNonEmptyPdf(pdfBytes);
+      PdfSigningOptions options) throws PdfSigningException, IOException {
+    try {
+      requireNonEmptyPdf(pdfBytes);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidPdfException("Invalid PDF input: " + safeMessage(e), e);
+    }
     PdfSigningOptions opts = options == null ? PdfSigningOptions.DEFAULT : options;
+    long start = System.currentTimeMillis();
+    LOG.info("Starting PDF signing. pages={}, finalVersion={}, tsaEnabled={}",
+        stampPageIndices == null ? 0 : stampPageIndices.size(),
+        opts.finalVersion(),
+        opts.tsaConfig() != null && opts.tsaConfig().enabled());
 
     byte[] bytesToSign = opts.finalVersion() ? applyFinalVersionDocumentMetadata(pdfBytes) : pdfBytes;
-    PreSignState pre = analyzeInputPdf(bytesToSign, stampPageIndices, opts);
-    byte[] signed = signDetachedWithIText(bytesToSign, material, reason, location, pre, opts);
+    PreSignState pre;
+    try {
+      pre = analyzeInputPdf(bytesToSign, stampPageIndices, opts);
+    } catch (IOException e) {
+      throw new InvalidPdfException("Invalid or corrupted PDF input: " + safeMessage(e), e);
+    }
+    PdfSigningResult result = signDetachedWithIText(bytesToSign, material, reason, location, pre, opts);
 
     if (opts.ltvConfig() != null && opts.ltvConfig().enabled()) {
       try {
-        return appendLtvRevision(signed, opts.ltvConfig());
+        byte[] ltvSigned = appendLtvRevision(result.signedPdf(), opts.ltvConfig());
+        PdfSigningResult out = new PdfSigningResult(ltvSigned, result.isTimestamped(), result.tsaWarning());
+        LOG.info("PDF signing completed in {} ms. timestamped={}, tsaFallback={}",
+            System.currentTimeMillis() - start, out.isTimestamped(), out.tsaWarning() != null);
+        return out;
       } catch (Exception e) {
-        throw new IllegalStateException("LTV embedding failed after signature: " + safeMessage(e), e);
+        throw new LtvException("LTV embedding failed after signature: " + safeMessage(e), e);
       }
     }
-    return signed;
+    LOG.info("PDF signing completed in {} ms. timestamped={}, tsaFallback={}",
+        System.currentTimeMillis() - start, result.isTimestamped(), result.tsaWarning() != null);
+    return result;
   }
 
   private static PreSignState analyzeInputPdf(byte[] pdfBytes, List<Integer> stampPageIndices, PdfSigningOptions opts)
-      throws IOException {
+      throws IOException, PdfSigningException {
     try (PDDocument doc = PDDocument.load(pdfBytes)) {
       int pageCount = doc.getNumberOfPages();
       if (pageCount == 0) {
-        throw new IllegalArgumentException("PDF has no pages");
+        throw new InvalidPdfException("PDF has no pages");
       }
       if (documentHasDocMdpP1LockFromCompletedSignature(doc) && !opts.allowResignFinalVersion()) {
         throw new DocMdpNoChangesLockException();
@@ -251,13 +421,13 @@ public final class PdfSignerService {
     }
   }
 
-  private static byte[] signDetachedWithIText(
+  private static PdfSigningResult signDetachedWithIText(
       byte[] pdfBytes,
       PdfSigningMaterial material,
       String reason,
       String location,
       PreSignState pre,
-      PdfSigningOptions opts) throws Exception {
+      PdfSigningOptions opts) throws PdfSigningException, IOException {
     validateChainForSigning(material);
 
     IExternalDigest digest = new BouncyCastleDigest();
@@ -266,18 +436,154 @@ public final class PdfSignerService {
     TSAClientBouncyCastle tsa = buildTsaClient(opts.tsaConfig());
 
     try {
-      return runDetachedSign(pdfBytes, material, reason, location, pre, opts, digest, signature, tsa);
-    } catch (Exception e) {
-      if (tsa != null && opts.tsaConfig() != null && !opts.tsaConfig().failOnError()) {
-        LOG.log(Level.WARNING, "TSA timestamp failed; signing without TSA: {0}", safeMessage(e));
+      byte[] signed = withRetry(() -> {
         try {
-          return runDetachedSign(pdfBytes, material, reason, location, pre, opts, digest, signature, null);
-        } catch (Exception e2) {
-          throw unwrapOpaquePkcs11SigningFailure(e2);
+          return runDetachedSign(pdfBytes, material, reason, location, pre, opts, digest, signature, tsa);
+        } catch (IOException | GeneralSecurityException ex) {
+          throw new RuntimeException(ex);
         }
+      });
+      return new PdfSigningResult(signed, tsa != null, null);
+    } catch (RuntimeException re) {
+      Throwable c = re.getCause() != null ? re.getCause() : re;
+      if (c instanceof GeneralSecurityException e) {
+        if (tsa != null && opts.tsaConfig() != null && !opts.tsaConfig().failOnError()) {
+          String tsaUrl = opts.tsaConfig().url() == null ? "<unknown>" : opts.tsaConfig().url().trim();
+          LOG.warn("TSA timestamp failed for URL {}; falling back without TSA. Cause: {}", tsaUrl, safeMessage(e));
+          try {
+            byte[] fallbackSigned = withRetry(() -> {
+              try {
+                return runDetachedSign(pdfBytes, material, reason, location, pre, opts, digest, signature, null);
+              } catch (IOException | GeneralSecurityException ex) {
+                throw new RuntimeException(ex);
+              }
+            });
+            TsaUnavailableException warning = new TsaUnavailableException(
+                "TSA unavailable for " + tsaUrl + "; signed without timestamp",
+                true,
+                e);
+            return new PdfSigningResult(fallbackSigned, false, warning);
+          } catch (RuntimeException retryException) {
+            Throwable retryCause = retryException.getCause() != null ? retryException.getCause() : retryException;
+            if (retryCause instanceof GeneralSecurityException gse) {
+              throw asCryptoSigningException(gse);
+            }
+            if (retryCause instanceof IOException io) {
+              throw io;
+            }
+            throw new CryptoSigningException("PKCS#11 signing failed: " + safeMessage(retryCause), retryCause);
+          }
+        }
+        if (tsa != null && opts.tsaConfig() != null && opts.tsaConfig().failOnError()) {
+          String tsaUrl = opts.tsaConfig().url() == null ? "<unknown>" : opts.tsaConfig().url().trim();
+          throw new TimestampException("TSA timestamp failed for URL " + tsaUrl + ": " + safeMessage(e), e);
+        }
+        throw asCryptoSigningException(e);
       }
-      throw unwrapOpaquePkcs11SigningFailure(e);
+      if (c instanceof IOException io) {
+        if (tsa != null && opts.tsaConfig() != null && opts.tsaConfig().failOnError()) {
+          String tsaUrl = opts.tsaConfig().url() == null ? "<unknown>" : opts.tsaConfig().url().trim();
+          throw new TimestampException("TSA timestamp I/O failed for URL " + tsaUrl + ": " + safeMessage(io), io);
+        }
+        throw io;
+      }
+      throw new CryptoSigningException("PKCS#11 signing failed: " + safeMessage(c), c);
     }
+  }
+
+  public static byte[] signPdfBytes(
+      byte[] pdfBytes,
+      PrivateKey privateKey,
+      Certificate[] chain,
+      Provider p11Provider,
+      X509Certificate signingCert,
+      String reason,
+      String location,
+      List<Integer> stampPageIndices) throws PdfSigningException, IOException {
+    return signPdfBytes(
+        pdfBytes,
+        privateKey,
+        chain,
+        p11Provider,
+        signingCert,
+        reason,
+        location,
+        stampPageIndices,
+        PdfSigningOptions.DEFAULT);
+  }
+
+  public static byte[] signPdfBytes(
+      byte[] pdfBytes,
+      PrivateKey privateKey,
+      Certificate[] chain,
+      Provider p11Provider,
+      X509Certificate signingCert,
+      String reason,
+      String location,
+      List<Integer> stampPageIndices,
+      PdfSigningOptions options) throws PdfSigningException, IOException {
+    PdfSigningResult result = signPdf(
+        pdfBytes,
+        privateKey,
+        chain,
+        p11Provider,
+        signingCert,
+        reason,
+        location,
+        stampPageIndices,
+        options);
+    return requireTimestampWhenConfigured(result, options);
+  }
+
+  public static void signPdf(
+      InputStream input,
+      OutputStream output,
+      PdfSigningMaterial material,
+      String reason,
+      String location,
+      List<Integer> stampPageIndices,
+      PdfSigningOptions options) throws PdfSigningException, IOException {
+    if (input == null) {
+      throw new InvalidPdfException("input stream is null");
+    }
+    if (output == null) {
+      throw new InvalidPdfException("output stream is null");
+    }
+    byte[] inBytes = input.readAllBytes();
+    PdfSigningResult result = signPdf(inBytes, material, reason, location, stampPageIndices, options);
+    output.write(result.signedPdf());
+  }
+
+  public static byte[] signPdfBytes(
+      byte[] pdfBytes,
+      PdfSigningMaterial material,
+      String reason,
+      String location,
+      List<Integer> stampPageIndices) throws PdfSigningException, IOException {
+    return signPdfBytes(pdfBytes, material, reason, location, stampPageIndices, PdfSigningOptions.DEFAULT);
+  }
+
+  public static byte[] signPdfBytes(
+      byte[] pdfBytes,
+      PdfSigningMaterial material,
+      String reason,
+      String location,
+      List<Integer> stampPageIndices,
+      PdfSigningOptions options) throws PdfSigningException, IOException {
+    PdfSigningResult result = signPdf(pdfBytes, material, reason, location, stampPageIndices, options);
+    return requireTimestampWhenConfigured(result, options);
+  }
+
+  private static byte[] requireTimestampWhenConfigured(PdfSigningResult result, PdfSigningOptions options)
+      throws TsaUnavailableException {
+    PdfSigningOptions opts = options == null ? PdfSigningOptions.DEFAULT : options;
+    if (opts.tsaConfig() != null && opts.tsaConfig().enabled() && !result.isTimestamped()) {
+      if (result.tsaWarning() != null) {
+        throw result.tsaWarning();
+      }
+      throw new TsaUnavailableException("TSA enabled but signature is not timestamped", true, null);
+    }
+    return result.signedPdf();
   }
 
   /**
@@ -332,7 +638,7 @@ public final class PdfSignerService {
     }
   }
 
-  private static Exception unwrapOpaquePkcs11SigningFailure(Exception e) {
+  private static GeneralSecurityException normalizePkcs11SecurityException(GeneralSecurityException e) {
     if (e instanceof InvalidKeyException ike && "Missing key encoding".equals(ike.getMessage())) {
       return new InvalidKeyException(
           "PKCS#11 signing failed (opaque key): ensure the signature algorithm is supported on the token "
@@ -343,15 +649,72 @@ public final class PdfSignerService {
     return e;
   }
 
+  private static CryptoSigningException asCryptoSigningException(GeneralSecurityException e) {
+    GeneralSecurityException normalized = normalizePkcs11SecurityException(e);
+    return new CryptoSigningException("PKCS#11 signing failed: " + safeMessage(normalized), normalized);
+  }
+
+  private static <T> T withRetry(Supplier<T> action) {
+    RuntimeException last = null;
+    for (int attempt = 1; attempt <= SIGN_RETRY_MAX_ATTEMPTS; attempt++) {
+      try {
+        return action.get();
+      } catch (RuntimeException e) {
+        Throwable cause = e.getCause() != null ? e.getCause() : e;
+        if (!isRetryableSigningFailure(cause) || attempt == SIGN_RETRY_MAX_ATTEMPTS) {
+          throw e;
+        }
+        last = e;
+        LOG.warn("Signing attempt {} failed ({}). Retrying...", attempt, safeMessage(cause));
+      }
+    }
+    throw last == null ? new RuntimeException("Signing failed without exception") : last;
+  }
+
+  private static boolean isRetryableSigningFailure(Throwable t) {
+    if (t == null) {
+      return false;
+    }
+    if (t instanceof GeneralSecurityException) {
+      return true;
+    }
+    String m = safeMessage(t).toLowerCase();
+    return m.contains("pkcs#11") || m.contains("pkcs11") || m.contains("token")
+        || m.contains("ckr_") || m.contains("sunpkcs11");
+  }
+
   private static Rectangle toItextRectangle(PDRectangle r) {
     return new Rectangle(r.getLowerLeftX(), r.getLowerLeftY(), r.getWidth(), r.getHeight());
   }
 
   private static void validateChainForSigning(PdfSigningMaterial material) {
+    if (material == null || material.certificateChain() == null || material.certificateChain().length == 0) {
+      throw new IllegalArgumentException("certificateChain is empty");
+    }
+    X509Certificate[] chain = new X509Certificate[material.certificateChain().length];
+    int i = 0;
     for (Certificate c : material.certificateChain()) {
       if (!(c instanceof X509Certificate)) {
         throw new IllegalArgumentException(
             "certificateChain must contain only X509Certificate entries for PDF signing");
+      }
+      chain[i++] = (X509Certificate) c;
+    }
+    validateCertificateChainOrder(chain);
+  }
+
+  private static void validateCertificateChainOrder(X509Certificate[] chain) {
+    if (chain == null || chain.length == 0) {
+      throw new IllegalArgumentException("certificateChain is empty");
+    }
+    for (int i = 0; i < chain.length - 1; i++) {
+      X509Certificate current = chain[i];
+      X509Certificate issuer = chain[i + 1];
+      if (!current.getIssuerX500Principal().equals(issuer.getSubjectX500Principal())) {
+        throw new IllegalArgumentException(
+            "Invalid certificate chain order at index " + i + ": expected issuer "
+                + current.getIssuerX500Principal().getName()
+                + " but found " + issuer.getSubjectX500Principal().getName());
       }
     }
   }
@@ -377,7 +740,7 @@ public final class PdfSignerService {
       PdfSigningOptions opts,
       IExternalDigest digest,
       IExternalSignature signature,
-      TSAClientBouncyCastle tsaClient) throws Exception {
+      TSAClientBouncyCastle tsaClient) throws IOException, GeneralSecurityException {
     try (ByteArrayOutputStream out = new ByteArrayOutputStream();
         PdfReader reader = new PdfReader(new ByteArrayInputStream(pdfBytes))) {
       List<Integer> pages1Based = new ArrayList<>(pre.stampPageIndices0Based().size());
@@ -389,7 +752,17 @@ public final class PdfSignerService {
       PdfSigner signer = new MultiWidgetPdfSigner(
           reader, out, new StampingProperties().useAppendMode(), pages1Based, itextRects);
       applyCertificationAndField(signer, pre, opts);
-      configureSignatureAppearance(signer, material, reason, location, pre, opts);
+      // MultiWidgetPdfSigner (and iText PdfSigner) currently exposes only one shared
+      // PdfSignatureAppearance object, not per-widget appearance accessors.
+      // TODO: If iText exposes per-widget appearance APIs, configure each widget index here.
+      configureSignatureAppearance(
+          signer,
+          material,
+          reason,
+          location,
+          pre.stampPageIndices0Based().get(0),
+          pre.widgetRects().get(0),
+          opts);
       signer.signDetached(
           digest,
           signature,
@@ -422,12 +795,12 @@ public final class PdfSignerService {
       PdfSigningMaterial material,
       String reason,
       String location,
-      PreSignState pre,
+      int pageIndex0Based,
+      PDRectangle rect,
       PdfSigningOptions opts) {
     PdfSignatureAppearance appearance = signer.getSignatureAppearance();
-    PDRectangle r = pre.widgetRects().get(0);
-    appearance.setPageNumber(pre.stampPageIndices0Based().get(0) + 1);
-    appearance.setPageRect(toItextRectangle(r));
+    appearance.setPageNumber(pageIndex0Based + 1);
+    appearance.setPageRect(toItextRectangle(rect));
 
     String resolvedReason = resolveReason(reason, opts.finalVersion());
     appearance.setReason(resolvedReason);
@@ -500,17 +873,51 @@ public final class PdfSignerService {
     if (contents == null || contents.length < 128) {
       return false;
     }
-    int firstNonZero = -1;
-    for (int i = 0; i < contents.length; i++) {
-      if (contents[i] != 0) {
-        firstNonZero = i;
-        break;
-      }
-    }
-    if (firstNonZero < 0) {
+    int offset = 0;
+    if ((contents[offset] & 0xff) != 0x30) {
       return false;
     }
-    return contents[firstNonZero] == (byte) 0x30;
+    DerLength outerLen = readDerLength(contents, offset + 1);
+    if (outerLen == null) {
+      return false;
+    }
+    int outerContentEnd = outerLen.nextOffset() + outerLen.value();
+    if (outerContentEnd > contents.length) {
+      return false;
+    }
+    offset = outerLen.nextOffset();
+    if ((contents[offset] & 0xff) != 0x06) {
+      return false;
+    }
+    DerLength oidLen = readDerLength(contents, offset + 1);
+    if (oidLen == null || oidLen.value() != SIGNED_DATA_OID.length) {
+      return false;
+    }
+    int oidStart = oidLen.nextOffset();
+    int oidEnd = oidStart + oidLen.value();
+    if (oidEnd > contents.length) {
+      return false;
+    }
+    return Arrays.equals(Arrays.copyOfRange(contents, oidStart, oidEnd), SIGNED_DATA_OID);
+  }
+
+  private static DerLength readDerLength(byte[] data, int offset) {
+    if (data == null || offset < 0 || offset >= data.length) {
+      return null;
+    }
+    int first = data[offset] & 0xff;
+    if ((first & 0x80) == 0) {
+      return new DerLength(first, offset + 1);
+    }
+    int numLenBytes = first & 0x7f;
+    if (numLenBytes == 0 || numLenBytes > 4 || offset + 1 + numLenBytes > data.length) {
+      return null;
+    }
+    int len = 0;
+    for (int i = 0; i < numLenBytes; i++) {
+      len = (len << 8) | (data[offset + 1 + i] & 0xff);
+    }
+    return new DerLength(len, offset + 1 + numLenBytes);
   }
 
   private static boolean documentHasDocMdpP1LockFromCompletedSignature(PDDocument doc) throws IOException {
@@ -624,7 +1031,8 @@ public final class PdfSignerService {
     return rect;
   }
 
-  private static List<Integer> resolveStampPages(int pageCount, List<Integer> stampPageIndices) {
+  private static List<Integer> resolveStampPages(int pageCount, List<Integer> stampPageIndices)
+      throws InvalidPdfException {
     if (stampPageIndices == null || stampPageIndices.isEmpty()) {
       return List.of(0);
     }
@@ -638,14 +1046,15 @@ public final class PdfSignerService {
     Set<Integer> unique = new LinkedHashSet<>();
     for (Integer idx : stampPageIndices) {
       if (idx == null) {
-        continue;
+        throw new InvalidPdfException("stampPageIndices contains null");
       }
-      if (idx >= 0 && idx < pageCount) {
-        unique.add(idx);
+      if (idx < 0 || idx >= pageCount) {
+        throw new InvalidPdfException("stampPageIndices contains out-of-range index: " + idx);
       }
+      unique.add(idx);
     }
     if (unique.isEmpty()) {
-      return List.of(0);
+      throw new InvalidPdfException("stampPageIndices resolved to empty set");
     }
     return new ArrayList<>(unique);
   }

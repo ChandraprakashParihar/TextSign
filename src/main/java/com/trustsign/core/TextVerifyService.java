@@ -13,13 +13,14 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import javax.crypto.Cipher;
 import java.nio.charset.StandardCharsets;
 
 public final class TextVerifyService {
 
-  private static final Logger LOG = Logger.getLogger(TextVerifyService.class.getName());
+  private static final Logger LOG = LoggerFactory.getLogger(TextVerifyService.class);
 
   private static final ThreadLocal<String> TARGET_HASH = new ThreadLocal<>();
 
@@ -85,17 +86,17 @@ public final class TextVerifyService {
       X509Certificate cert = (X509Certificate) cf.generateCertificate(new ByteArrayInputStream(certBytes));
       PublicKey publicKey = cert.getPublicKey();
 
-      LOG.info("Subject : " + cert.getSubjectX500Principal());
-      LOG.info("Issuer  : " + cert.getIssuerX500Principal());
-      LOG.info("Key algo: " + publicKey.getAlgorithm());
-      LOG.info("Sig len : " + sigBytes.length);
+      LOG.info("Subject : {}", cert.getSubjectX500Principal());
+      LOG.info("Issuer  : {}", cert.getIssuerX500Principal());
+      LOG.info("Key algo: {}", publicKey.getAlgorithm());
+      LOG.info("Sig len : {}", sigBytes.length);
 
       // Build certificate info — returned in every response
       CertificateInfo certInfo = buildCertInfo(cert);
 
       // Store target hash for diagnostics
       TARGET_HASH.set(extractTargetHash(sigBytes, publicKey));
-      LOG.info("Target  : " + TARGET_HASH.get());
+      LOG.info("Target  : {}", TARGET_HASH.get());
 
       // ── 3. Build candidates ────────────────────────────────────────────
       //
@@ -148,8 +149,7 @@ public final class TextVerifyService {
                   certInfo);
             }
           } catch (Exception e) {
-            LOG.warning("SHA algo=" + algo + " len=" + candidate.length
-                + " exception: " + e.getMessage());
+            LOG.warn("SHA algo={} len={} exception={}", algo, candidate.length, e.getMessage());
           }
         }
       }
@@ -173,14 +173,13 @@ public final class TextVerifyService {
                   certInfo);
             }
           } catch (Exception e) {
-            LOG.warning("NONEwithRSA digest=" + digestAlgo + " len=" + candidate.length
-                + " exception: " + e.getMessage());
+            LOG.warn("NONEwithRSA digest={} len={} exception={}", digestAlgo, candidate.length, e.getMessage());
           }
         }
       }
 
       // ── 6. Failure diagnostics ─────────────────────────────────────────
-      LOG.warning("All verification attempts failed.");
+      LOG.warn("All verification attempts failed.");
       logCandidateHashes(unique);
       TARGET_HASH.remove();
 
@@ -472,7 +471,7 @@ public final class TextVerifyService {
         }
       }
     } catch (Exception e) {
-      LOG.warning("extractTargetHash failed: " + e.getMessage());
+      LOG.warn("extractTargetHash failed: {}", e.getMessage());
     }
     return "unknown";
   }
@@ -481,15 +480,15 @@ public final class TextVerifyService {
 
   private static void logCandidateHashes(List<byte[]> unique) {
     String target = TARGET_HASH.get();
-    LOG.warning("── Candidate table (target=" + target + ") ──────────────────");
+    LOG.warn("── Candidate table (target={}) ──────────────────", target);
     for (int i = 0; i < unique.size(); i++) {
       byte[] c = unique.get(i);
       String sha1h = toHex(sha1(c));
       String marker = sha1h.equals(target) ? "  <<< MATCH !!!" : "";
-      LOG.warning(String.format("[%02d] len=%-4d hex=%-20s sha1=%s%s",
+      LOG.warn(String.format("[%02d] len=%-4d hex=%-20s sha1=%s%s",
           i, c.length, toHex(c), sha1h, marker));
     }
-    LOG.warning("────────────────────────────────────────────────────────────");
+    LOG.warn("────────────────────────────────────────────────────────────");
   }
 
   private TextVerifyService() {

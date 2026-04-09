@@ -16,9 +16,10 @@ import java.util.logging.Formatter;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
 import java.util.logging.FileHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Initializes java.util.logging based on config.
@@ -28,7 +29,7 @@ import java.util.logging.FileHandler;
  * - Thread-safe via JUL handlers
  */
 public final class LoggingInitializer {
-  private static final Logger LOG = Logger.getLogger(LoggingInitializer.class.getName());
+  private static final Logger LOG = LoggerFactory.getLogger(LoggingInitializer.class);
   private static final AtomicBoolean INITIALIZED = new AtomicBoolean(false);
 
   private static final DateTimeFormatter TS_FMT = DateTimeFormatter
@@ -60,7 +61,7 @@ public final class LoggingInitializer {
 
     try {
       configureHandlers(filePath, level, consoleEnabled);
-      LOG.info("Logging to: " + filePath.toAbsolutePath());
+      LOG.info("Logging to: {}", filePath.toAbsolutePath());
     } catch (Exception e) {
       String msg = "Failed to initialize file logging at: " + filePath.toAbsolutePath() + " — " + e.getMessage();
       if (failOnError) {
@@ -77,7 +78,7 @@ public final class LoggingInitializer {
   }
 
   private static void configureHandlers(Path filePathOrNull, Level level, boolean consoleEnabled) throws Exception {
-    Logger root = Logger.getLogger("");
+    java.util.logging.Logger root = java.util.logging.Logger.getLogger("");
     root.setLevel(level);
 
     // Reset handlers so we don't double-log across restarts in dev.

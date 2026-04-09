@@ -30,11 +30,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Embeds DSS (/Certs, /OCSPs, /CRLs) for long-term offline validation. */
 public final class LtvEnabler {
-  private static final Logger LOG = Logger.getLogger(LtvEnabler.class.getName());
+  private static final Logger LOG = LoggerFactory.getLogger(LtvEnabler.class);
 
   /** CMS id-aa-signatureTimeStampToken (RFC 3161 timestamp on signature value). */
   private static final ASN1ObjectIdentifier ID_AA_SIGNATURE_TIMESTAMP_TOKEN =
@@ -84,7 +85,7 @@ public final class LtvEnabler {
       try {
         pkcs7Der = pkcs7DerFromContents(contents);
       } catch (IOException e) {
-        LOG.warning("PKCS#7 DER extraction failed; using raw /Contents: " + e.getMessage());
+        LOG.warn("PKCS#7 DER extraction failed; using raw /Contents: {}", e.getMessage());
         pkcs7Der = contents;
       }
       String vriKeyDer = sha1UpperHex(pkcs7Der);
@@ -378,7 +379,7 @@ public final class LtvEnabler {
       if (perSigOrNull != null) perSigOrNull.ocsps.add(ocsp);
       return true;
     } catch (Exception e) {
-      LOG.warning(logCtx + " OCSP fetch failed: " + e.getMessage());
+      LOG.warn("{} OCSP fetch failed: {}", logCtx, e.getMessage());
     }
     try {
       byte[] crl = CrlFetcher.fetchCrl(cert, issuer, cfg.crlConnectTimeoutMs(), cfg.crlReadTimeoutMs());
@@ -387,7 +388,7 @@ public final class LtvEnabler {
       if (perSigOrNull != null) perSigOrNull.crls.add(crl);
       return true;
     } catch (Exception e) {
-      LOG.warning(logCtx + " CRL fetch failed: " + e.getMessage());
+      LOG.warn("{} CRL fetch failed: {}", logCtx, e.getMessage());
     }
     return false;
   }
@@ -418,14 +419,14 @@ public final class LtvEnabler {
       try {
         encoded = vals.getObjectAt(vi).toASN1Primitive().getEncoded();
       } catch (Exception e) {
-        LOG.warning("Failed to encode timestamp attribute value: " + e.getMessage());
+        LOG.warn("Failed to encode timestamp attribute value: {}", e.getMessage());
         continue;
       }
       final TimeStampToken tst;
       try {
         tst = new TimeStampToken(new CMSSignedData(encoded));
       } catch (Exception e) {
-        LOG.warning("Failed to parse embedded signature timestamp token: " + e.getMessage());
+        LOG.warn("Failed to parse embedded signature timestamp token: {}", e.getMessage());
         continue;
       }
       var tsCertStore = tst.getCertificates();
@@ -433,14 +434,14 @@ public final class LtvEnabler {
       @SuppressWarnings("unchecked")
       var matches = tsCertStore.getMatches((Selector<org.bouncycastle.cert.X509CertificateHolder>) sid);
       if (matches == null || matches.isEmpty()) {
-        LOG.warning("Timestamp token had no certificate matching TSA SignerId");
+        LOG.warn("Timestamp token had no certificate matching TSA SignerId");
         continue;
       }
       X509Certificate tsaSigner;
       try {
         tsaSigner = converter.getCertificate(matches.iterator().next());
       } catch (Exception e) {
-        LOG.warning("Failed to convert TSA certificate: " + e.getMessage());
+        LOG.warn("Failed to convert TSA certificate: {}", e.getMessage());
         continue;
       }
 
@@ -448,7 +449,7 @@ public final class LtvEnabler {
       try {
         tsChain = buildLikelyChain(tsCertStore, tsaSigner);
       } catch (Exception e) {
-        LOG.warning("Failed to build TSA chain: " + e.getMessage());
+        LOG.warn("Failed to build TSA chain: {}", e.getMessage());
         continue;
       }
 
@@ -459,7 +460,7 @@ public final class LtvEnabler {
           if (certDedup.add(key)) certs.add(cBytes);
           perSig.certs.add(cBytes);
         } catch (Exception e) {
-          LOG.warning("Failed to encode TSA cert: " + e.getMessage());
+          LOG.warn("Failed to encode TSA cert: {}", e.getMessage());
         }
       }
 

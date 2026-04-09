@@ -44,11 +44,13 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.regex.Pattern;
 
 public final class ApiServlet extends HttpServlet {
-  private static final Logger LOG = Logger.getLogger(ApiServlet.class.getName());
+  private static final Logger LOG = LoggerFactory.getLogger(ApiServlet.class);
   private static final Pattern SAFE_FILENAME = Pattern.compile("[^a-zA-Z0-9._-]");
 
   private final SessionManager sessions;
@@ -88,7 +90,7 @@ public final class ApiServlet extends HttpServlet {
     try {
       File cfgFile = resolveConfigFile();
       if (!cfgFile.exists()) {
-        LOG.warning("Config file not found for IP check: " + cfgFile.getAbsolutePath());
+        LOG.warn("Config file not found for IP check: {}", cfgFile.getAbsolutePath());
         return false;
       }
       AgentConfig cfg = ConfigLoader.load(cfgFile);
@@ -98,13 +100,29 @@ public final class ApiServlet extends HttpServlet {
       }
       boolean ok = allowed.contains(remoteIp);
       if (!ok) {
-        LOG.warning("Rejecting request from disallowed IP: " + remoteIp);
+        LOG.warn("Rejecting request from disallowed IP: {}", remoteIp);
       }
       return ok;
     } catch (Exception e) {
-      LOG.warning("Failed to evaluate client IP allowlist: " + e.getMessage());
+      LOG.warn("Failed to evaluate client IP allowlist: {}", safeMsg(e));
       return false;
     }
+  }
+
+  private static String requestId(HttpServletRequest req) {
+    String h = req != null ? req.getHeader("X-Request-Id") : null;
+    if (h != null && !h.isBlank()) {
+      return h.trim();
+    }
+    // Short id keeps logs readable; uniqueness is per-process/time and sufficient for correlation.
+    return UUID.randomUUID().toString().substring(0, 12);
+  }
+
+  private static String logCtx(HttpServletRequest req, String requestId) {
+    String method = req != null ? req.getMethod() : "";
+    String path = req != null ? req.getPathInfo() : "";
+    String ip = req != null ? req.getRemoteAddr() : "";
+    return "[rid=" + requestId + " " + method + " " + path + " ip=" + ip + "]";
   }
 
   /**
@@ -120,7 +138,7 @@ public final class ApiServlet extends HttpServlet {
     try {
       return ConfigLoader.load(f);
     } catch (Exception e) {
-      LOG.warning("Config load failed: " + e.getMessage());
+      LOG.warn("Config load failed: {}", safeMsg(e));
       writeJson(resp, 500, Map.of("error", "Invalid config", "details", safeMsg(e)));
       return null;
     }
@@ -544,6 +562,9 @@ public final class ApiServlet extends HttpServlet {
 
   @Override
   protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    final String rid = requestId(req);
+    final String ctx = logCtx(req, rid);
+    final long startMs = System.currentTimeMillis();
     if (!isClientIpAllowed(req)) {
       writeJson(resp, 403, Map.of("error", "IP not allowed", "ip", req.getRemoteAddr()));
       return;
@@ -620,6 +641,8 @@ public final class ApiServlet extends HttpServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
+            LOG.warn("{} Token load failed (certificates). tookMs={} details={}",
+                ctx, System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of(
                 "error", "Token load failed",
                 "details", detail));
@@ -642,13 +665,16 @@ public final class ApiServlet extends HttpServlet {
     } catch (SecurityException se) {
       writeJson(resp, 403, Map.of("error", se.getMessage()));
     } catch (Exception e) {
-      LOG.warning("GET error: " + e.getMessage());
+      LOG.warn("{} GET error after {} ms: {}", ctx, System.currentTimeMillis() - startMs, safeMsg(e), e);
       writeJson(resp, 500, Map.of("error", "Internal error", "details", safeMsg(e)));
     }
   }
 
   @Override
   protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    final String rid = requestId(req);
+    final String ctx = logCtx(req, rid);
+    final long startMs = System.currentTimeMillis();
     if (!isClientIpAllowed(req)) {
       writeJson(resp, 403, Map.of("error", "IP not allowed", "ip", req.getRemoteAddr()));
       return;
@@ -720,6 +746,8 @@ public final class ApiServlet extends HttpServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
+            LOG.warn("{} Token load failed (auto-sign-text). tookMs={} details={}",
+                ctx, System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of(
                 "error", "Token load failed",
                 "details", detail));
@@ -819,7 +847,7 @@ public final class ApiServlet extends HttpServlet {
             reservedOutPath = SignedPdfOutputPaths.reserveNextSignedTextPath(
                 outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
           } catch (IOException e) {
-            LOG.warning("/auto-sign-text: failed to reserve output path: " + e.getMessage());
+            LOG.warn("/auto-sign-text: failed to reserve output path: {}", safeMsg(e));
             writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
             return;
           }
@@ -842,7 +870,7 @@ public final class ApiServlet extends HttpServlet {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
-                LOG.warning("/auto-sign-text: failed to delete reserved output: " + e.getMessage());
+                LOG.warn("/auto-sign-text: failed to delete reserved output: {}", safeMsg(e));
               }
             }
           }
@@ -850,7 +878,7 @@ public final class ApiServlet extends HttpServlet {
         }
 
         case "/auto-sign-pdf" -> {
-          LOG.info("Auto-signing PDF request received");
+          LOG.info("{} Auto-signing PDF request received", ctx);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
           String reason = mp.field("reason");
@@ -921,6 +949,8 @@ public final class ApiServlet extends HttpServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
+            LOG.warn("{} Token load failed (auto-sign-pdf). tookMs={} details={}",
+                ctx, System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of(
                 "error", "Token load failed",
                 "details", detail));
@@ -980,7 +1010,7 @@ public final class ApiServlet extends HttpServlet {
             reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
                 outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
           } catch (IOException e) {
-            LOG.warning("/auto-sign-pdf: failed to reserve output path: " + e.getMessage());
+            LOG.warn("/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
             writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
             return;
           }
@@ -990,9 +1020,10 @@ public final class ApiServlet extends HttpServlet {
             File outFile = reservedOutPath.toFile();
             byte[] pdfToSign = resolveAutoSignIncrementalInput(data, outFile, mp);
 
-            byte[] signedPdf;
+            PdfSignerService.PdfSigningResult signResult;
             try {
-              signedPdf = PdfSignerService.signPdf(
+              long signStartMs = System.currentTimeMillis();
+              signResult = PdfSignerService.signPdf(
                   pdfToSign,
                   key,
                   chain,
@@ -1002,13 +1033,24 @@ public final class ApiServlet extends HttpServlet {
                   location,
                   stampPages,
                   pdfOpts);
+              LOG.info("{} PDF signed. alias={} pages={} timestamped={} tookMs={}",
+                  ctx, matchedAlias, stampPages != null ? stampPages.size() : 0, signResult.isTimestamped(),
+                  System.currentTimeMillis() - signStartMs);
             } catch (DocMdpNoChangesLockException e) {
               writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
               return;
+            } catch (PdfSignerService.PdfSigningException e) {
+              LOG.warn("{} PDF signing failed. alias={} tookMs={} err={}",
+                  ctx, matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
+              writeJson(resp, 500, Map.of("error", "PDF signing failed", "details", safeMsg(e)));
+              return;
             } catch (IOException e) {
+              LOG.warn("{} Invalid PDF structure. alias={} tookMs={} err={}",
+                  ctx, matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e));
               writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
               return;
             }
+            byte[] signedPdf = signResult.signedPdf();
 
             Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
             outputWritten = true;
@@ -1022,13 +1064,17 @@ public final class ApiServlet extends HttpServlet {
             autoPdfBody.put("chainedFromExistingOutput", pdfToSign != data);
             autoPdfBody.put("stampedPages", stampPages);
             autoPdfBody.put("finalVersion", finalVersion);
+            autoPdfBody.put("timestamped", signResult.isTimestamped());
+            if (signResult.tsaWarning() != null) {
+              autoPdfBody.put("tsaWarning", signResult.tsaWarning().getMessage());
+            }
             writeJson(resp, 200, autoPdfBody);
           } finally {
             if (!outputWritten) {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
-                LOG.warning("/auto-sign-pdf: failed to delete reserved output: " + e.getMessage());
+                LOG.warn("/auto-sign-pdf: failed to delete reserved output: {}", safeMsg(e));
               }
             }
           }
@@ -1083,6 +1129,8 @@ public final class ApiServlet extends HttpServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
+            LOG.warn("{} Token load failed (auto-sign-text-cms). tookMs={} details={}",
+                ctx, System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
             return;
           }
@@ -1144,7 +1192,7 @@ public final class ApiServlet extends HttpServlet {
             reservedOutPath = SignedPdfOutputPaths.reserveNextCmsSignedTextPath(
                 outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
           } catch (IOException e) {
-            LOG.warning("/auto-sign-text-cms: failed to reserve output path: " + e.getMessage());
+            LOG.warn("/auto-sign-text-cms: failed to reserve output path: {}", safeMsg(e));
             writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
             return;
           }
@@ -1164,7 +1212,7 @@ public final class ApiServlet extends HttpServlet {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
-                LOG.warning("/auto-sign-text-cms: failed to delete reserved output: " + e.getMessage());
+                LOG.warn("/auto-sign-text-cms: failed to delete reserved output: {}", safeMsg(e));
               }
             }
           }
@@ -1258,9 +1306,10 @@ public final class ApiServlet extends HttpServlet {
                   .toArray(X509Certificate[]::new)
               : null;
           CertificateValidator.validateForSigning(signingCert, x509Chain);
-          byte[] signedPdf;
+          PdfSignerService.PdfSigningResult signResult;
           try {
-            signedPdf = PdfSignerService.signPdf(
+            long signStartMs = System.currentTimeMillis();
+            signResult = PdfSignerService.signPdf(
                 data,
                 key,
                 chain,
@@ -1270,13 +1319,24 @@ public final class ApiServlet extends HttpServlet {
                 location,
                 stampPages,
                 pdfOpts);
+            LOG.info("{} PDF signed. alias={} pages={} timestamped={} tookMs={}",
+                ctx, matchedAlias, stampPages != null ? stampPages.size() : 0, signResult.isTimestamped(),
+                System.currentTimeMillis() - signStartMs);
           } catch (DocMdpNoChangesLockException e) {
             writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
             return;
+          } catch (PdfSignerService.PdfSigningException e) {
+            LOG.warn("{} PDF signing failed. alias={} tookMs={} err={}",
+                ctx, matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
+            writeJson(resp, 500, Map.of("error", "PDF signing failed", "details", safeMsg(e)));
+            return;
           } catch (IOException e) {
+            LOG.warn("{} Invalid PDF structure. alias={} tookMs={} err={}",
+                ctx, matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e));
             writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
             return;
           }
+          byte[] signedPdf = signResult.signedPdf();
 
           resp.setStatus(200);
           resp.setContentType("application/pdf");
@@ -1285,6 +1345,10 @@ public final class ApiServlet extends HttpServlet {
               "attachment; filename=\"" + buildSignedPdfFilename(mp.filename("file")) + "\"");
           resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
           resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
+          resp.setHeader("X-TrustSign-Timestamped", String.valueOf(signResult.isTimestamped()));
+          if (signResult.tsaWarning() != null) {
+            resp.setHeader("X-TrustSign-TSA-Warning", signResult.tsaWarning().getMessage());
+          }
           if (finalVersion) {
             resp.setHeader("X-TrustSign-Final-Version", "true");
           }
@@ -1351,6 +1415,7 @@ public final class ApiServlet extends HttpServlet {
           char[] pinChars = pinStr.toCharArray();
           HsmPdfSignerService.SignResult hsmResult = null;
           try {
+            long signStartMs = System.currentTimeMillis();
             hsmResult = HsmPdfSignerService.signPdfWithMetadata(
                 data,
                 pinChars,
@@ -1362,18 +1427,24 @@ public final class ApiServlet extends HttpServlet {
                 location,
                 stampPages,
                 pdfOpts);
+            LOG.info("{} HSM PDF signed. pages={} tookMs={}",
+                ctx, stampPages != null ? stampPages.size() : 0, System.currentTimeMillis() - signStartMs);
           } catch (DocMdpNoChangesLockException e) {
             writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
             return;
           } catch (IOException e) {
+            LOG.warn("{} HSM invalid PDF structure. tookMs={} err={}",
+                ctx, System.currentTimeMillis() - startMs, safeMsg(e));
             writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
             return;
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
+            LOG.warn("{} HSM token load or signing failed. tookMs={} details={}",
+                ctx, System.currentTimeMillis() - startMs, detail, e);
             writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
             return;
           } catch (Exception e) {
-            LOG.warning("/hsm/sign-pdf: " + e.getMessage());
+            LOG.warn("{} /hsm/sign-pdf failed. tookMs={} err={}", ctx, System.currentTimeMillis() - startMs, safeMsg(e), e);
             writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
             return;
           } finally {
@@ -1482,7 +1553,7 @@ public final class ApiServlet extends HttpServlet {
             reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
                 outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
           } catch (IOException e) {
-            LOG.warning("/hsm/auto-sign-pdf: failed to reserve output path: " + e.getMessage());
+            LOG.warn("/hsm/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
             writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
             return;
           }
@@ -1495,6 +1566,7 @@ public final class ApiServlet extends HttpServlet {
             char[] pinChars = pinStr.toCharArray();
             HsmPdfSignerService.SignResult hsmResult = null;
             try {
+              long signStartMs = System.currentTimeMillis();
               hsmResult = HsmPdfSignerService.signPdfWithMetadata(
                   pdfToSign,
                   pinChars,
@@ -1506,18 +1578,25 @@ public final class ApiServlet extends HttpServlet {
                   location,
                   stampPages,
                   pdfOpts);
+              LOG.info("{} HSM auto-sign PDF signed. pages={} tookMs={}",
+                  ctx, stampPages != null ? stampPages.size() : 0, System.currentTimeMillis() - signStartMs);
             } catch (DocMdpNoChangesLockException e) {
               writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
               return;
             } catch (IOException e) {
+              LOG.warn("{} HSM auto-sign invalid PDF structure. tookMs={} err={}",
+                  ctx, System.currentTimeMillis() - startMs, safeMsg(e));
               writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
               return;
             } catch (RuntimeException e) {
               String detail = buildTokenErrorDetail(e);
+              LOG.warn("{} HSM auto-sign token load or signing failed. tookMs={} details={}",
+                  ctx, System.currentTimeMillis() - startMs, detail, e);
               writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
               return;
             } catch (Exception e) {
-              LOG.warning("/hsm/auto-sign-pdf: " + e.getMessage());
+              LOG.warn("{} /hsm/auto-sign-pdf failed. tookMs={} err={}",
+                  ctx, System.currentTimeMillis() - startMs, safeMsg(e), e);
               writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
               return;
             } finally {
@@ -1545,7 +1624,7 @@ public final class ApiServlet extends HttpServlet {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
-                LOG.warning("/hsm/auto-sign-pdf: failed to delete reserved output: " + e.getMessage());
+                LOG.warn("/hsm/auto-sign-pdf: failed to delete reserved output: {}", safeMsg(e));
               }
             }
           }
@@ -1569,6 +1648,7 @@ public final class ApiServlet extends HttpServlet {
         }
 
         case "/debug/pdf-ltv" -> {
+          LOG.info("{} LTV debug request received", ctx);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
           if (data == null || data.length == 0) {
@@ -1613,6 +1693,8 @@ public final class ApiServlet extends HttpServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
+            LOG.warn("{} Token load failed (sign-text). tookMs={} details={}",
+                ctx, System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
             return;
           }
@@ -1782,7 +1864,7 @@ public final class ApiServlet extends HttpServlet {
     } catch (SecurityException se) {
       writeJson(resp, 403, Map.of("error", se.getMessage()));
     } catch (Exception e) {
-      LOG.warning("POST error: " + e.getMessage());
+      LOG.warn("{} POST error after {} ms: {}", ctx, System.currentTimeMillis() - startMs, safeMsg(e), e);
       writeJson(resp, 500, Map.of("error", "Internal error", "details", safeMsg(e)));
     }
   }

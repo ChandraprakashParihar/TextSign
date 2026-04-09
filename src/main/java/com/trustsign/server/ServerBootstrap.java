@@ -16,11 +16,12 @@ import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
 import java.util.EnumSet;
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class ServerBootstrap {
 
-  private static final Logger LOG = Logger.getLogger(ServerBootstrap.class.getName());
+  private static final Logger LOG = LoggerFactory.getLogger(ServerBootstrap.class);
 
   public static Server buildServer(AgentConfig cfg, LicenceEnforcer licenceEnforcer) {
     AgentConfig.ServerConfig sc = cfg.server();
@@ -78,13 +79,12 @@ public final class ServerBootstrap {
     server.setHandler(ctx);
 
     int signMax = AgentConfig.ServerConfig.maxConcurrentSigningOrDefault(sc);
-    LOG.info(String.format(
-        "TrustSign listener: port=%d jettyMaxThreads=%d acceptQueue=%d signingConcurrency=%s tcpConnectionCap=%s",
+    LOG.info("TrustSign listener: port={} jettyMaxThreads={} acceptQueue={} signingConcurrency={} tcpConnectionCap={}",
         cfg.portOrDefault(),
         pool.getMaxThreads(),
         connector.getAcceptQueueSize(),
         signMax <= 0 ? "unlimited" : String.valueOf(signMax),
-        maxTcp <= 0 ? "none" : String.valueOf(maxTcp)));
+        maxTcp <= 0 ? "none" : String.valueOf(maxTcp));
 
     return server;
   }
