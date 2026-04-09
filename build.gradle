@@ -1,6 +1,7 @@
 plugins {
   id("java")
   id("application")
+  id("org.springframework.boot") version "3.3.5"
   id("com.gradleup.shadow") version "8.3.9"
   id("de.undercouch.download") version "5.6.0"
 }
@@ -50,6 +51,12 @@ tasks.shadowJar {
   duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }
 
+tasks.bootJar {
+  archiveBaseName.set("trustsign")
+  archiveClassifier.set("all")
+  mainClass.set("com.trustsign.server.Main")
+}
+
 tasks.test {
   useJUnitPlatform()
 }
@@ -77,6 +84,14 @@ def windowsJreZipUrl = "https://github.com/adoptium/temurin17-binaries/releases/
 def windowsJreZip = file("$buildDir/jre-win/temurin17-jre-win-x64.zip")
 def windowsJreExtractDir = file("$buildDir/jre-win/extracted")
 def windowsJreSha256 = (findProperty("windowsJreSha256") ?: System.getenv("TRUSTSIGN_WINDOWS_JRE_SHA256"))?.toString()
+def macJreTarGzUrl = "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.18%2B8/OpenJDK17U-jre_x64_mac_hotspot_17.0.18_8.tar.gz"
+def macJreTarGz = file("$buildDir/jre-mac/temurin17-jre-mac-x64.tar.gz")
+def macJreExtractDir = file("$buildDir/jre-mac/extracted")
+def macJreSha256 = (findProperty("macJreSha256") ?: System.getenv("TRUSTSIGN_MAC_JRE_SHA256"))?.toString()
+def linuxJreTarGzUrl = "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.18%2B8/OpenJDK17U-jre_x64_linux_hotspot_17.0.18_8.tar.gz"
+def linuxJreTarGz = file("$buildDir/jre-linux/temurin17-jre-linux-x64.tar.gz")
+def linuxJreExtractDir = file("$buildDir/jre-linux/extracted")
+def linuxJreSha256 = (findProperty("linuxJreSha256") ?: System.getenv("TRUSTSIGN_LINUX_JRE_SHA256"))?.toString()
 
 tasks.register("downloadWindowsJre", de.undercouch.gradle.tasks.download.Download) {
   group = "distribution"
@@ -139,6 +154,112 @@ tasks.register("extractWindowsJre") {
   }
 }
 
+tasks.register("downloadMacJre", de.undercouch.gradle.tasks.download.Download) {
+  group = "distribution"
+  description = "Downloads Eclipse Temurin 17 JRE for macOS x64"
+  onlyIf { !macJreTarGz.exists() }
+  src(macJreTarGzUrl)
+  dest(macJreTarGz)
+  overwrite(false)
+}
+
+tasks.register("verifyMacJreChecksum") {
+  group = "distribution"
+  description = "Verifies SHA-256 of downloaded macOS JRE archive"
+  dependsOn("downloadMacJre")
+  doLast {
+    if (!macJreTarGz.exists()) {
+      throw new GradleException("macOS JRE archive missing: ${macJreTarGz}")
+    }
+    if (macJreSha256 == null || macJreSha256.isBlank()) {
+      throw new GradleException(
+        "Missing expected SHA-256 for macOS JRE. Set -PmacJreSha256=<sha256> " +
+        "or TRUSTSIGN_MAC_JRE_SHA256 environment variable."
+      )
+    }
+    def md = java.security.MessageDigest.getInstance("SHA-256")
+    macJreTarGz.withInputStream { is ->
+      byte[] buf = new byte[8192]
+      int read
+      while ((read = is.read(buf)) != -1) {
+        md.update(buf, 0, read)
+      }
+    }
+    def actual = md.digest().encodeHex().toString()
+    if (!actual.equalsIgnoreCase(macJreSha256.trim())) {
+      throw new GradleException("macOS JRE SHA-256 mismatch. expected=${macJreSha256} actual=${actual}")
+    }
+  }
+}
+
+tasks.register("extractMacJre") {
+  group = "distribution"
+  description = "Extracts the macOS JRE tar.gz (after download + checksum)"
+  dependsOn("verifyMacJreChecksum")
+  def extractTo = macJreExtractDir
+  outputs.dir(extractTo)
+  doLast {
+    extractTo.mkdirs()
+    copy {
+      from(tarTree(resources.gzip(macJreTarGz)))
+      into(extractTo)
+    }
+  }
+}
+
+tasks.register("downloadLinuxJre", de.undercouch.gradle.tasks.download.Download) {
+  group = "distribution"
+  description = "Downloads Eclipse Temurin 17 JRE for Linux x64"
+  onlyIf { !linuxJreTarGz.exists() }
+  src(linuxJreTarGzUrl)
+  dest(linuxJreTarGz)
+  overwrite(false)
+}
+
+tasks.register("verifyLinuxJreChecksum") {
+  group = "distribution"
+  description = "Verifies SHA-256 of downloaded Linux JRE archive"
+  dependsOn("downloadLinuxJre")
+  doLast {
+    if (!linuxJreTarGz.exists()) {
+      throw new GradleException("Linux JRE archive missing: ${linuxJreTarGz}")
+    }
+    if (linuxJreSha256 == null || linuxJreSha256.isBlank()) {
+      throw new GradleException(
+        "Missing expected SHA-256 for Linux JRE. Set -PlinuxJreSha256=<sha256> " +
+        "or TRUSTSIGN_LINUX_JRE_SHA256 environment variable."
+      )
+    }
+    def md = java.security.MessageDigest.getInstance("SHA-256")
+    linuxJreTarGz.withInputStream { is ->
+      byte[] buf = new byte[8192]
+      int read
+      while ((read = is.read(buf)) != -1) {
+        md.update(buf, 0, read)
+      }
+    }
+    def actual = md.digest().encodeHex().toString()
+    if (!actual.equalsIgnoreCase(linuxJreSha256.trim())) {
+      throw new GradleException("Linux JRE SHA-256 mismatch. expected=${linuxJreSha256} actual=${actual}")
+    }
+  }
+}
+
+tasks.register("extractLinuxJre") {
+  group = "distribution"
+  description = "Extracts the Linux JRE tar.gz (after download + checksum)"
+  dependsOn("verifyLinuxJreChecksum")
+  def extractTo = linuxJreExtractDir
+  outputs.dir(extractTo)
+  doLast {
+    extractTo.mkdirs()
+    copy {
+      from(tarTree(resources.gzip(linuxJreTarGz)))
+      into(extractTo)
+    }
+  }
+}
+
 tasks.register("installDistWithJre") {
   group = "distribution"
   description = "Same as installDist but embeds Windows JRE and patches launcher to use it (for installer)"
@@ -166,13 +287,13 @@ tasks.register("installDistWithJre") {
 
 tasks.register("clientFolder") {
   group = "distribution"
-  description = "Creates build/client/ with JAR, bundled Windows JRE, run script, config — ready to give to the client. Client does not need Java installed (Windows). Requires config/public-key.pem."
-  dependsOn("shadowJar", "installDistWithJre", "verifyInstallerInputs")
+  description = "Creates build/client/ as a cross-platform package (Windows/macOS/Linux). Uses system Java by default and includes both .bat and .sh launchers."
+  dependsOn("bootJar", "installDist")
   def clientDir = file("$buildDir/client")
   outputs.dir(clientDir)
   // Re-run when any of these source files change so licence.json, config.json, etc. are always updated.
   inputs.files(
-    tasks.shadowJar.archiveFile,
+    tasks.bootJar.archiveFile,
     file("config/config.json"),
     file("config/licence.json"),
     file("config/public-key.pem"),
@@ -186,18 +307,10 @@ tasks.register("clientFolder") {
     def configDir = new File(clientDir, "config")
     configDir.mkdirs()
     copy {
-      from(tasks.shadowJar.archiveFile) { rename { "trustsign-${project.version}-all.jar" } }
+      from(tasks.bootJar.archiveFile) { rename { "trustsign-${project.version}-all.jar" } }
       into(clientDir)
     }
-    // Bundled Windows JRE so client does not need to install Java
-    def jreDir = file("$buildDir/install/trustsign/jre")
-    if (jreDir.exists()) {
-      copy {
-        from(jreDir)
-        into(new File(clientDir, "jre"))
-      }
-    }
-    // Launcher: use bundled jre\bin\java.exe when present, else fall back to system java
+    // Windows launcher: use bundled JRE when present, else fall back to system Java.
     new File(clientDir, "run-trustsign.bat").text = """@echo off
 title TrustSign Service
 cd /d "%~dp0"
@@ -230,6 +343,61 @@ echo.
 "%JAVA_EXE%" -jar "%JAR%" %*
 pause
 """
+    // Linux/macOS launcher (system Java).
+    def shFile = new File(clientDir, "run-trustsign.sh")
+    shFile.text = """#!/usr/bin/env sh
+set -eu
+cd "\$(dirname "\$0")"
+
+JAR=""
+for f in trustsign-*-all.jar trustsign*.jar; do
+  if [ -f "\$f" ]; then JAR="\$f"; break; fi
+done
+
+if [ -z "\$JAR" ]; then
+  echo "No trustsign JAR found in this folder."
+  exit 1
+fi
+
+if [ ! -f "config/config.json" ]; then
+  echo "Missing config/config.json. Copy your config.json into the config folder."
+  exit 1
+fi
+
+exec java -jar "\$JAR" "\$@"
+"""
+    shFile.setExecutable(true)
+
+    // macOS double-click launcher (Finder .command files run in Terminal).
+    def commandFile = new File(clientDir, "run-trustsign.command")
+    commandFile.text = """#!/usr/bin/env bash
+set -euo pipefail
+cd "\$(dirname "\$0")"
+
+JAR=""
+for f in trustsign-*-all.jar trustsign*.jar; do
+  if [ -f "\$f" ]; then JAR="\$f"; break; fi
+done
+
+if [ -z "\$JAR" ]; then
+  echo "No trustsign JAR found in this folder."
+  read -r -p "Press Enter to close..."
+  exit 1
+fi
+
+if [ ! -f "config/config.json" ]; then
+  echo "Missing config/config.json. Copy your config.json into the config folder."
+  read -r -p "Press Enter to close..."
+  exit 1
+fi
+
+echo "Starting TrustSign service..."
+echo "Press Ctrl+C to stop."
+echo
+java -jar "\$JAR" "\$@"
+read -r -p "Press Enter to close..."
+"""
+    commandFile.setExecutable(true)
     // Prefer main config so you can change anything in config/ and both clientFolder and buildInstaller use it
     def configSource = file("config/config.json").exists() ? file("config/config.json") : file("installer/config.json")
     if (configSource.exists()) {
@@ -279,15 +447,72 @@ pause
   }
 }
 
+tasks.register("clientFolderCrossPlatform") {
+  group = "distribution"
+  description = "Alias for cross-platform client package"
+  dependsOn("clientFolder")
+}
+
+tasks.register("clientFolderWindows") {
+  group = "distribution"
+  description = "Creates build/client/ with bundled Windows JRE (for Windows client distribution and installer)"
+  dependsOn("clientFolder", "installDistWithJre", "verifyInstallerInputs")
+  doLast {
+    def clientDir = file("$buildDir/client")
+    def jreDir = file("$buildDir/install/trustsign/jre")
+    if (!jreDir.exists()) {
+      throw new GradleException("Bundled Windows JRE not found after installDistWithJre: ${jreDir}")
+    }
+    copy {
+      from(jreDir)
+      into(new File(clientDir, "jre"))
+    }
+  }
+}
+
+tasks.register("clientFolderMac") {
+  group = "distribution"
+  description = "Creates build/client/ with bundled macOS JRE (x64)"
+  dependsOn("clientFolder", "extractMacJre")
+  doLast {
+    def clientDir = file("$buildDir/client")
+    def jreTarget = new File(clientDir, "jre")
+    delete(jreTarget)
+    def topDirs = macJreExtractDir.listFiles()?.findAll { it.isDirectory() }
+    def jreContentDir = (topDirs?.size() == 1) ? topDirs[0] : macJreExtractDir
+    copy {
+      from(jreContentDir)
+      into(jreTarget)
+    }
+  }
+}
+
+tasks.register("clientFolderLinux") {
+  group = "distribution"
+  description = "Creates build/client/ with bundled Linux JRE (x64)"
+  dependsOn("clientFolder", "extractLinuxJre")
+  doLast {
+    def clientDir = file("$buildDir/client")
+    def jreTarget = new File(clientDir, "jre")
+    delete(jreTarget)
+    def topDirs = linuxJreExtractDir.listFiles()?.findAll { it.isDirectory() }
+    def jreContentDir = (topDirs?.size() == 1) ? topDirs[0] : linuxJreExtractDir
+    copy {
+      from(jreContentDir)
+      into(jreTarget)
+    }
+  }
+}
+
 tasks.register("buildInstaller") {
   group = "distribution"
-  description = "Builds the Windows installer with bundled JRE (requires Windows and Inno Setup 6). Packages the same files as clientFolder (build/client) so the installer and zip client match."
-  dependsOn("clientFolder", "verifyInstallerInputs")
+  description = "Builds the Windows installer with bundled JRE (requires Windows and Inno Setup 6). Packages files from build/client prepared by clientFolderWindows."
+  dependsOn("clientFolderWindows", "verifyInstallerInputs")
   doLast {
     if (!System.getProperty("os.name", "").toLowerCase().contains("windows")) {
       throw new GradleException(
         "The Windows installer can only be built on Windows (Inno Setup is Windows-only).\n" +
-        "On Mac/Linux: use ./gradlew clientFolder and give the client build/client/ (or zip it).\n" +
+        "On Mac/Linux: use ./gradlew clientFolderCrossPlatform and give the client build/client/ (or zip it).\n" +
         "To build the .exe installer, run ./gradlew buildInstaller on a Windows machine with Inno Setup 6 installed."
       )
     }
@@ -296,7 +521,7 @@ tasks.register("buildInstaller") {
       throw new GradleException(
         "Inno Setup 6 is required to build the Windows installer but was not found.\n" +
         "Install from https://jrsoftware.org/isinfo.php (use default path so Gradle finds ISCC.exe).\n" +
-        "If you don't need the .exe installer, run ./gradlew clientFolder and distribute build/client/ (e.g. as a zip)."
+        "If you don't need the .exe installer, run ./gradlew clientFolderCrossPlatform and distribute build/client/ (e.g. as a zip)."
       )
     }
     def iss = file("installer/TrustSign.iss")
@@ -306,6 +531,31 @@ tasks.register("buildInstaller") {
     pb.inheritIO()
     def ret = pb.start().waitFor()
     if (ret != 0) throw new GradleException("ISCC exited with code $ret")
+  }
+}
+
+tasks.register("printSha256") {
+  group = "distribution"
+  description = "Prints SHA-256 for a local file. Usage: ./gradlew printSha256 -Pfile=/path/to/file"
+  doLast {
+    def filePath = findProperty("file")?.toString()
+    if (filePath == null || filePath.isBlank()) {
+      throw new GradleException("Missing -Pfile=/path/to/file")
+    }
+    def f = file(filePath)
+    if (!f.exists() || !f.isFile()) {
+      throw new GradleException("File not found: ${f}")
+    }
+    def md = java.security.MessageDigest.getInstance("SHA-256")
+    f.withInputStream { is ->
+      byte[] buf = new byte[8192]
+      int read
+      while ((read = is.read(buf)) != -1) {
+        md.update(buf, 0, read)
+      }
+    }
+    def sha = md.digest().encodeHex().toString()
+    println("SHA256(${f})=${sha}")
   }
 }
 

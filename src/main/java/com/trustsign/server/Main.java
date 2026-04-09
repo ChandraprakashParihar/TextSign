@@ -4,6 +4,7 @@ import com.trustsign.core.AgentConfig;
 import com.trustsign.core.ConfigLoader;
 import com.trustsign.core.LicenceEnforcer;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.WebApplicationType;
 
 import java.io.File;
 import java.io.InputStream;
@@ -43,6 +44,7 @@ public final class Main {
     }
     System.setProperty("trustsign.config.path", configFile.getAbsolutePath());
     SpringApplication app = new SpringApplication(TrustSignSpringApplication.class);
+    app.setWebApplicationType(WebApplicationType.SERVLET);
     app.setDefaultProperties(Map.of(
         "server.port", String.valueOf(cfg.portOrDefault()),
         "server.shutdown", "graceful",

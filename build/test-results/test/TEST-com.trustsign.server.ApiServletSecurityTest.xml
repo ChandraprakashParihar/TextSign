@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.server.ApiServletSecurityTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-04-09T09:29:12.988Z" hostname="Chandras-Mac-mini.local" time="0.462">
-  <properties/>
-  <testcase name="debugBytesIsDisabledByDefault()" classname="com.trustsign.server.ApiServletSecurityTest" time="0.455"/>
-  <testcase name="sessionEndpointIsRateLimitedPerIp()" classname="com.trustsign.server.ApiServletSecurityTest" time="0.003"/>
-  <testcase name="signPdfRequiresSessionToken()" classname="com.trustsign.server.ApiServletSecurityTest" time="0.001"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

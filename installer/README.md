@@ -3,7 +3,7 @@
 This folder contains the Inno Setup script to build a Windows installer for TrustSign. The installer packages **the same files as the client folder** (`build/client`): JAR, `run-trustsign.bat`, `config/` (config.json, licence.json, public-key.pem, truststore.jks, SET-PIN.txt), README.txt, and bundled JRE.
 
 - **Bundled JRE**: Eclipse Temurin 17 JRE for Windows x64 — the client does **not** need to install Java.
-- **Same as zip client**: `./gradlew buildInstaller` first runs `clientFolder`, then packages `build/client` into the .exe. So the installed app matches what you get from zipping `build/client`.
+- **Same as zip client**: `./gradlew buildInstaller` first runs `clientFolderWindows`, then packages `build/client` into the .exe. So the installed app matches what you get from zipping `build/client`.
 - **Run at startup**: Optional task "Run TrustSign when Windows starts" creates a shortcut in the Startup folder.
 - **Shortcuts**: Start menu and optional desktop shortcut to run TrustSign.
 
@@ -30,7 +30,10 @@ The installer is created at:
 
 **`build/installer/TrustSign-0.1.0-Setup.exe`**
 
-If you don’t have Inno Setup, you can still give clients the same content as a zip: run `./gradlew clientFolder` and zip `build/client`.
+If you don’t have Inno Setup, you can still give clients the same content as a zip:
+
+- Cross-platform package (requires Java on client): `./gradlew clientFolderCrossPlatform`
+- Windows package with bundled JRE: `./gradlew clientFolderWindows`
 
 ## What to give the client
 
@@ -51,3 +54,41 @@ For production deployments, start from `config/config.production.json` (project 
   - `server.maxConcurrentSigningOperations`
 - Keep `server.enableDebugEndpoints` as `false`.
 - Keep `pkcs11.pin` as `null` and provide PIN through `TRUSTSIGN_TOKEN_PIN`.
+
+
+
+Use either Gradle property (-P...) or environment variable before running the task.
+
+Option 1: pass directly with -P (easy one-time)
+macOS package:
+./gradlew clientFolderMac -PmacJreSha256="<your-mac-jre-sha256>"
+Linux package:
+./gradlew clientFolderLinux -PlinuxJreSha256="<your-linux-jre-sha256>"
+Option 2: export env vars (good for repeated runs / CI)
+export TRUSTSIGN_MAC_JRE_SHA256="<your-mac-jre-sha256>"
+export TRUSTSIGN_LINUX_JRE_SHA256="<your-linux-jre-sha256>"
+Then run:
+
+./gradlew clientFolderMac
+./gradlew clientFolderLinux
+In CI (GitHub Actions example)
+Store both hashes as secrets, then:
+
+env:
+  TRUSTSIGN_MAC_JRE_SHA256: ${{ secrets.TRUSTSIGN_MAC_JRE_SHA256 }}
+  TRUSTSIGN_LINUX_JRE_SHA256: ${{ secrets.TRUSTSIGN_LINUX_JRE_SHA256 }}
+and run Gradle tasks normally.
+
+How to get the SHA256 value
+From terminal after download URL (or file):
+
+macOS/Linux:
+shasum -a 256 "<file>"
+Use the first hex string as <sha256>.
+Exactly — it downloads first, then needs the checksum for verification.
+
+You can generate hash from the downloaded file (now present in build/jre-mac/).
+
+Use this:
+
+./gradlew printSha256 -Pfile="build/jre-mac/temurin17-jre-mac-x64.tar.gz"
