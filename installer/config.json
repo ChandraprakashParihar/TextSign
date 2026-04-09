@@ -2,8 +2,9 @@
   "port": 31927,
   "allowedOrigins": ["http://localhost:3000"],
   "server": {
-    "jettyMaxThreads": 400,
-    "jettyMinThreads": 16,
+    "maxThreads": 400,
+    "minSpareThreads": 16,
+    "threadIdleTimeoutMs": 120000,
     "acceptQueueSize": 8192,
     "maxTcpConnections": 0,
     "maxConcurrentSigningOperations": 24,

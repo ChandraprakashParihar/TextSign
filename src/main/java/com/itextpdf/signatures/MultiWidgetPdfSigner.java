@@ -65,7 +65,25 @@ public final class MultiWidgetPdfSigner extends PdfSigner {
       appearanceXo.makeIndirect(document);
     }
 
-    for (int i = 0; i < widgetPages1Based.size(); i++) {
+    // Create the primary widget first; let acroForm.addField(sigField, primaryPage)
+    // attach it to the page to avoid duplicate attach/remove churn on page 1.
+    int primaryPage = widgetPages1Based.get(0);
+    Rectangle primaryRect = widgetRects.get(0);
+    PdfWidgetAnnotation primaryWidget = new PdfWidgetAnnotation(primaryRect);
+    primaryWidget.setFlags(PdfAnnotation.PRINT | PdfAnnotation.LOCKED);
+    primaryWidget.setPage(document.getPage(primaryPage));
+    if (appearance.isInvisible()) {
+      primaryWidget.remove(PdfName.AP);
+    } else {
+      PdfDictionary apDict = new PdfDictionary();
+      apDict.put(PdfName.N, appearanceXo.getPdfObject());
+      primaryWidget.put(PdfName.AP, apDict);
+    }
+    sigField.addKid(primaryWidget);
+    primaryWidget.makeIndirect(document);
+
+    // Additional widgets are attached directly to their pages.
+    for (int i = 1; i < widgetPages1Based.size(); i++) {
       int pageNum = widgetPages1Based.get(i);
       Rectangle rect = widgetRects.get(i);
       PdfWidgetAnnotation widget = new PdfWidgetAnnotation(rect);
@@ -82,8 +100,6 @@ public final class MultiWidgetPdfSigner extends PdfSigner {
       widget.makeIndirect(document);
       document.getPage(pageNum).addAnnotation(widget);
     }
-
-    int primaryPage = widgetPages1Based.get(0);
     acroForm.addField(sigField, document.getPage(primaryPage));
 
     if (acroForm.getPdfObject().isIndirect()) {

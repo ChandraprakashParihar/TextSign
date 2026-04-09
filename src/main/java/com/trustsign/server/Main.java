@@ -3,12 +3,13 @@ package com.trustsign.server;
 import com.trustsign.core.AgentConfig;
 import com.trustsign.core.ConfigLoader;
 import com.trustsign.core.LicenceEnforcer;
-import org.eclipse.jetty.server.Server;
+import org.springframework.boot.SpringApplication;
 
 import java.io.File;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.security.PublicKey;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,23 +41,15 @@ public final class Main {
       System.err.println("Licence check failed: " + licenceResult.message());
       System.exit(1);
     }
-
-    Server server = ServerBootstrap.buildServer(cfg, licenceEnforcer);
-    server.setStopTimeout(AgentConfig.ServerConfig.gracefulStopTimeoutMsOrDefault(cfg.server()));
-    server.start();
-
-    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-      LOG.info("Shutting down TrustSign server...");
-      try {
-        server.stop();
-      } catch (Exception e) {
-        LOG.warn("Error stopping server", e);
-      }
-    }));
-
-    LOG.info("TrustSign API at http://0.0.0.0:{}/v1 — for very high load run many instances behind a load balancer; each JVM is bounded by signing hardware throughput.",
-        cfg.portOrDefault());
-    server.join();
+    System.setProperty("trustsign.config.path", configFile.getAbsolutePath());
+    SpringApplication app = new SpringApplication(TrustSignSpringApplication.class);
+    app.setDefaultProperties(Map.of(
+        "server.port", String.valueOf(cfg.portOrDefault()),
+        "server.shutdown", "graceful",
+        "spring.lifecycle.timeout-per-shutdown-phase",
+        AgentConfig.ServerConfig.gracefulStopTimeoutMsOrDefault(cfg.server()) + "ms"));
+    app.run(args);
+    LOG.info("TrustSign API at http://0.0.0.0:{}/v1 — Spring Boot MVC", cfg.portOrDefault());
   }
 
   /**
@@ -136,7 +129,7 @@ public final class Main {
     }
   }
 
-  private static LicenceEnforcer createLicenceEnforcer(File configFile) throws Exception {
+  static LicenceEnforcer createLicenceEnforcer(File configFile) throws Exception {
     Path configDir = configFile.getParentFile() != null ? configFile.getParentFile().toPath() : Path.of(".");
     Path licencePath = configDir.resolve("licence.json");
     Path statePath = configDir.resolve(".licence-state");

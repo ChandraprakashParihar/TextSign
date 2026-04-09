@@ -43,7 +43,7 @@ public record AgentConfig(
      */
     @JsonProperty(required = false) List<String> allowedClientIps,
     /**
-     * Optional. Jetty threading, TCP limits, multipart sizes, and signing concurrency.
+     * Optional. Server threading, TCP limits, multipart sizes, and signing concurrency.
      * Very large concurrent user counts require many JVM instances behind a load balancer; tune {@code maxConcurrentSigningOperations}
      * per HSM throughput and set {@code maxTcpConnections} to protect each instance.
      */
@@ -137,12 +137,12 @@ public record AgentConfig(
    * Production server limits. All fields optional; static {@code *OrDefault} helpers apply safe bounds.
    */
   public record ServerConfig(
-      @JsonProperty(required = false) Integer jettyMaxThreads,
-      @JsonProperty(required = false) Integer jettyMinThreads,
-      @JsonProperty(required = false) Integer jettyThreadIdleTimeoutMs,
+      @JsonProperty(required = false) Integer maxThreads,
+      @JsonProperty(required = false) Integer minSpareThreads,
+      @JsonProperty(required = false) Integer threadIdleTimeoutMs,
       @JsonProperty(required = false) Integer acceptQueueSize,
       @JsonProperty(required = false) Integer connectorIdleTimeoutMs,
-      /** When set and positive, {@link org.eclipse.jetty.server.ConnectionLimit} is applied. Zero or omitted = no global TCP cap. */
+      /** When set and positive, server connector max connections are capped. Zero or omitted = no global TCP cap. */
       @JsonProperty(required = false) Integer maxTcpConnections,
       /** Max concurrent PKCS#11 / signing requests. Omitted defaults to 16; {@code 0} means unlimited (use only with external throttling). */
       @JsonProperty(required = false) Integer maxConcurrentSigningOperations,
@@ -154,19 +154,22 @@ public record AgentConfig(
       @JsonProperty(required = false) Long gracefulStopTimeoutMs
   ) {
 
-    public static int jettyMaxThreadsOrDefault(ServerConfig c) {
-      int v = c == null || c.jettyMaxThreads() == null ? 250 : c.jettyMaxThreads();
+    public static int maxThreadsOrDefault(ServerConfig c) {
+      Integer configured = c == null ? null : c.maxThreads();
+      int v = configured == null ? 250 : configured;
       return Math.min(Math.max(v, 8), 20_000);
     }
 
-    public static int jettyMinThreadsOrDefault(ServerConfig c) {
-      int max = jettyMaxThreadsOrDefault(c);
-      int v = c == null || c.jettyMinThreads() == null ? Math.min(10, max) : c.jettyMinThreads();
+    public static int minSpareThreadsOrDefault(ServerConfig c) {
+      int max = maxThreadsOrDefault(c);
+      Integer configured = c == null ? null : c.minSpareThreads();
+      int v = configured == null ? Math.min(10, max) : configured;
       return Math.min(Math.max(v, 1), max);
     }
 
-    public static int jettyThreadIdleTimeoutMsOrDefault(ServerConfig c) {
-      int v = c == null || c.jettyThreadIdleTimeoutMs() == null ? 60_000 : c.jettyThreadIdleTimeoutMs();
+    public static int threadIdleTimeoutMsOrDefault(ServerConfig c) {
+      Integer configured = c == null ? null : c.threadIdleTimeoutMs();
+      int v = configured == null ? 60_000 : configured;
       return Math.min(Math.max(v, 1000), 600_000);
     }
 

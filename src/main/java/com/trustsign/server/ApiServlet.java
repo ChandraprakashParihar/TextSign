@@ -21,7 +21,6 @@ import com.trustsign.core.TextVerifyService;
 import com.trustsign.core.CertificateValidator;
 import com.trustsign.core.LicenceEnforcer;
 import com.trustsign.hsm.HsmPkcs11ConfigurationService;
-import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.File;
@@ -49,7 +48,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.regex.Pattern;
 
-public final class ApiServlet extends HttpServlet {
+public final class ApiServlet {
   private static final Logger LOG = LoggerFactory.getLogger(ApiServlet.class);
   private static final Pattern SAFE_FILENAME = Pattern.compile("[^a-zA-Z0-9._-]");
 
@@ -560,8 +559,7 @@ public final class ApiServlet extends HttpServlet {
     return java.util.List.of(0);
   }
 
-  @Override
-  protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+  public void handleGet(HttpServletRequest req, HttpServletResponse resp, String forcedPath) throws IOException {
     final String rid = requestId(req);
     final String ctx = logCtx(req, rid);
     final long startMs = System.currentTimeMillis();
@@ -574,7 +572,7 @@ public final class ApiServlet extends HttpServlet {
       writeJson(resp, 403, Map.of("error", "Licence", "message", licence.message()));
       return;
     }
-    String path = normPath(req.getPathInfo());
+    String path = forcedPath != null ? normPath(forcedPath) : normPath(req.getPathInfo());
 
     try {
       switch (path) {
@@ -670,8 +668,7 @@ public final class ApiServlet extends HttpServlet {
     }
   }
 
-  @Override
-  protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+  public void handlePost(HttpServletRequest req, HttpServletResponse resp, String forcedPath) throws IOException {
     final String rid = requestId(req);
     final String ctx = logCtx(req, rid);
     final long startMs = System.currentTimeMillis();
@@ -684,7 +681,7 @@ public final class ApiServlet extends HttpServlet {
       writeJson(resp, 403, Map.of("error", "Licence", "message", licence.message()));
       return;
     }
-    String path = normPath(req.getPathInfo());
+    String path = forcedPath != null ? normPath(forcedPath) : normPath(req.getPathInfo());
 
     try {
       switch (path) {

@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.PdfSignerServiceTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-09T06:47:52.689Z" hostname="Chandras-Mac-mini.local" time="0.496">
+<testsuite name="com.trustsign.core.PdfSignerServiceTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-09T08:38:12.546Z" hostname="Chandras-Mac-mini.local" time="0.382">
   <properties/>
-  <testcase name="signatureContentsLookSigned_requiresSignedDataOid()" classname="com.trustsign.core.PdfSignerServiceTest" time="0.009"/>
-  <testcase name="multiPageSigning_placesWidgetRectsOnAllRequestedPages()" classname="com.trustsign.core.PdfSignerServiceTest" time="0.486"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[Apr 09, 2026 12:17:53 PM com.trustsign.core.PdfSignerService signPdf
-INFO: Starting PDF signing. pages=3, finalVersion=false, tsaEnabled=false
-Apr 09, 2026 12:17:53 PM com.trustsign.core.PdfSignerService signPdf
-INFO: PDF signing completed in 107 ms. timestamped=false, tsaFallback=false
-]]></system-err>
+  <testcase name="signatureContentsLookSigned_requiresSignedDataOid()" classname="com.trustsign.core.PdfSignerServiceTest" time="0.026"/>
+  <testcase name="multiPageSigning_placesWidgetRectsOnAllRequestedPages()" classname="com.trustsign.core.PdfSignerServiceTest" time="0.354"/>
+  <system-out><![CDATA[Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+14:08:12.822 [Test worker] INFO com.trustsign.core.PdfSignerService -- Starting PDF signing. pages=3, finalVersion=false, tsaEnabled=false
+14:08:12.925 [Test worker] INFO com.trustsign.core.PdfSignerService -- PDF signing completed in 104 ms. timestamped=false, tsaFallback=false
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
 </testsuite>

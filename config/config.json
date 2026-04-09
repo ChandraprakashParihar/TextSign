@@ -6,8 +6,9 @@
   ],
   "logFilePath": "/Users/jainnibha/output/logs/trustsign/app.log",
   "server": {
-    "jettyMaxThreads": 400,
-    "jettyMinThreads": 16,
+    "maxThreads": 400,
+    "minSpareThreads": 16,
+    "threadIdleTimeoutMs": 120000,
     "acceptQueueSize": 8192,
     "connectorIdleTimeoutMs": 120000,
     "maxTcpConnections": 0,
