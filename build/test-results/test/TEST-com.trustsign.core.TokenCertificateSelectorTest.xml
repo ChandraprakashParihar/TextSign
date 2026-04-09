@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.core.TokenCertificateSelectorTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-08T07:47:21.249Z" hostname="Chandras-Mac-mini.local" time="0.33">
+<testsuite name="com.trustsign.core.TokenCertificateSelectorTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-08T12:48:54.467Z" hostname="Chandras-Mac-mini.local" time="0.325">
   <properties/>
-  <testcase name="signerCertificatesMatch_differentSerialDoesNotMatchUnlessSamePublicKey()" classname="com.trustsign.core.TokenCertificateSelectorTest" time="0.273"/>
-  <testcase name="signerCertificatesMatch_serialAndIssuer()" classname="com.trustsign.core.TokenCertificateSelectorTest" time="0.057"/>
+  <testcase name="signerCertificatesMatch_differentSerialDoesNotMatchUnlessSamePublicKey()" classname="com.trustsign.core.TokenCertificateSelectorTest" time="0.178"/>
+  <testcase name="signerCertificatesMatch_serialAndIssuer()" classname="com.trustsign.core.TokenCertificateSelectorTest" time="0.147"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>
