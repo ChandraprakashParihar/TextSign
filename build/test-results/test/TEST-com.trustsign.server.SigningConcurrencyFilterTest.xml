@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.trustsign.server.SigningConcurrencyFilterTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-04-08T12:48:54.794Z" hostname="Chandras-Mac-mini.local" time="0.004">
+<testsuite name="com.trustsign.server.SigningConcurrencyFilterTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-04-09T05:56:15.031Z" hostname="Chandras-Mac-mini.local" time="0.004">
   <properties/>
-  <testcase name="requiresSlot_matchesSigningPosts()" classname="com.trustsign.server.SigningConcurrencyFilterTest" time="0.004"/>
+  <testcase name="requiresSlot_matchesSigningPosts()" classname="com.trustsign.server.SigningConcurrencyFilterTest" time="0.003"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>
