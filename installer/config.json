@@ -1,6 +1,12 @@
 {
   "port": 31927,
   "allowedOrigins": ["http://localhost:3000"],
+  "logging": {
+    "directory": "logs",
+    "level": "INFO",
+    "consoleEnabled": true,
+    "failOnError": true
+  },
   "server": {
     "maxThreads": 400,
     "minSpareThreads": 16,

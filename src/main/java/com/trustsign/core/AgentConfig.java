@@ -106,6 +106,12 @@ public record AgentConfig(
    * Application logging settings. File logging is appended (never overwritten).
    */
   public record LoggingConfig(
+      /**
+       * Log directory (absolute or relative to the config file directory).
+       * When set, the log file is {@code <directory>/application.log} (parent dirs created at runtime).
+       * Ignored when {@link #filePath} is set or top-level {@code logFilePath} is set.
+       */
+      @JsonProperty(required = false) String directory,
       /** Absolute or relative to config directory. */
       @JsonProperty(required = false) String filePath,
       /** When true, errors initializing file logging will fail startup. */

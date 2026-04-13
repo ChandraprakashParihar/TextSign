@@ -39,6 +39,8 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -189,6 +191,57 @@ public final class ApiServlet {
       throw new IllegalArgumentException("outputDir is not writable: " + dir.getAbsolutePath());
     }
     return dir;
+  }
+
+  private static Path resolveConfiguredLogDirectory(AgentConfig cfg, File configFile) {
+    String path = firstNonBlank(
+        cfg != null && cfg.logging() != null ? cfg.logging().filePath() : null,
+        cfg != null ? cfg.logFilePath() : null);
+    if (path != null && !path.isBlank()) {
+      String trimmed = path.trim();
+      Path resolved = resolveAgainstConfigDir(trimmed, configFile);
+      if (trimmed.endsWith("/") || trimmed.endsWith("\\") || (Files.exists(resolved) && Files.isDirectory(resolved))) {
+        return resolved.toAbsolutePath().normalize();
+      }
+      Path parent = resolved.getParent();
+      return (parent != null ? parent : resolveAgainstConfigDir("logs", configFile)).toAbsolutePath().normalize();
+    }
+
+    String logDir = cfg != null && cfg.logging() != null ? cfg.logging().directory() : null;
+    if (logDir != null && !logDir.isBlank()) {
+      return resolveAgainstConfigDir(logDir.trim(), configFile).toAbsolutePath().normalize();
+    }
+    return resolveAgainstConfigDir("logs", configFile).toAbsolutePath().normalize();
+  }
+
+  private static Path resolveSafeLogFile(Path allowedLogDir, String fileName) {
+    Path base = allowedLogDir.toAbsolutePath().normalize();
+    Path resolved = base.resolve(fileName).normalize().toAbsolutePath();
+    if (!resolved.startsWith(base)) {
+      throw new SecurityException("Invalid log file path");
+    }
+    return resolved;
+  }
+
+  private static Path resolveAgainstConfigDir(String path, File configFile) {
+    Path p = Paths.get(path);
+    if (p.isAbsolute()) {
+      return p.normalize();
+    }
+    Path base = (configFile != null && configFile.getParentFile() != null)
+        ? configFile.getParentFile().toPath()
+        : Paths.get(System.getProperty("user.dir", "."));
+    return base.resolve(p).normalize();
+  }
+
+  private static String firstNonBlank(String a, String b) {
+    if (a != null && !a.isBlank()) {
+      return a.trim();
+    }
+    if (b != null && !b.isBlank()) {
+      return b.trim();
+    }
+    return null;
   }
 
   /**
@@ -661,6 +714,40 @@ public final class ApiServlet {
               "libraryPath", loaded.libraryPath(),
               "certCount", certs.size(),
               "certificates", certs));
+          return;
+        }
+        case "/logs" -> {
+          // requireSession(req);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) {
+            return;
+          }
+          String dateParam = req.getParameter("date");
+          if (dateParam == null || dateParam.isBlank()) {
+            writeJson(resp, 400, Map.of("error", "Missing required query parameter: date (YYYY-MM-DD)"));
+            return;
+          }
+          LocalDate date;
+          try {
+            date = LocalDate.parse(dateParam.trim());
+          } catch (DateTimeParseException e) {
+            writeJson(resp, 400, Map.of("error", "Invalid date format. Use YYYY-MM-DD"));
+            return;
+          }
+          File cfgFile = resolveConfigFile();
+          Path logDir = resolveConfiguredLogDirectory(cfg, cfgFile);
+          String fileName = "application-" + date + ".log";
+          Path logFile = resolveSafeLogFile(logDir, fileName);
+          if (!Files.isRegularFile(logFile)) {
+            writeJson(resp, 404, Map.of("error", "Log file not found", "file", fileName));
+            return;
+          }
+
+          resp.setStatus(200);
+          resp.setContentType("application/octet-stream");
+          resp.setHeader("Content-Disposition", "attachment; filename=\"" + sanitizeFilename(fileName) + "\"");
+          resp.setContentLengthLong(Files.size(logFile));
+          Files.copy(logFile, resp.getOutputStream());
           return;
         }
         default -> {

@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.io.IOException;
 
 @RestController
-@RequestMapping("/v1")
+@RequestMapping("/pki")
 public class V1Controller {
   private final ApiServlet api;
 
@@ -41,6 +41,11 @@ public class V1Controller {
   @GetMapping("/certificates")
   public void certificates(HttpServletRequest req, HttpServletResponse resp) throws IOException {
     api.handleGet(req, resp, "/certificates");
+  }
+
+  @GetMapping("/logs")
+  public void logs(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handleGet(req, resp, "/logs");
   }
 
   @PostMapping("/session")

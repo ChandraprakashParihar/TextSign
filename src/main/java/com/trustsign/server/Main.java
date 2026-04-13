@@ -15,7 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public final class Main {
-  private static final Logger LOG = LoggerFactory.getLogger(Main.class);
   private static final String BUILD_TIME_RESOURCE = "/com/trustsign/build-time.txt";
   private static final String LICENCE_PUBLIC_KEY_RESOURCE = "/com/trustsign/licence-public-key.pem";
 
@@ -28,11 +27,11 @@ public final class Main {
       System.exit(1);
     }
 
-    LOG.info("Using config: {}", configFile.getAbsolutePath());
-
     AgentConfig cfg = ConfigLoader.load(configFile);
-    // Initialize file/console logging as early as possible.
+    // Initialize Logback from config before any SLF4J logging or other business logic.
     LoggingInitializer.initFromConfig(cfg, configFile);
+    Logger log = LoggerFactory.getLogger(Main.class);
+    log.info("Using config: {}", configFile.getAbsolutePath());
     applyTruststoreConfig(configFile, cfg);
     applyCertificateValidationConfig(cfg);
 
@@ -51,7 +50,7 @@ public final class Main {
         "spring.lifecycle.timeout-per-shutdown-phase",
         AgentConfig.ServerConfig.gracefulStopTimeoutMsOrDefault(cfg.server()) + "ms"));
     app.run(args);
-    LOG.info("TrustSign API at http://0.0.0.0:{}/v1 — Spring Boot MVC", cfg.portOrDefault());
+    log.info("TrustSign API at http://0.0.0.0:{}/pki — Spring Boot MVC", cfg.portOrDefault());
   }
 
   /**

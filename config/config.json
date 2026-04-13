@@ -4,7 +4,12 @@
   "allowedClientIps": [
     "127.0.0.1"
   ],
-  "logFilePath": "/Users/jainnibha/output/logs/trustsign/app.log",
+  "logFilePath": "/Users/jainnibha/output/logs/trustsign/application.log",
+  "logging": {
+    "directory": "logs",
+    "consoleEnabled": true,
+    "failOnError": true
+  },
   "server": {
     "maxThreads": 400,
     "minSpareThreads": 32,
@@ -52,29 +57,6 @@
     ],
     "macCandidates": ["/usr/local/lib/libcastle_v2.1.0.0.dylib"],
     "linuxCandidates": []
-  },
-  "hsm": {
-    "preferredLibrary": null,
-    "slotProbeCount": 32,
-    "windowsCandidates": [
-    ],
-    "macCandidates": [],
-    "linuxCandidates": []
-  },
-  "tsa": {
-    "url": "http://timestamp.digicert.com",
-    "hashAlgorithm": "SHA-256",
-    "failOnError": true,
-    "connectTimeoutMs": 10000,
-    "readTimeoutMs": 15000
-  },
-  "ltv": {
-    "enabled": true,
-    "failOnMissingRevocationData": true,
-    "ocspConnectTimeoutMs": 10000,
-    "ocspReadTimeoutMs": 15000,
-    "crlConnectTimeoutMs": 10000,
-    "crlReadTimeoutMs": 15000
   }
 }
 

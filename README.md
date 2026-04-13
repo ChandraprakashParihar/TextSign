@@ -139,3 +139,34 @@ Then:
   -PmacJreSha256=<sha256> \
   -PmacSignIdentity="Developer ID Application: Your Name (TEAMID)" \
   -PmacNotaryProfile=<profile>
+
+"logging": {
+  "directory": "logs",
+  "level": "INFO",
+  "consoleEnabled": true,
+  "failOnError": false
+}
+"logFilePath": "/Users/jainnibha/output/logs/trustsign/app.log",
+  "hsm": {
+    "preferredLibrary": null,
+    "slotProbeCount": 32,
+    "windowsCandidates": [
+    ],
+    "macCandidates": [],
+    "linuxCandidates": []
+  },
+  "tsa": {
+    "url": "http://timestamp.digicert.com",
+    "hashAlgorithm": "SHA-256",
+    "failOnError": true,
+    "connectTimeoutMs": 10000,
+    "readTimeoutMs": 15000
+  },
+  "ltv": {
+    "enabled": true,
+    "failOnMissingRevocationData": true,
+    "ocspConnectTimeoutMs": 10000,
+    "ocspReadTimeoutMs": 15000,
+    "crlConnectTimeoutMs": 10000,
+    "crlReadTimeoutMs": 15000
+  }
