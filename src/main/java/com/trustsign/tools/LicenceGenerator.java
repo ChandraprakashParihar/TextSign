@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Base64;
+import java.util.Objects;
 
 /**
  * Vendor-only tool: generate RSA key pair for signing licences, and sign a licence file.
@@ -31,20 +32,21 @@ public final class LicenceGenerator {
       printUsage();
       System.exit(1);
     }
-    String cmd = args[0].toLowerCase();
+    String[] cliArgs = Objects.requireNonNull(args);
+    String cmd = cliArgs[0].toLowerCase();
     switch (cmd) {
       case "genkey" -> {
-        String outDir = args.length >= 2 ? args[1] : ".";
+        String outDir = cliArgs.length >= 2 ? cliArgs[1] : ".";
         genkey(Path.of(outDir));
       }
       case "sign" -> {
-        if (args.length < 3) {
+        if (cliArgs.length < 3) {
           System.err.println("sign requires: durationDays privateKeyPath [outputPath]");
           System.exit(1);
         }
-        int days = Integer.parseInt(args[1]);
-        Path keyPath = Path.of(args[2]);
-        Path outPath = args.length >= 4 ? Path.of(args[3]) : Path.of("licence.json");
+        int days = Integer.parseInt(cliArgs[1]);
+        Path keyPath = Path.of(cliArgs[2]);
+        Path outPath = cliArgs.length >= 4 ? Path.of(cliArgs[3]) : Path.of("licence.json");
         sign(days, keyPath, outPath);
       }
       default -> {

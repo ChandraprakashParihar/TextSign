@@ -13,10 +13,12 @@ import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
+import org.springframework.lang.NonNull;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.io.File;
+import java.util.Objects;
 
 @Configuration
 public class SpringServerConfig {
@@ -120,12 +122,13 @@ public class SpringServerConfig {
   public WebMvcConfigurer corsConfigurer(AgentConfig cfg) {
     return new WebMvcConfigurer() {
       @Override
-      public void addCorsMappings(CorsRegistry registry) {
+      public void addCorsMappings(@NonNull CorsRegistry registry) {
         if (cfg.allowedOrigins() == null || cfg.allowedOrigins().isEmpty()) {
           return;
         }
+        String[] allowedOrigins = Objects.requireNonNull(cfg.allowedOrigins().toArray(new String[0]));
         registry.addMapping("/v1/**")
-            .allowedOrigins(cfg.allowedOrigins().toArray(String[]::new))
+            .allowedOrigins(allowedOrigins)
             .allowedMethods("GET", "POST", "OPTIONS")
             .allowedHeaders("*");
       }

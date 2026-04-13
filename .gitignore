@@ -3,7 +3,9 @@
 # **/licence-private-key.pem
 # build/tools-keys/
 
-# # Build
-# build/
-# .gradle/
-# *.class
+# Build outputs and IDE compile artifacts
+build/
+.gradle/
+bin/
+com/
+*.class

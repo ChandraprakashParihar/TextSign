@@ -17,6 +17,7 @@ import com.itextpdf.kernel.pdf.annot.PdfWidgetAnnotation;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * One PKCS#7 signature field with a visible widget on each selected page, sharing the same normal
@@ -76,7 +77,7 @@ public final class MultiWidgetPdfSigner extends PdfSigner {
       primaryWidget.remove(PdfName.AP);
     } else {
       PdfDictionary apDict = new PdfDictionary();
-      apDict.put(PdfName.N, appearanceXo.getPdfObject());
+      apDict.put(PdfName.N, Objects.requireNonNull(appearanceXo).getPdfObject());
       primaryWidget.put(PdfName.AP, apDict);
     }
     sigField.addKid(primaryWidget);
@@ -93,7 +94,7 @@ public final class MultiWidgetPdfSigner extends PdfSigner {
         widget.remove(PdfName.AP);
       } else {
         PdfDictionary apDict = new PdfDictionary();
-        apDict.put(PdfName.N, appearanceXo.getPdfObject());
+        apDict.put(PdfName.N, Objects.requireNonNull(appearanceXo).getPdfObject());
         widget.put(PdfName.AP, apDict);
       }
       sigField.addKid(widget);
