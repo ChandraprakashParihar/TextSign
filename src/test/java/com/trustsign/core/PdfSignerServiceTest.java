@@ -124,12 +124,13 @@ class PdfSignerServiceTest {
         "computeSignatureWidgetRect",
         PDDocument.class,
         int.class,
-        boolean.class);
+        boolean.class,
+        PdfSignerService.SignaturePlacement.class);
     m.setAccessible(true);
     List<PDRectangle> out = new ArrayList<>();
     try (PDDocument doc = PDDocument.load(unsignedPdf)) {
       for (int p : pages0Based) {
-        out.add((PDRectangle) m.invoke(null, doc, p, false));
+        out.add((PDRectangle) m.invoke(null, doc, p, false, PdfSignerService.SignaturePlacement.DEFAULT));
       }
     }
     return out;

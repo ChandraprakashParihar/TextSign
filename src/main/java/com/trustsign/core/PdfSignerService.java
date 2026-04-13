@@ -92,23 +92,55 @@ public final class PdfSignerService {
       .ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'")
       .withZone(ZoneOffset.UTC);
 
+  private static final float DEFAULT_COORDINATE_WIDTH = 150f;
+  private static final float DEFAULT_COORDINATE_HEIGHT = 50f;
+  private static final float DEFAULT_EDGE_MARGIN = 24f;
+
+  public enum CoordinateOverflowMode {
+    ADJUST,
+    ERROR
+  }
+
+  public enum CoordinateOrigin {
+    BOTTOM_LEFT,
+    TOP_LEFT
+  }
+
+  public record SignaturePlacement(
+      Float x,
+      Float y,
+      Float width,
+      Float height,
+      CoordinateOverflowMode overflowMode,
+      CoordinateOrigin origin) {
+    public static final SignaturePlacement DEFAULT = new SignaturePlacement(
+        null, null, null, null, CoordinateOverflowMode.ADJUST, CoordinateOrigin.BOTTOM_LEFT);
+
+    public boolean hasCustomCoordinates() {
+      return x != null && y != null;
+    }
+  }
+
   public record PdfSigningOptions(
       boolean finalVersion,
       boolean allowResignFinalVersion,
       TsaClient.Config tsaConfig,
-      LtvEnabler.Config ltvConfig) {
+      LtvEnabler.Config ltvConfig,
+      SignaturePlacement signaturePlacement) {
     public static final PdfSigningOptions DEFAULT = new PdfSigningOptions(
         false,
         false,
         TsaClient.Config.DISABLED,
-        LtvEnabler.Config.DISABLED);
+        LtvEnabler.Config.DISABLED,
+        SignaturePlacement.DEFAULT);
 
     public PdfSigningOptions(boolean finalVersion) {
-      this(finalVersion, false, TsaClient.Config.DISABLED, LtvEnabler.Config.DISABLED);
+      this(finalVersion, false, TsaClient.Config.DISABLED, LtvEnabler.Config.DISABLED, SignaturePlacement.DEFAULT);
     }
 
     public PdfSigningOptions(boolean finalVersion, boolean allowResignFinalVersion) {
-      this(finalVersion, allowResignFinalVersion, TsaClient.Config.DISABLED, LtvEnabler.Config.DISABLED);
+      this(finalVersion, allowResignFinalVersion, TsaClient.Config.DISABLED, LtvEnabler.Config.DISABLED,
+          SignaturePlacement.DEFAULT);
     }
   }
 
@@ -393,8 +425,9 @@ public final class PdfSignerService {
       boolean priorSigs = documentHasCompletedPriorSignatures(doc);
       List<Integer> resolved = resolveStampPages(pageCount, stampPageIndices);
       List<PDRectangle> rects = new ArrayList<>(resolved.size());
+      SignaturePlacement placement = opts.signaturePlacement() == null ? SignaturePlacement.DEFAULT : opts.signaturePlacement();
       for (int pageIndex : resolved) {
-        rects.add(computeSignatureWidgetRect(doc, pageIndex, opts.finalVersion()));
+        rects.add(computeSignatureWidgetRect(doc, pageIndex, opts.finalVersion(), placement));
       }
       return new PreSignState(resolved, rects, priorSigs);
     }
@@ -1144,26 +1177,99 @@ public final class PdfSignerService {
     }
   }
 
-  private static PDRectangle computeSignatureWidgetRect(PDDocument doc, int pageIndex, boolean finalVersion) {
+  private static PDRectangle computeSignatureWidgetRect(
+      PDDocument doc,
+      int pageIndex,
+      boolean finalVersion,
+      SignaturePlacement placement) throws InvalidPdfException {
     PDPage page = doc.getPage(pageIndex);
     PDRectangle visible = page.getCropBox();
     float vx = visible.getLowerLeftX();
     float vy = visible.getLowerLeftY();
     float vW = visible.getWidth();
     float vH = visible.getHeight();
-    float boxWidth = Math.max(190f, Math.min((float) (vW * 0.26), 250f));
-    float boxHeight = finalVersion
-        ? Math.max(78f, Math.min((float) (vH * 0.12), 108f))
-        : Math.max(56f, Math.min((float) (vH * 0.075), 78f));
-    float margin = 24f;
-    float x = vx + vW - boxWidth - margin;
-    float y = vy + margin;
+    SignaturePlacement effectivePlacement = placement == null ? SignaturePlacement.DEFAULT : placement;
+    float boxWidth = effectivePlacement.width() != null
+        ? effectivePlacement.width()
+        : (effectivePlacement.hasCustomCoordinates()
+            ? DEFAULT_COORDINATE_WIDTH
+            : Math.max(190f, Math.min((float) (vW * 0.26), 250f)));
+    float boxHeight = effectivePlacement.height() != null
+        ? effectivePlacement.height()
+        : (effectivePlacement.hasCustomCoordinates()
+            ? DEFAULT_COORDINATE_HEIGHT
+            : (finalVersion
+                ? Math.max(78f, Math.min((float) (vH * 0.12), 108f))
+                : Math.max(56f, Math.min((float) (vH * 0.075), 78f))));
+    float requestedX = effectivePlacement.hasCustomCoordinates() ? effectivePlacement.x() : vW - boxWidth - DEFAULT_EDGE_MARGIN;
+    float requestedY;
+    if (effectivePlacement.hasCustomCoordinates()) {
+      CoordinateOrigin origin = effectivePlacement.origin() == null ? CoordinateOrigin.BOTTOM_LEFT : effectivePlacement.origin();
+      requestedY = origin == CoordinateOrigin.TOP_LEFT
+          ? Math.max(0f, vH - effectivePlacement.y() - boxHeight)
+          : effectivePlacement.y();
+    } else {
+      requestedY = DEFAULT_EDGE_MARGIN;
+    }
+
+    Rectangle local = calculateSignatureRectangle(requestedX, requestedY, boxWidth, boxHeight, vW, vH);
+    float x = vx + local.getX();
+    float y = vy + local.getY();
+    float w = local.getWidth();
+    float h = local.getHeight();
+    float maxX = vx + vW;
+    float maxY = vy + vH;
+    boolean outside = x < vx || y < vy || (x + w) > maxX || (y + h) > maxY;
+    if (outside) {
+      CoordinateOverflowMode mode = effectivePlacement.overflowMode() == null
+          ? CoordinateOverflowMode.ADJUST
+          : effectivePlacement.overflowMode();
+      if (mode == CoordinateOverflowMode.ERROR) {
+        throw new InvalidPdfException(
+            "Signature rectangle is outside page bounds for page " + (pageIndex + 1) + ". Provide valid coordinates.");
+      }
+      if (w > vW || h > vH) {
+        throw new InvalidPdfException("Signature width/height exceed page bounds for page " + (pageIndex + 1));
+      }
+      x = Math.max(vx, Math.min(x, maxX - w));
+      y = Math.max(vy, Math.min(y, maxY - h));
+    }
+    LOG.info("Signature placement page={} mode={} rect=[x={}, y={}, w={}, h={}] page=[w={}, h={}]",
+        pageIndex + 1,
+        effectivePlacement.hasCustomCoordinates()
+            ? ("custom-" + (effectivePlacement.origin() == CoordinateOrigin.TOP_LEFT ? "top-left" : "bottom-left"))
+            : "default-bottom-right",
+        round2(x), round2(y), round2(w), round2(h), round2(vW), round2(vH));
+
     PDRectangle rect = new PDRectangle();
     rect.setLowerLeftX(x);
     rect.setLowerLeftY(y);
-    rect.setUpperRightX(x + boxWidth);
-    rect.setUpperRightY(y + boxHeight);
+    rect.setUpperRightX(x + w);
+    rect.setUpperRightY(y + h);
     return rect;
+  }
+
+  public static Rectangle calculateSignatureRectangle(
+      float x,
+      float y,
+      float width,
+      float height,
+      float pageWidth,
+      float pageHeight) throws InvalidPdfException {
+    if (x < 0 || y < 0) {
+      throw new InvalidPdfException("x and y must be >= 0");
+    }
+    if (width <= 0 || height <= 0) {
+      throw new InvalidPdfException("width and height must be positive");
+    }
+    if (pageWidth <= 0 || pageHeight <= 0) {
+      throw new InvalidPdfException("Invalid page dimensions");
+    }
+    return new Rectangle(x, y, width, height);
+  }
+
+  private static float round2(float v) {
+    return Math.round(v * 100f) / 100f;
   }
 
   private static List<Integer> resolveStampPages(int pageCount, List<Integer> stampPageIndices)

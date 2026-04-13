@@ -7,6 +7,9 @@ import com.trustsign.core.HsmPdfSignerService;
 import com.trustsign.core.PdfSignerService;
 import com.trustsign.core.PdfSignerService.PdfSigningOptions;
 import com.trustsign.core.PdfSignerService.DocMdpNoChangesLockException;
+import com.trustsign.core.PdfSignerService.SignaturePlacement;
+import com.trustsign.core.PdfSignerService.CoordinateOverflowMode;
+import com.trustsign.core.PdfSignerService.CoordinateOrigin;
 import com.trustsign.core.PdfVerifyService;
 import com.trustsign.core.Pkcs11Token;
 import com.trustsign.core.OsPkcs11Resolver;
@@ -338,11 +341,71 @@ public final class ApiServlet {
   private static PdfSigningOptions pdfSigningOptionsFromMultipart(
       Multipart.Data mp, boolean finalVersion, AgentConfig cfg) {
     boolean allowResign = parseBooleanLoose(readMultipartString(mp, "allowResignFinalVersion", true));
+    SignaturePlacement placement = parseSignaturePlacementFromMultipart(mp);
     return new PdfSigningOptions(
         finalVersion,
         allowResign,
         tsaConfigFromAgentConfig(cfg),
-        ltvConfigFromAgentConfig(cfg));
+        ltvConfigFromAgentConfig(cfg),
+        placement);
+  }
+
+  private static SignaturePlacement parseSignaturePlacementFromMultipart(Multipart.Data mp) {
+    Float x = parseOptionalFloat(readMultipartString(mp, "x", true), "x");
+    Float y = parseOptionalFloat(readMultipartString(mp, "y", true), "y");
+    if ((x == null) != (y == null)) {
+      throw new IllegalArgumentException("Both x and y coordinates are required together");
+    }
+    if (x != null && x < 0) {
+      throw new IllegalArgumentException("x must be greater than or equal to 0");
+    }
+    if (y != null && y < 0) {
+      throw new IllegalArgumentException("y must be greater than or equal to 0");
+    }
+    Float width = parseOptionalFloat(readMultipartString(mp, "width", true), "width");
+    Float height = parseOptionalFloat(readMultipartString(mp, "height", true), "height");
+    if (width != null && width <= 0) {
+      throw new IllegalArgumentException("width must be positive");
+    }
+    if (height != null && height <= 0) {
+      throw new IllegalArgumentException("height must be positive");
+    }
+    String overflowRaw = readMultipartString(mp, "coordinateOverflowMode", true);
+    CoordinateOverflowMode overflowMode = CoordinateOverflowMode.ADJUST;
+    if (overflowRaw != null && !overflowRaw.isBlank()) {
+      String o = overflowRaw.trim().toLowerCase(java.util.Locale.ROOT);
+      if ("adjust".equals(o)) {
+        overflowMode = CoordinateOverflowMode.ADJUST;
+      } else if ("error".equals(o)) {
+        overflowMode = CoordinateOverflowMode.ERROR;
+      } else {
+        throw new IllegalArgumentException("Invalid coordinateOverflowMode. Supported values: adjust, error");
+      }
+    }
+    String originRaw = readMultipartString(mp, "coordinateOrigin", true);
+    CoordinateOrigin origin = CoordinateOrigin.BOTTOM_LEFT;
+    if (originRaw != null && !originRaw.isBlank()) {
+      String o = originRaw.trim().toLowerCase(java.util.Locale.ROOT);
+      if ("bottom-left".equals(o) || "bottom_left".equals(o) || "bottomleft".equals(o)) {
+        origin = CoordinateOrigin.BOTTOM_LEFT;
+      } else if ("top-left".equals(o) || "top_left".equals(o) || "topleft".equals(o)) {
+        origin = CoordinateOrigin.TOP_LEFT;
+      } else {
+        throw new IllegalArgumentException("Invalid coordinateOrigin. Supported values: bottom-left, top-left");
+      }
+    }
+    return new SignaturePlacement(x, y, width, height, overflowMode, origin);
+  }
+
+  private static Float parseOptionalFloat(String raw, String fieldName) {
+    if (raw == null || raw.isBlank()) {
+      return null;
+    }
+    try {
+      return Float.parseFloat(raw.trim());
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException(fieldName + " must be a valid number");
+    }
   }
 
   private static TsaClient.Config tsaConfigFromAgentConfig(AgentConfig cfg) {
@@ -1158,7 +1221,13 @@ public final class ApiServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+          PdfSigningOptions pdfOpts;
+          try {
+            pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
 
           File outDirFile = null;
           if (outputPreference.includesFile()) {
@@ -1543,7 +1612,13 @@ public final class ApiServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+          PdfSigningOptions pdfOpts;
+          try {
+            pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
 
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
@@ -1743,7 +1818,13 @@ public final class ApiServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+          PdfSigningOptions pdfOpts;
+          try {
+            pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
 
           if (cfg.hsm() == null) {
             writeJson(resp, 500,
@@ -1862,7 +1943,13 @@ public final class ApiServlet {
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
-          PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+          PdfSigningOptions pdfOpts;
+          try {
+            pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
 
           if (cfg.hsm() == null) {
             writeJson(resp, 500,
