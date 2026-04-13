@@ -355,6 +355,7 @@ public final class PdfSignerService {
         opts.tsaConfig() != null && opts.tsaConfig().enabled());
 
     byte[] bytesToSign = opts.finalVersion() ? applyFinalVersionDocumentMetadata(pdfBytes) : pdfBytes;
+    bytesToSign = ensureAnnotsArrayOnTargetPages(bytesToSign, stampPageIndices);
     PreSignState pre;
     try {
       pre = analyzeInputPdf(bytesToSign, stampPageIndices, opts);
@@ -417,7 +418,7 @@ public final class PdfSignerService {
       byte[] signed = withRetry(() -> {
         try {
           return runDetachedSign(pdfBytes, material, reason, location, pre, opts, digest, signature, tsa);
-        } catch (IOException | GeneralSecurityException ex) {
+        } catch (IOException | GeneralSecurityException | InvalidPdfException ex) {
           throw new RuntimeException(ex);
         }
       });
@@ -432,7 +433,7 @@ public final class PdfSignerService {
             byte[] fallbackSigned = withRetry(() -> {
               try {
                 return runDetachedSign(pdfBytes, material, reason, location, pre, opts, digest, signature, null);
-              } catch (IOException | GeneralSecurityException ex) {
+              } catch (IOException | GeneralSecurityException | InvalidPdfException ex) {
                 throw new RuntimeException(ex);
               }
             });
@@ -464,6 +465,9 @@ public final class PdfSignerService {
           throw new TimestampException("TSA timestamp I/O failed for URL " + tsaUrl + ": " + safeMessage(io), io);
         }
         throw io;
+      }
+      if (c instanceof InvalidPdfException ipe) {
+        throw ipe;
       }
       throw new CryptoSigningException("PKCS#11 signing failed: " + safeMessage(c), c);
     }
@@ -721,7 +725,7 @@ public final class PdfSignerService {
       PdfSigningOptions opts,
       IExternalDigest digest,
       IExternalSignature signature,
-      TSAClientBouncyCastle tsaClient) throws IOException, GeneralSecurityException {
+      TSAClientBouncyCastle tsaClient) throws IOException, GeneralSecurityException, InvalidPdfException {
     try (ByteArrayOutputStream out = new ByteArrayOutputStream();
         PdfReader reader = new PdfReader(new ByteArrayInputStream(pdfBytes))) {
       List<Integer> pages1Based = new ArrayList<>(pre.stampPageIndices0Based().size());
@@ -754,7 +758,119 @@ public final class PdfSignerService {
           tsaClient,
           ESTIMATED_SIGNATURE_SIZE_BYTES,
           PdfSigner.CryptoStandard.CMS);
-      return out.toByteArray();
+      return ensureSignatureWidgetsLinkedToPageAnnots(
+          out.toByteArray(),
+          pre.stampPageIndices0Based());
+    }
+  }
+
+  /**
+   * Some viewers render signature widgets only when each widget reference is
+   * present in its page /Annots array. Ensure every /Sig widget kid is linked.
+   */
+  private static byte[] ensureSignatureWidgetsLinkedToPageAnnots(byte[] signedPdfBytes, List<Integer> expectedPages0Based)
+      throws IOException, InvalidPdfException {
+    try (PDDocument doc = PDDocument.load(signedPdfBytes)) {
+      COSDictionary catalog = doc.getDocumentCatalog().getCOSObject();
+      COSDictionary acroForm = catalog.getCOSDictionary(COSName.ACRO_FORM);
+      if (acroForm == null) {
+        throw new InvalidPdfException("Signed PDF is missing AcroForm");
+      }
+      COSArray fields = acroForm.getCOSArray(COSName.FIELDS);
+      if (fields == null || fields.size() == 0) {
+        throw new InvalidPdfException("Signed PDF contains no form fields");
+      }
+      boolean changed = false;
+      for (int i = 0; i < fields.size(); i++) {
+        COSDictionary fieldDict = asCosDictionary(fields.get(i));
+        if (fieldDict == null || !COSName.SIG.equals(fieldDict.getCOSName(COSName.FT))) {
+          continue;
+        }
+        COSArray kids = fieldDict.getCOSArray(COSName.KIDS);
+        if (kids == null || kids.size() == 0) {
+          continue;
+        }
+        for (int k = 0; k < kids.size(); k++) {
+          COSBase kidRef = kids.get(k);
+          COSDictionary kidDict = asCosDictionary(kidRef);
+          if (kidDict == null || !COSName.getPDFName("Widget").equals(kidDict.getCOSName(COSName.SUBTYPE))) {
+            continue;
+          }
+          COSDictionary pageDict = asCosDictionary(kidDict.getDictionaryObject(COSName.P));
+          if (pageDict == null) {
+            continue;
+          }
+          COSBase annotsBase = pageDict.getDictionaryObject(COSName.ANNOTS);
+          COSArray annots;
+          if (annotsBase instanceof COSArray arr) {
+            annots = arr;
+          } else {
+            annots = new COSArray();
+            pageDict.setItem(COSName.ANNOTS, annots);
+            changed = true;
+          }
+          boolean exists = false;
+          for (int a = 0; a < annots.size(); a++) {
+            COSBase existing = annots.get(a);
+            if (existing == kidRef || asCosDictionary(existing) == kidDict) {
+              exists = true;
+              break;
+            }
+          }
+          if (!exists) {
+            annots.add(kidRef);
+            changed = true;
+          }
+        }
+      }
+      if (!changed) {
+        validateSignatureWidgetCoverage(doc, expectedPages0Based);
+        return signedPdfBytes;
+      }
+      try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+        doc.save(out);
+        byte[] normalized = out.toByteArray();
+        try (PDDocument reloaded = PDDocument.load(normalized)) {
+          validateSignatureWidgetCoverage(reloaded, expectedPages0Based);
+        }
+        return normalized;
+      }
+    }
+  }
+
+  private static void validateSignatureWidgetCoverage(PDDocument doc, List<Integer> expectedPages0Based)
+      throws InvalidPdfException {
+    if (expectedPages0Based == null || expectedPages0Based.isEmpty()) {
+      return;
+    }
+    for (int pageIndex : expectedPages0Based) {
+      if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages()) {
+        throw new InvalidPdfException("Invalid expected stamp page index: " + pageIndex);
+      }
+      COSDictionary pageDict = doc.getPage(pageIndex).getCOSObject();
+      COSBase annotsBase = pageDict.getDictionaryObject(COSName.ANNOTS);
+      if (!(annotsBase instanceof COSArray annots) || annots.size() == 0) {
+        throw new InvalidPdfException("Missing signature widget annotations on stamped page " + (pageIndex + 1));
+      }
+      boolean hasSigWidget = false;
+      for (int a = 0; a < annots.size(); a++) {
+        COSDictionary annot = asCosDictionary(annots.get(a));
+        if (annot == null || !COSName.getPDFName("Widget").equals(annot.getCOSName(COSName.SUBTYPE))) {
+          continue;
+        }
+        COSName ft = annot.getCOSName(COSName.FT);
+        if (ft == null) {
+          COSDictionary parent = asCosDictionary(annot.getDictionaryObject(COSName.PARENT));
+          ft = parent != null ? parent.getCOSName(COSName.FT) : null;
+        }
+        if (COSName.SIG.equals(ft)) {
+          hasSigWidget = true;
+          break;
+        }
+      }
+      if (!hasSigWidget) {
+        throw new InvalidPdfException("No visible signature widget linked on stamped page " + (pageIndex + 1));
+      }
     }
   }
 
@@ -852,6 +968,39 @@ public final class PdfSignerService {
       LtvEnabler.enableLTV(signedDoc, signedPdfBytes, ltvConfig);
       signedDoc.saveIncremental(out);
       return out.toByteArray();
+    }
+  }
+
+  /**
+   * Ensures target pages have an /Annots array before iText widget insertion.
+   * This avoids a renderer gap where page 1 can miss visible signature widgets
+   * even though the widget exists in AcroForm Kids.
+   */
+  private static byte[] ensureAnnotsArrayOnTargetPages(byte[] pdfBytes, List<Integer> stampPageIndices)
+      throws IOException, InvalidPdfException {
+    try (PDDocument doc = PDDocument.load(pdfBytes)) {
+      int pageCount = doc.getNumberOfPages();
+      if (pageCount == 0) {
+        throw new InvalidPdfException("PDF has no pages");
+      }
+      List<Integer> targetPages = resolveStampPages(pageCount, stampPageIndices);
+      boolean changed = false;
+      for (int pageIndex : targetPages) {
+        PDPage page = doc.getPage(pageIndex);
+        COSDictionary pageDict = page.getCOSObject();
+        COSBase annots = pageDict.getDictionaryObject(COSName.ANNOTS);
+        if (!(annots instanceof COSArray)) {
+          pageDict.setItem(COSName.ANNOTS, new COSArray());
+          changed = true;
+        }
+      }
+      if (!changed) {
+        return pdfBytes;
+      }
+      try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+        doc.save(out);
+        return out.toByteArray();
+      }
     }
   }
 
@@ -1029,10 +1178,24 @@ public final class PdfSignerService {
       }
       return all;
     }
+    if (stampPageIndices.contains(-2)) {
+      return List.of(pageCount - 1);
+    }
     Set<Integer> unique = new LinkedHashSet<>();
     for (Integer idx : stampPageIndices) {
       if (idx == null) {
         throw new InvalidPdfException("stampPageIndices contains null");
+      }
+      if (idx <= -1001) {
+        int startPage1 = -1000 - idx;
+        int startIndex = startPage1 - 1;
+        if (startIndex < 0 || startIndex >= pageCount) {
+          throw new InvalidPdfException("startPage is out-of-range: " + startPage1);
+        }
+        for (int p = startIndex; p < pageCount; p++) {
+          unique.add(p);
+        }
+        continue;
       }
       if (idx < 0 || idx >= pageCount) {
         throw new InvalidPdfException("stampPageIndices contains out-of-range index: " + idx);

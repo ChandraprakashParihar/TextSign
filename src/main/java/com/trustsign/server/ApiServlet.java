@@ -45,6 +45,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -123,7 +124,8 @@ public final class ApiServlet {
     if (h != null && !h.isBlank()) {
       return h.trim();
     }
-    // Short id keeps logs readable; uniqueness is per-process/time and sufficient for correlation.
+    // Short id keeps logs readable; uniqueness is per-process/time and sufficient
+    // for correlation.
     return UUID.randomUUID().toString().substring(0, 12);
   }
 
@@ -279,18 +281,23 @@ public final class ApiServlet {
   }
 
   /**
-   * For auto-sign PDF routes: by default signs the uploaded bytes only ({@code chainedFromExistingOutput}
-   * stays false), so re-signing an already-signed PDF adds a new signature and visible stamp on top of the
+   * For auto-sign PDF routes: by default signs the uploaded bytes only
+   * ({@code chainedFromExistingOutput}
+   * stays false), so re-signing an already-signed PDF adds a new signature and
+   * visible stamp on top of the
    * prior one when the same stamp pages are used.
    * <p>
-   * Set multipart {@code signFromUpload} to false/0/no to opt into chaining from the previous numbered
-   * output on disk when present ({@code stem-signed.pdf} ← {@code stem-signed1.pdf} ← …) so earlier
+   * Set multipart {@code signFromUpload} to false/0/no to opt into chaining from
+   * the previous numbered
+   * output on disk when present ({@code stem-signed.pdf} ←
+   * {@code stem-signed1.pdf} ← …) so earlier
    * signatures stay valid across incremental saves.
    */
   private static byte[] resolveAutoSignIncrementalInput(byte[] uploadedPdf, File targetSignedFile, Multipart.Data mp)
       throws IOException {
     String signFromUpload = readMultipartString(mp, "signFromUpload", true);
-    boolean useUploadedPdfOnly = signFromUpload == null || signFromUpload.isBlank() || parseBooleanLoose(signFromUpload);
+    boolean useUploadedPdfOnly = signFromUpload == null || signFromUpload.isBlank()
+        || parseBooleanLoose(signFromUpload);
     if (useUploadedPdfOnly) {
       return uploadedPdf;
     }
@@ -305,7 +312,10 @@ public final class ApiServlet {
     return uploadedPdf;
   }
 
-  /** Suggested download name for streaming sign endpoints (single file, not numbered). */
+  /**
+   * Suggested download name for streaming sign endpoints (single file, not
+   * numbered).
+   */
   private static String buildSignedPdfFilename(String filename) {
     String safe = sanitizeFilename(filename);
     String stem = SignedPdfOutputPaths.stemForSignedOutput(safe);
@@ -313,14 +323,17 @@ public final class ApiServlet {
   }
 
   private static boolean parseBooleanLoose(String v) {
-    if (v == null) return false;
+    if (v == null)
+      return false;
     String t = v.trim().toLowerCase(java.util.Locale.ROOT);
     return t.equals("true") || t.equals("1") || t.equals("yes") || t.equals("y");
   }
 
   /**
-   * Builds PDF signing options from multipart: {@code finalVersion} and optional {@code allowResignFinalVersion}
-   * (true/1/yes/y) to sign a PDF that already has ISO 32000 DocMDP P=1 (no changes permitted).
+   * Builds PDF signing options from multipart: {@code finalVersion} and optional
+   * {@code allowResignFinalVersion}
+   * (true/1/yes/y) to sign a PDF that already has ISO 32000 DocMDP P=1 (no
+   * changes permitted).
    */
   private static PdfSigningOptions pdfSigningOptionsFromMultipart(
       Multipart.Data mp, boolean finalVersion, AgentConfig cfg) {
@@ -386,7 +399,8 @@ public final class ApiServlet {
   }
 
   /**
-   * OCSP/CRL reachability for the configured signer (PKCS#11 cert matching public-key.pem) and issuer
+   * OCSP/CRL reachability for the configured signer (PKCS#11 cert matching
+   * public-key.pem) and issuer
    * (token chain or trust store). Same timeouts as {@code ltv} in config.
    */
   private Map<String, Object> probeLtvHealth(AgentConfig cfg) {
@@ -521,9 +535,11 @@ public final class ApiServlet {
   }
 
   private static Integer parsePositiveInt(String v) {
-    if (v == null) return null;
+    if (v == null)
+      return null;
     String t = v.trim();
-    if (t.isEmpty()) return null;
+    if (t.isEmpty())
+      return null;
     try {
       int n = Integer.parseInt(t);
       return n > 0 ? n : null;
@@ -532,8 +548,93 @@ public final class ApiServlet {
     }
   }
 
+  private enum OutputMode {
+    RAW,
+    FILE,
+    BOTH
+  }
+
+  private enum RawOutputFormat {
+    BASE64,
+    HEX,
+    BINARY
+  }
+
+  private record OutputPreference(OutputMode mode, RawOutputFormat rawFormat) {
+    boolean includesRaw() {
+      return mode == OutputMode.RAW || mode == OutputMode.BOTH;
+    }
+
+    boolean includesFile() {
+      return mode == OutputMode.FILE || mode == OutputMode.BOTH;
+    }
+  }
+
+  private static OutputPreference parseOutputPreference(Multipart.Data mp) {
+    String outputRaw = readMultipartString(mp, "output", true);
+    if (outputRaw == null || outputRaw.isBlank()) {
+      throw new IllegalArgumentException("output is required. Supported values: raw, file, both");
+    }
+    OutputMode mode = switch (outputRaw.trim().toLowerCase(java.util.Locale.ROOT)) {
+      case "raw" -> OutputMode.RAW;
+      case "file" -> OutputMode.FILE;
+      case "both" -> OutputMode.BOTH;
+      default -> throw new IllegalArgumentException("Invalid output value. Supported values: raw, file, both");
+    };
+
+    RawOutputFormat format = RawOutputFormat.BASE64;
+    if (mode == OutputMode.RAW) {
+      String outputFormatRaw = readMultipartString(mp, "outputFormat", true);
+      if (outputFormatRaw != null && !outputFormatRaw.isBlank()) {
+        format = switch (outputFormatRaw.trim().toLowerCase(java.util.Locale.ROOT)) {
+          case "base64" -> RawOutputFormat.BASE64;
+          case "hex" -> RawOutputFormat.HEX;
+          case "binary" -> RawOutputFormat.BINARY;
+          default -> throw new IllegalArgumentException(
+              "Invalid outputFormat value. Supported values: base64, hex, binary");
+        };
+      }
+    }
+    return new OutputPreference(mode, format);
+  }
+
+  private static String encodeForRawOutput(byte[] content, RawOutputFormat format) {
+    RawOutputFormat safeFormat = format == null ? RawOutputFormat.BASE64 : format;
+    return switch (safeFormat) {
+      case BASE64 -> Base64.getEncoder().encodeToString(content);
+      case HEX -> toHex(content);
+      case BINARY -> toBinary(content);
+    };
+  }
+
+  private static String toHex(byte[] content) {
+    StringBuilder out = new StringBuilder(content.length * 2);
+    for (byte b : content) {
+      out.append(String.format("%02x", b));
+    }
+    return out.toString();
+  }
+
+  private static String toBinary(byte[] content) {
+    StringBuilder out = new StringBuilder(content.length * 8);
+    for (byte b : content) {
+      out.append(String.format("%8s", Integer.toBinaryString(b & 0xFF)).replace(' ', '0'));
+    }
+    return out.toString();
+  }
+
+  private static String requireAutoSignOutputDirForFileOutput(AgentConfig cfg) {
+    String outputDir = cfg.autoSignOutputDir();
+    if (outputDir == null || outputDir.isBlank()) {
+      throw new IllegalArgumentException(
+          "Output directory is not configured. Please provide autoSignOutputDir in config.");
+    }
+    return outputDir;
+  }
+
   /**
-   * Reads a text multipart field or a same-named file part (Postman-style). For PEM bodies, use {@code trimBody=false}.
+   * Reads a text multipart field or a same-named file part (Postman-style). For
+   * PEM bodies, use {@code trimBody=false}.
    */
   private static String readMultipartString(Multipart.Data mp, String name, boolean trimBody) {
     String v = mp.field(name);
@@ -558,7 +659,8 @@ public final class ApiServlet {
   }
 
   /**
-   * HSM signer certificate: prefers raw file part {@code cer} (PEM or DER), else form field text as UTF-8.
+   * HSM signer certificate: prefers raw file part {@code cer} (PEM or DER), else
+   * form field text as UTF-8.
    */
   private static byte[] readMultipartCerPayload(Multipart.Data mp) {
     byte[] filePart = mp.file("cer");
@@ -573,7 +675,8 @@ public final class ApiServlet {
   }
 
   /**
-   * Parses comma-separated 1-based page numbers (e.g. "1,3,5") into 0-based indices.
+   * Parses comma-separated 1-based page numbers (e.g. "1,3,5") into 0-based
+   * indices.
    */
   private static java.util.List<Integer> parsePagesCsv1Based(String pagesCsv) {
     if (pagesCsv == null || pagesCsv.isBlank()) {
@@ -591,16 +694,26 @@ public final class ApiServlet {
 
   /**
    * Resolves which PDF pages should get the visible stamp.
-   * - {@code allPages}: if true, stamps all pages (evaluated before {@code pages} so a default hidden {@code pages=1}
-   *   does not cancel {@code allPages=true})
+   * - {@code allPages}: if true, stamps all pages (evaluated before {@code pages}
+   * so a default hidden {@code pages=1}
+   * does not cancel {@code allPages=true})
+   * - {@code lastPage}: if true, stamps only the final page
    * - {@code pages}: comma-separated 1-based page numbers (e.g. {@code 1,3,5})
-   * - {@code page} or {@code startPage}: single 1-based page (field or file part, like other multipart text)
-   * - default: page 1 only (no config; use {@code allPages}, {@code pages}, {@code page}, or {@code startPage} to change)
+   * - {@code startPage}: 1-based page; stamps from this page through the final page
+   * - {@code page}: single 1-based page (field or file part, like other multipart text)
+   * - default: page 1 only (no config; use {@code allPages}, {@code pages},
+   * {@code page}, or {@code startPage} to change)
    */
   private static java.util.List<Integer> resolvePdfStampPages(Multipart.Data mp) {
     String allPagesStr = readMultipartString(mp, "allPages", true);
     if (parseBooleanLoose(allPagesStr)) {
       return java.util.List.of(-1);
+    }
+
+    String lastPageStr = readMultipartString(mp, "lastPage", true);
+    if (parseBooleanLoose(lastPageStr)) {
+      // Marker resolved in PdfSignerService.resolveStampPages(...)
+      return java.util.List.of(-2);
     }
 
     String pagesCsv = readMultipartString(mp, "pages", true);
@@ -609,10 +722,14 @@ public final class ApiServlet {
       return pages.isEmpty() ? java.util.List.of(0) : pages;
     }
 
-    Integer page1 = parsePositiveInt(readMultipartString(mp, "page", true));
-    if (page1 == null) {
-      page1 = parsePositiveInt(readMultipartString(mp, "startPage", true));
+    Integer startPage1 = parsePositiveInt(readMultipartString(mp, "startPage", true));
+    if (startPage1 != null) {
+      // Negative range marker resolved in PdfSignerService.resolveStampPages(...):
+      // -1000 - startPage1 means [startPage1..lastPage].
+      return java.util.List.of(-1000 - startPage1);
     }
+
+    Integer page1 = parsePositiveInt(readMultipartString(mp, "page", true));
     if (page1 != null) {
       return java.util.List.of(page1 - 1);
     }
@@ -650,7 +767,8 @@ public final class ApiServlet {
         }
         case "/health/tsa" -> {
           AgentConfig cfg = loadConfig(resp);
-          if (cfg == null) return;
+          if (cfg == null)
+            return;
           Map<String, Object> tsaHealth = probeTsaHealth(cfg);
           int status = "error".equals(String.valueOf(tsaHealth.get("status"))) ? 503 : 200;
           writeJson(resp, status, tsaHealth);
@@ -658,7 +776,8 @@ public final class ApiServlet {
         }
         case "/health/ltv" -> {
           AgentConfig cfgLtv = loadConfig(resp);
-          if (cfgLtv == null) return;
+          if (cfgLtv == null)
+            return;
           Map<String, Object> ltvHealth = probeLtvHealth(cfgLtv);
           int ltvStatus = "error".equals(String.valueOf(ltvHealth.get("status"))) ? 503 : 200;
           writeJson(resp, ltvStatus, ltvHealth);
@@ -793,6 +912,13 @@ public final class ApiServlet {
         case "/auto-sign-text" -> {
           requireSession(req);
           var mp = Multipart.read(req, multipartTextMaxBytes);
+          OutputPreference outputPreference;
+          try {
+            outputPreference = parseOutputPreference(mp);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
           byte[] data = mp.file("file");
 
           if (data == null || data.length == 0) {
@@ -800,7 +926,8 @@ public final class ApiServlet {
             return;
           }
           if (isPdfUpload(data, mp.filename("file"))) {
-            writeJson(resp, 400, Map.of("error", "PDF is not allowed on /auto-sign-text. Use /sign-pdf or /auto-sign-pdf."));
+            writeJson(resp, 400,
+                Map.of("error", "PDF is not allowed on /auto-sign-text. Use /sign-pdf or /auto-sign-pdf."));
             return;
           }
 
@@ -808,26 +935,28 @@ public final class ApiServlet {
           if (cfg == null)
             return;
 
-          String outputDir = cfg.autoSignOutputDir();
-          if (outputDir == null || outputDir.isBlank()) {
-            writeJson(resp, 500,
-                Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
-            return;
-          }
-
-          Path outputBase = null;
-          if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
-            outputBase = Paths.get(cfg.outputBaseDir());
-            if (!outputBase.isAbsolute()) {
-              outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+          File outDirFile = null;
+          if (outputPreference.includesFile()) {
+            String outputDir;
+            try {
+              outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+            } catch (IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              return;
             }
-          }
-          File outDirFile;
-          try {
-            outDirFile = resolveSafeOutputDir(outputDir, outputBase);
-          } catch (SecurityException | IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
-            return;
+            Path outputBase = null;
+            if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+              outputBase = Paths.get(cfg.outputBaseDir());
+              if (!outputBase.isAbsolute()) {
+                outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+              }
+            }
+            try {
+              outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+            } catch (SecurityException | IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              return;
+            }
           }
 
           char[] pin = resolvePin(cfg);
@@ -938,47 +1067,67 @@ public final class ApiServlet {
             inputFilename = "text.txt";
           }
 
-          final Path reservedOutPath;
-          try {
-            reservedOutPath = SignedPdfOutputPaths.reserveNextSignedTextPath(
-                outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
-          } catch (IOException e) {
-            LOG.warn("/auto-sign-text: failed to reserve output path: {}", safeMsg(e));
-            writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
-            return;
-          }
-
-          boolean outputWritten = false;
-          try {
-            Files.writeString(
-                reservedOutPath,
-                sb.toString(),
-                java.nio.charset.StandardCharsets.UTF_8,
-                StandardOpenOption.TRUNCATE_EXISTING);
-            outputWritten = true;
-            writeJson(resp, 200, Map.of(
-                "ok", true,
-                "subjectDn", signingCert != null ? signingCert.getSubjectX500Principal().getName() : "",
-                "serialNumber", signingCert != null ? signingCert.getSerialNumber().toString(16) : "",
-                "outputPath", reservedOutPath.toAbsolutePath().toString()));
-          } finally {
-            if (!outputWritten) {
-              try {
-                Files.deleteIfExists(reservedOutPath);
-              } catch (IOException e) {
-                LOG.warn("/auto-sign-text: failed to delete reserved output: {}", safeMsg(e));
+          String signedText = sb.toString();
+          byte[] signedTextBytes = signedText.getBytes(StandardCharsets.UTF_8);
+          String outputPath = null;
+          if (outputPreference.includesFile()) {
+            final Path reservedOutPath;
+            try {
+              reservedOutPath = SignedPdfOutputPaths.reserveNextSignedTextPath(
+                  Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
+                  ApiServlet::sanitizeFilename);
+            } catch (IOException e) {
+              LOG.warn("/auto-sign-text: failed to reserve output path: {}", safeMsg(e));
+              writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+              return;
+            }
+            boolean outputWritten = false;
+            try {
+              Files.writeString(
+                  reservedOutPath,
+                  signedText,
+                  StandardCharsets.UTF_8,
+                  StandardOpenOption.TRUNCATE_EXISTING);
+              outputWritten = true;
+              outputPath = reservedOutPath.toAbsolutePath().toString();
+            } finally {
+              if (!outputWritten) {
+                try {
+                  Files.deleteIfExists(reservedOutPath);
+                } catch (IOException e) {
+                  LOG.warn("/auto-sign-text: failed to delete reserved output: {}", safeMsg(e));
+                }
               }
             }
           }
+          Map<String, Object> responseBody = new LinkedHashMap<>();
+          responseBody.put("ok", true);
+          responseBody.put("subjectDn", signingCert != null ? signingCert.getSubjectX500Principal().getName() : "");
+          responseBody.put("serialNumber", signingCert != null ? signingCert.getSerialNumber().toString(16) : "");
+          if (outputPreference.includesRaw()) {
+            responseBody.put("signedData", encodeForRawOutput(signedTextBytes, outputPreference.rawFormat()));
+            responseBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
+          }
+          if (outputPreference.includesFile()) {
+            responseBody.put("outputPath", outputPath);
+          }
+          writeJson(resp, 200, responseBody);
           return;
         }
 
         case "/auto-sign-pdf" -> {
           LOG.info("{} Auto-signing PDF request received", ctx);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
+          OutputPreference outputPreference;
+          try {
+            outputPreference = parseOutputPreference(mp);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
           byte[] data = mp.file("file");
           String reason = mp.field("reason");
-          String location = mp.field("location");  
+          String location = mp.field("location");
           // Some clients send text fields as "file" parts with filename present/empty.
           // Fall back to interpreting them as text when mp.field(...) is null.
           if (reason == null) {
@@ -1011,26 +1160,28 @@ public final class ApiServlet {
           boolean finalVersion = parseFinalVersionMultipart(mp);
           PdfSigningOptions pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
 
-          String outputDir = cfg.autoSignOutputDir();
-          if (outputDir == null || outputDir.isBlank()) {
-            writeJson(resp, 500,
-                Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
-            return;
-          }
-
-          Path outputBase = null;
-          if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
-            outputBase = Paths.get(cfg.outputBaseDir());
-            if (!outputBase.isAbsolute()) {
-              outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+          File outDirFile = null;
+          if (outputPreference.includesFile()) {
+            String outputDir;
+            try {
+              outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+            } catch (IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              return;
             }
-          }
-          File outDirFile;
-          try {
-            outDirFile = resolveSafeOutputDir(outputDir, outputBase);
-          } catch (SecurityException | IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
-            return;
+            Path outputBase = null;
+            if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+              outputBase = Paths.get(cfg.outputBaseDir());
+              if (!outputBase.isAbsolute()) {
+                outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+              }
+            }
+            try {
+              outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+            } catch (SecurityException | IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              return;
+            }
           }
 
           char[] pin = resolvePin(cfg);
@@ -1101,20 +1252,23 @@ public final class ApiServlet {
             inputFilename = "document.pdf";
           }
 
-          final Path reservedOutPath;
-          try {
-            reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
-                outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
-          } catch (IOException e) {
-            LOG.warn("/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
-            writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
-            return;
+          Path reservedOutPath = null;
+          if (outputPreference.includesFile()) {
+            try {
+              reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
+                  Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
+                  ApiServlet::sanitizeFilename);
+            } catch (IOException e) {
+              LOG.warn("/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
+              writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+              return;
+            }
           }
 
           boolean outputWritten = false;
           try {
-            File outFile = reservedOutPath.toFile();
-            byte[] pdfToSign = resolveAutoSignIncrementalInput(data, outFile, mp);
+            File outFile = reservedOutPath != null ? reservedOutPath.toFile() : null;
+            byte[] pdfToSign = outFile != null ? resolveAutoSignIncrementalInput(data, outFile, mp) : data;
 
             PdfSignerService.PdfSigningResult signResult;
             try {
@@ -1147,26 +1301,36 @@ public final class ApiServlet {
               return;
             }
             byte[] signedPdf = signResult.signedPdf();
-
-            Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
-            outputWritten = true;
+            String outputPath = null;
+            if (reservedOutPath != null) {
+              Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
+              outputWritten = true;
+              outputPath = Objects.requireNonNull(outFile, "outFile").getAbsolutePath();
+            }
 
             Map<String, Object> autoPdfBody = new LinkedHashMap<>();
             autoPdfBody.put("ok", true);
             autoPdfBody.put("format", "pdf");
             autoPdfBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
             autoPdfBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
-            autoPdfBody.put("outputPath", outFile.getAbsolutePath());
-            autoPdfBody.put("chainedFromExistingOutput", pdfToSign != data);
+            if (outputPreference.includesRaw()) {
+              autoPdfBody.put("signedData", encodeForRawOutput(signedPdf, outputPreference.rawFormat()));
+              autoPdfBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
+            }
+            if (outputPreference.includesFile()) {
+              autoPdfBody.put("outputPath", outputPath);
+            }
+            autoPdfBody.put("chainedFromExistingOutput", outFile != null && pdfToSign != data);
             autoPdfBody.put("stampedPages", stampPages);
             autoPdfBody.put("finalVersion", finalVersion);
             autoPdfBody.put("timestamped", signResult.isTimestamped());
             if (signResult.tsaWarning() != null) {
               autoPdfBody.put("tsaWarning", signResult.tsaWarning().getMessage());
             }
-            writeJson(resp, 200, autoPdfBody);
+            // writeJson(resp, 200, autoPdfBody);
+            resp.getOutputStream().write(signedPdf);
           } finally {
-            if (!outputWritten) {
+            if (reservedOutPath != null && !outputWritten) {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
@@ -1180,39 +1344,49 @@ public final class ApiServlet {
         case "/auto-sign-text-cms" -> {
           requireSession(req);
           var mp = Multipart.read(req, multipartTextMaxBytes);
+          OutputPreference outputPreference;
+          try {
+            outputPreference = parseOutputPreference(mp);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
           byte[] data = mp.file("file");
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
             return;
           }
           if (isPdfUpload(data, mp.filename("file"))) {
-            writeJson(resp, 400, Map.of("error", "PDF is not allowed on /auto-sign-text-cms. Use /sign-pdf or /auto-sign-pdf."));
+            writeJson(resp, 400,
+                Map.of("error", "PDF is not allowed on /auto-sign-text-cms. Use /sign-pdf or /auto-sign-pdf."));
             return;
           }
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null)
             return;
 
-          String outputDir = cfg.autoSignOutputDir();
-          if (outputDir == null || outputDir.isBlank()) {
-            writeJson(resp, 500,
-                Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
-            return;
-          }
-
-          Path outputBase = null;
-          if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
-            outputBase = Paths.get(cfg.outputBaseDir());
-            if (!outputBase.isAbsolute()) {
-              outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+          File outDirFile = null;
+          if (outputPreference.includesFile()) {
+            String outputDir;
+            try {
+              outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+            } catch (IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              return;
             }
-          }
-          File outDirFile;
-          try {
-            outDirFile = resolveSafeOutputDir(outputDir, outputBase);
-          } catch (SecurityException | IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
-            return;
+            Path outputBase = null;
+            if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+              outputBase = Paths.get(cfg.outputBaseDir());
+              if (!outputBase.isAbsolute()) {
+                outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+              }
+            }
+            try {
+              outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+            } catch (SecurityException | IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              return;
+            }
           }
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
@@ -1283,41 +1457,61 @@ public final class ApiServlet {
             inputFilename = "text.txt";
           }
 
-          final Path reservedOutPath;
-          try {
-            reservedOutPath = SignedPdfOutputPaths.reserveNextCmsSignedTextPath(
-                outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
-          } catch (IOException e) {
-            LOG.warn("/auto-sign-text-cms: failed to reserve output path: {}", safeMsg(e));
-            writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
-            return;
-          }
-
-          boolean outputWritten = false;
-          try {
-            Files.writeString(
-                reservedOutPath, sb.toString(), StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING);
-            outputWritten = true;
-            writeJson(resp, 200, Map.of(
-                "ok", true,
-                "subjectDn", signingCert.getSubjectX500Principal().getName(),
-                "serialNumber", signingCert.getSerialNumber().toString(16),
-                "outputPath", reservedOutPath.toAbsolutePath().toString()));
-          } finally {
-            if (!outputWritten) {
-              try {
-                Files.deleteIfExists(reservedOutPath);
-              } catch (IOException e) {
-                LOG.warn("/auto-sign-text-cms: failed to delete reserved output: {}", safeMsg(e));
+          String signedText = sb.toString();
+          byte[] signedTextBytes = signedText.getBytes(StandardCharsets.UTF_8);
+          String outputPath = null;
+          if (outputPreference.includesFile()) {
+            final Path reservedOutPath;
+            try {
+              reservedOutPath = SignedPdfOutputPaths.reserveNextCmsSignedTextPath(
+                  Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
+                  ApiServlet::sanitizeFilename);
+            } catch (IOException e) {
+              LOG.warn("/auto-sign-text-cms: failed to reserve output path: {}", safeMsg(e));
+              writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+              return;
+            }
+            boolean outputWritten = false;
+            try {
+              Files.writeString(
+                  reservedOutPath, signedText, StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING);
+              outputWritten = true;
+              outputPath = reservedOutPath.toAbsolutePath().toString();
+            } finally {
+              if (!outputWritten) {
+                try {
+                  Files.deleteIfExists(reservedOutPath);
+                } catch (IOException e) {
+                  LOG.warn("/auto-sign-text-cms: failed to delete reserved output: {}", safeMsg(e));
+                }
               }
             }
           }
+          Map<String, Object> responseBody = new LinkedHashMap<>();
+          responseBody.put("ok", true);
+          responseBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+          responseBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+          if (outputPreference.includesRaw()) {
+            responseBody.put("signedData", encodeForRawOutput(signedTextBytes, outputPreference.rawFormat()));
+            responseBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
+          }
+          if (outputPreference.includesFile()) {
+            responseBody.put("outputPath", outputPath);
+          }
+          writeJson(resp, 200, responseBody);
           return;
         }
 
         case "/sign-pdf" -> {
           requireSession(req);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
+          OutputPreference outputPreference;
+          try {
+            outputPreference = parseOutputPreference(mp);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
           byte[] data = mp.file("file");
           String reason = mp.field("reason");
           String location = mp.field("location");
@@ -1433,22 +1627,76 @@ public final class ApiServlet {
             return;
           }
           byte[] signedPdf = signResult.signedPdf();
-
-          resp.setStatus(200);
-          resp.setContentType("application/pdf");
-          resp.setHeader("X-Stamped-Pages", String.valueOf(stampPages));
-          resp.setHeader("Content-Disposition",
-              "attachment; filename=\"" + buildSignedPdfFilename(mp.filename("file")) + "\"");
-          resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
-          resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
-          resp.setHeader("X-TrustSign-Timestamped", String.valueOf(signResult.isTimestamped()));
+          String outputPath = null;
+          if (outputPreference.includesFile()) {
+            String outputDir;
+            try {
+              outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+            } catch (IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              return;
+            }
+            Path outputBase = null;
+            if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+              outputBase = Paths.get(cfg.outputBaseDir());
+              if (!outputBase.isAbsolute()) {
+                outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+              }
+            }
+            File outDirFile;
+            try {
+              outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+            } catch (SecurityException | IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              return;
+            }
+            String inputFilename = mp.filename("file");
+            if (inputFilename == null || inputFilename.isBlank()) {
+              inputFilename = "document.pdf";
+            }
+            final Path reservedOutPath;
+            try {
+              reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
+                  outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
+            } catch (IOException e) {
+              LOG.warn("/sign-pdf: failed to reserve output path: {}", safeMsg(e));
+              writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+              return;
+            }
+            boolean outputWritten = false;
+            try {
+              Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
+              outputWritten = true;
+              outputPath = reservedOutPath.toAbsolutePath().toString();
+            } finally {
+              if (!outputWritten) {
+                try {
+                  Files.deleteIfExists(reservedOutPath);
+                } catch (IOException e) {
+                  LOG.warn("/sign-pdf: failed to delete reserved output: {}", safeMsg(e));
+                }
+              }
+            }
+          }
+          Map<String, Object> signPdfBody = new LinkedHashMap<>();
+          signPdfBody.put("ok", true);
+          signPdfBody.put("format", "pdf");
+          signPdfBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+          signPdfBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+          signPdfBody.put("stampedPages", stampPages);
+          signPdfBody.put("finalVersion", finalVersion);
+          signPdfBody.put("timestamped", signResult.isTimestamped());
           if (signResult.tsaWarning() != null) {
-            resp.setHeader("X-TrustSign-TSA-Warning", signResult.tsaWarning().getMessage());
+            signPdfBody.put("tsaWarning", signResult.tsaWarning().getMessage());
           }
-          if (finalVersion) {
-            resp.setHeader("X-TrustSign-Final-Version", "true");
+          if (outputPreference.includesRaw()) {
+            signPdfBody.put("signedData", encodeForRawOutput(signedPdf, outputPreference.rawFormat()));
+            signPdfBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
           }
-          resp.getOutputStream().write(signedPdf);
+          if (outputPreference.includesFile()) {
+            signPdfBody.put("outputPath", outputPath);
+          }
+          writeJson(resp, 200, signPdfBody);
           return;
         }
 
@@ -1540,7 +1788,8 @@ public final class ApiServlet {
             writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
             return;
           } catch (Exception e) {
-            LOG.warn("{} /hsm/sign-pdf failed. tookMs={} err={}", ctx, System.currentTimeMillis() - startMs, safeMsg(e), e);
+            LOG.warn("{} /hsm/sign-pdf failed. tookMs={} err={}", ctx, System.currentTimeMillis() - startMs, safeMsg(e),
+                e);
             writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
             return;
           } finally {
@@ -1565,6 +1814,13 @@ public final class ApiServlet {
 
         case "/hsm/auto-sign-pdf" -> {
           var mp = Multipart.read(req, multipartPdfMaxBytes);
+          OutputPreference outputPreference;
+          try {
+            outputPreference = parseOutputPreference(mp);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
           byte[] data = mp.file("file");
           byte[] cerBytes = readMultipartCerPayload(mp);
           String pinStr = readMultipartString(mp, "pin", true);
@@ -1613,25 +1869,28 @@ public final class ApiServlet {
                 Map.of("error", "Configuration error", "details", "config.hsm is not configured (see config.json)"));
             return;
           }
-          String outputDir = cfg.autoSignOutputDir();
-          if (outputDir == null || outputDir.isBlank()) {
-            writeJson(resp, 500,
-                Map.of("error", "Configuration error", "details", "autoSignOutputDir is not configured"));
-            return;
-          }
-          Path outputBase = null;
-          if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
-            outputBase = Paths.get(cfg.outputBaseDir());
-            if (!outputBase.isAbsolute()) {
-              outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+          File outDirFile = null;
+          if (outputPreference.includesFile()) {
+            String outputDir;
+            try {
+              outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+            } catch (IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              return;
             }
-          }
-          File outDirFile;
-          try {
-            outDirFile = resolveSafeOutputDir(outputDir, outputBase);
-          } catch (SecurityException | IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
-            return;
+            Path outputBase = null;
+            if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+              outputBase = Paths.get(cfg.outputBaseDir());
+              if (!outputBase.isAbsolute()) {
+                outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+              }
+            }
+            try {
+              outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+            } catch (SecurityException | IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              return;
+            }
           }
           List<String> libs = OsPkcs11Resolver.hsmCandidates(cfg.hsm());
           if (libs.isEmpty()) {
@@ -1644,20 +1903,23 @@ public final class ApiServlet {
             inputFilename = "document.pdf";
           }
 
-          final Path reservedOutPath;
-          try {
-            reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
-                outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
-          } catch (IOException e) {
-            LOG.warn("/hsm/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
-            writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
-            return;
+          Path reservedOutPath = null;
+          if (outputPreference.includesFile()) {
+            try {
+              reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
+                  Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
+                  ApiServlet::sanitizeFilename);
+            } catch (IOException e) {
+              LOG.warn("/hsm/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
+              writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+              return;
+            }
           }
 
           boolean outputWritten = false;
           try {
-            File outFile = reservedOutPath.toFile();
-            byte[] pdfToSign = resolveAutoSignIncrementalInput(data, outFile, mp);
+            File outFile = reservedOutPath != null ? reservedOutPath.toFile() : null;
+            byte[] pdfToSign = outFile != null ? resolveAutoSignIncrementalInput(data, outFile, mp) : data;
 
             char[] pinChars = pinStr.toCharArray();
             HsmPdfSignerService.SignResult hsmResult = null;
@@ -1701,22 +1963,31 @@ public final class ApiServlet {
 
             byte[] signedPdf = hsmResult.signedPdf();
             X509Certificate signingCert = hsmResult.signingCertificate();
-
-            Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
-            outputWritten = true;
+            String outputPath = null;
+            if (reservedOutPath != null) {
+              Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
+              outputWritten = true;
+              outputPath = Objects.requireNonNull(outFile, "outFile").getAbsolutePath();
+            }
 
             Map<String, Object> hsmAutoBody = new LinkedHashMap<>();
             hsmAutoBody.put("ok", true);
             hsmAutoBody.put("format", "pdf");
             hsmAutoBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
             hsmAutoBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
-            hsmAutoBody.put("outputPath", outFile.getAbsolutePath());
-            hsmAutoBody.put("chainedFromExistingOutput", pdfToSign != data);
+            if (outputPreference.includesRaw()) {
+              hsmAutoBody.put("signedData", encodeForRawOutput(signedPdf, outputPreference.rawFormat()));
+              hsmAutoBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
+            }
+            if (outputPreference.includesFile()) {
+              hsmAutoBody.put("outputPath", outputPath);
+            }
+            hsmAutoBody.put("chainedFromExistingOutput", outFile != null && pdfToSign != data);
             hsmAutoBody.put("stampedPages", stampPages);
             hsmAutoBody.put("finalVersion", finalVersion);
             writeJson(resp, 200, hsmAutoBody);
           } finally {
-            if (!outputWritten) {
+            if (reservedOutPath != null && !outputWritten) {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
@@ -1769,6 +2040,13 @@ public final class ApiServlet {
           requireSession(req);
 
           var mp = Multipart.read(req, multipartTextMaxBytes);
+          OutputPreference outputPreference;
+          try {
+            outputPreference = parseOutputPreference(mp);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
           byte[] data = mp.file("file");
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing text file field: file"));
@@ -1871,14 +2149,75 @@ public final class ApiServlet {
           sb.append("<START-SIGNATURE>").append(sigB64).append("</START-SIGNATURE>\n");
           sb.append("<START-CERTIFICATE>").append(certB64).append("</START-CERTIFICATE>\n");
           sb.append("<SIGNER-VERSION>").append(signerVersion).append("</SIGNER-VERSION>\n");
-
-          resp.setStatus(200);
-          resp.setContentType("text/plain; charset=UTF-8");
-          resp.setHeader("Content-Disposition",
-              "attachment; filename=\"" + sanitizeFilename(mp.filename("file")) + "\"");
-          resp.setHeader("X-Signer-SubjectDN", signingCert.getSubjectX500Principal().getName());
-          resp.setHeader("X-Signer-SerialNumber", signingCert.getSerialNumber().toString(16));
-          resp.getOutputStream().write(sb.toString().getBytes(StandardCharsets.UTF_8));
+          String signedText = sb.toString();
+          byte[] signedTextBytes = signedText.getBytes(StandardCharsets.UTF_8);
+          String outputPath = null;
+          if (outputPreference.includesFile()) {
+            String outputDir;
+            try {
+              outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+            } catch (IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              return;
+            }
+            Path outputBase = null;
+            if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+              outputBase = Paths.get(cfg.outputBaseDir());
+              if (!outputBase.isAbsolute()) {
+                outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+              }
+            }
+            File outDirFile;
+            try {
+              outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+            } catch (SecurityException | IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              return;
+            }
+            String inputFilename = mp.filename("file");
+            if (inputFilename == null || inputFilename.isBlank()) {
+              inputFilename = "text.txt";
+            }
+            final Path reservedOutPath;
+            try {
+              reservedOutPath = SignedPdfOutputPaths.reserveNextSignedTextPath(
+                  outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
+            } catch (IOException e) {
+              LOG.warn("/sign-text: failed to reserve output path: {}", safeMsg(e));
+              writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+              return;
+            }
+            boolean outputWritten = false;
+            try {
+              Files.writeString(
+                  reservedOutPath,
+                  signedText,
+                  StandardCharsets.UTF_8,
+                  StandardOpenOption.TRUNCATE_EXISTING);
+              outputWritten = true;
+              outputPath = reservedOutPath.toAbsolutePath().toString();
+            } finally {
+              if (!outputWritten) {
+                try {
+                  Files.deleteIfExists(reservedOutPath);
+                } catch (IOException e) {
+                  LOG.warn("/sign-text: failed to delete reserved output: {}", safeMsg(e));
+                }
+              }
+            }
+          }
+          Map<String, Object> signTextBody = new LinkedHashMap<>();
+          signTextBody.put("ok", true);
+          signTextBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+          signTextBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+          if (outputPreference.includesRaw()) {
+            signTextBody.put("signedData", encodeForRawOutput(signedTextBytes, outputPreference.rawFormat()));
+            signTextBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
+          }
+          if (outputPreference.includesFile()) {
+            signTextBody.put("outputPath", outputPath);
+          }
+          writeJson(resp, 200, signTextBody);
           return;
         }
 

@@ -27,7 +27,7 @@ TrustSign is a local signing service that uses a PKCS#11 hardware token (or soft
 
 - You run the **TrustSign service** on a machine where the signing token is attached (e.g. a Windows PC or server).
 - Your **backend server** (your own application) runs on the same machine or another machine on the network.
-- Your backend **calls the TrustSign API** (e.g. `POST /v1/auto-sign-text`) to request signing. TrustSign signs the content and returns the result; the signed file is written to a directory you specify.
+- Your backend **calls the TrustSign API** (e.g. `POST /v1/auto-sign-text`) to request signing. TrustSign signs the content and returns raw data, output file path, or both (based on request parameters).
 
 This guide covers **installation from the ZIP file** and **integration of the `/auto-sign-text` endpoint** into your backend.
 
@@ -123,7 +123,7 @@ Example snippet:
 
 ### 4.3 Optional: Restrict Output Directory
 
-If you want to limit where signed files can be written, the vendor can set **`outputBaseDir`** in the configuration. In that case, the `outputDir` you send to `/auto-sign-text` must be under that base path.
+If you want to limit where signed files can be written, the vendor can set **`outputBaseDir`** in the configuration. The configured `autoSignOutputDir` must be under that base path.
 
 ---
 
@@ -191,9 +191,9 @@ You provide a backend server (your own application). That backend runs alongside
 - **Your backend** sends a **POST** request to **`http://<host>:<port>/v1/auto-sign-text`** with:
   - A **multipart/form-data** body.
   - Part **`file`**: the text file (or text content) to sign.
-  - Part **`outputDir`**: the directory path on the **TrustSign machine** where the signed file should be written.
+  - Part **`output`**: required response mode (`raw`, `file`, or `both`).
 
-The response is JSON: success with `outputPath` and certificate info, or an error message.
+The response is JSON: success with certificate info and either raw signed data, output path, or both.
 
 ### 6.2 Base URL
 
@@ -204,12 +204,20 @@ Full endpoint: **`POST http://<host>:31927/v1/auto-sign-text`**
 
 ### 6.3 Important Points for Your Backend
 
-1. **Output directory (`outputDir`)** is a path on the **machine where TrustSign is running**, not on your backend server. Ensure that path exists and is writable by the user running TrustSign. If `outputBaseDir` is set in TrustSign config, `outputDir` must be under that base.
-2. **Request format:** `multipart/form-data` with:
+1. **Output mode (`output`)** is required on all auto-sign requests:
+   - `raw`: return signed data only
+   - `file`: return output path only
+   - `both`: return both signed data and output path
+2. **When file output is requested** (`output=file` or `output=both`), TrustSign requires `autoSignOutputDir` in `config/config.json`. If missing, the API returns:
+   - `Output directory is not configured. Please provide autoSignOutputDir in config.`
+3. **Raw format (`outputFormat`)** is optional and used only for `output=raw`:
+   - `base64` (default), `hex`, `binary`
+4. **Request format:** `multipart/form-data` with:
    - `file`: the text file (or a file-like part with the text content).
-   - `outputDir`: string, directory path for the signed file.
-3. **Response:** JSON. On success you get `ok: true`, `outputPath`, and certificate details. On error you get `error` and optionally `details`.
-4. **Security:** Run TrustSign in a trusted network. If your backend is on another host, restrict access (firewall, VPN, or binding to a specific interface) as needed.
+   - `output`: required (`raw`, `file`, `both`)
+   - `outputFormat`: optional (`base64`, `hex`, `binary`) for `output=raw`
+5. **Response:** JSON. On success you get `ok: true`, certificate details, and fields according to `output`.
+6. **Security:** Run TrustSign in a trusted network. If your backend is on another host, restrict access (firewall, VPN, or binding to a specific interface) as needed.
 
 ---
 
@@ -230,9 +238,10 @@ Example: `http://127.0.0.1:31927/v1/auto-sign-text`
 | Part name   | Type   | Required | Description |
 |------------|--------|----------|-------------|
 | **file**   | file   | Yes      | The text file to sign (UTF-8). Max size is 2 MB. |
-| **outputDir** | string | Yes   | Directory path (on the TrustSign server) where the signed file will be written. Must not contain `..`. If the server has `outputBaseDir` set, this must be under that path. |
+| **output** | string | Yes | Response mode: `raw`, `file`, or `both`. |
+| **outputFormat** | string | No | Only for `output=raw`. Supported values: `base64` (default), `hex`, `binary`. |
 
-The signed file is written with the same name as the uploaded file, with **`-signed`** before the extension (e.g. `document.txt` → `document-signed.txt`).
+When file output is requested, the signed file is written in `autoSignOutputDir` with **`-signed`** before the extension (e.g. `document.txt` → `document-signed.txt`).
 
 ### 7.3 Success Response (HTTP 200)
 
@@ -243,6 +252,8 @@ The signed file is written with the same name as the uploaded file, with **`-sig
   "ok": true,
   "subjectDn": "CN=..., O=..., ...",
   "serialNumber": "1a2b3c4d",
+  "signedData": "<base64|hex|binary payload>",
+  "outputFormat": "base64",
   "outputPath": "C:\\TrustSign\\output\\document-signed.txt"
 }
 ```
@@ -252,15 +263,19 @@ The signed file is written with the same name as the uploaded file, with **`-sig
 | **ok**         | `true` on success |
 | **subjectDn**  | Subject DN of the signing certificate |
 | **serialNumber** | Serial number of the certificate (hex) |
-| **outputPath** | Full path of the signed file on the TrustSign machine |
+| **signedData** | Encoded signed content (present for `output=raw` and `output=both`) |
+| **outputFormat** | Encoding used for `signedData` |
+| **outputPath** | Full path of the signed file on the TrustSign machine (present for `output=file` and `output=both`) |
 
 ### 7.4 Error Responses
 
 | HTTP | Body (example) | Meaning |
 |------|----------------|---------|
 | 400 | `{"error": "Missing text file field: file"}` | No `file` part in the request |
-| 400 | `{"error": "Missing field: outputDir"}` | No `outputDir` part |
-| 400 | `{"error": "Invalid outputDir", "details": "..."}` | `outputDir` invalid or not allowed (e.g. path traversal or outside `outputBaseDir`) |
+| 400 | `{"error": "output is required. Supported values: raw, file, both"}` | Missing `output` |
+| 400 | `{"error": "Invalid output value. Supported values: raw, file, both"}` | Invalid `output` value |
+| 400 | `{"error": "Invalid outputFormat value. Supported values: base64, hex, binary"}` | Invalid `outputFormat` for raw output |
+| 400 | `{"error": "Output directory is not configured. Please provide autoSignOutputDir in config."}` | File output requested but `autoSignOutputDir` not set |
 | 400 | `{"error": "No PKCS#11 libraries configured for this OS"}` | No token library configured for this platform |
 | 400 | `{"error": "Token load failed", "details": "..."}` | Token not found, wrong PIN, or driver issue |
 | 400 | `{"error": "No certificate on token matches provided public key"}` | Token does not have a certificate matching `config/public-key.pem` |
@@ -272,7 +287,8 @@ The signed file is written with the same name as the uploaded file, with **`-sig
 ```bash
 curl -X POST "http://127.0.0.1:31927/v1/auto-sign-text" \
   -F "file=@/path/to/document.txt" \
-  -F "outputDir=C:\TrustSign\output"
+  -F "output=both" \
+  -F "outputFormat=base64"
 ```
 
 ### 7.6 Example: Python (requests)
@@ -281,18 +297,16 @@ curl -X POST "http://127.0.0.1:31927/v1/auto-sign-text" \
 import requests
 
 url = "http://127.0.0.1:31927/v1/auto-sign-text"
-# outputDir is a path on the machine where TrustSign runs
-output_dir = "C:\\TrustSign\\output"
-
 with open("document.txt", "rb") as f:
     files = {"file": ("document.txt", f, "text/plain")}
-    data = {"outputDir": output_dir}
+    data = {"output": "both", "outputFormat": "base64"}
     r = requests.post(url, files=files, data=data)
 
 print(r.status_code)
 print(r.json())
 if r.ok:
     print("Signed file written to:", r.json().get("outputPath"))
+    print("Signed data format:", r.json().get("outputFormat"))
 ```
 
 ### 7.7 Example: Node.js (form-data and axios/fetch)
@@ -305,7 +319,8 @@ const axios = require('axios');
 const url = 'http://127.0.0.1:31927/v1/auto-sign-text';
 const form = new FormData();
 form.append('file', fs.createReadStream('document.txt'), { filename: 'document.txt' });
-form.append('outputDir', 'C:\\TrustSign\\output');
+form.append('output', 'both');
+form.append('outputFormat', 'base64');
 
 const response = await axios.post(url, form, {
   headers: form.getHeaders(),
@@ -337,8 +352,8 @@ Your backend or downstream systems can verify the signature using the certificat
 | Issue | What to check |
 |-------|----------------|
 | **"Missing text file field: file"** | Send the file as a multipart part named exactly `file`. |
-| **"Missing field: outputDir"** | Send a form field named exactly `outputDir` with a non-empty path. |
-| **"Invalid outputDir"** | Ensure `outputDir` does not contain `..` and, if the server has `outputBaseDir`, that it is under that base. Create the directory on the TrustSign machine if needed. |
+| **"output is required. Supported values: raw, file, both"** | Send the required multipart field `output` with one of: `raw`, `file`, `both`. |
+| **"Output directory is not configured. Please provide autoSignOutputDir in config."** | Set `autoSignOutputDir` in `config/config.json` before using `output=file` or `output=both`. |
 | **"No PKCS#11 libraries configured"** | Config has no library path for your OS. Contact your vendor or add the correct path in `config.json` under `pkcs11`. |
 | **"Token load failed"** | Check token is connected, PIN is correct (in config or `TRUSTSIGN_TOKEN_PIN`), and the correct PKCS#11 driver is installed. |
 | **"No certificate on token matches provided public key"** | The token’s certificate does not match `config/public-key.pem`. Ensure the correct public key is in the package. |
@@ -351,6 +366,6 @@ Your backend or downstream systems can verify the signature using the certificat
 
 1. **Install:** Extract the TrustSign ZIP, set the token PIN in config or environment, and (on Windows) run **run-trustsign.bat**.
 2. **Run:** Keep the TrustSign process running; it listens on `http://127.0.0.1:31927/v1` by default.
-3. **Integrate:** From your backend, send **POST** requests to **`http://<host>:31927/v1/auto-sign-text`** with **multipart/form-data** (`file` + `outputDir`), and handle the JSON response to get `outputPath` and certificate info.
+3. **Integrate:** From your backend, send **POST** requests to **`http://<host>:31927/v1/auto-sign-text`** with **multipart/form-data** (`file` + `output`, optional `outputFormat`), and handle the JSON response (`signedData`, `outputPath`, or both based on `output`).
 
 For further support, contact your TrustSign vendor.
