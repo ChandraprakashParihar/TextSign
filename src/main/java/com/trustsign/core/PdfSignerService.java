@@ -784,14 +784,17 @@ public final class PdfSignerService {
     appearance.setPageNumber(pageIndex0Based + 1);
     appearance.setPageRect(toItextRectangle(rect));
 
-    String resolvedReason = resolveReason(reason, opts.finalVersion());
-    appearance.setReason(resolvedReason);
+    // String resolvedReason = resolveReason(reason, opts.finalVersion());
+
+    if (reason != null && !reason.isBlank()) {
+      appearance.setReason(reason.trim());
+    }
     if (location != null && !location.isBlank()) {
-      appearance.setLocation(location.trim());
+      appearance.setLocation(location);
     }
     appearance.setCertificate(material.signingCertificate());
     appearance.setLayer2Text(
-        buildAppearanceText(material.signingCertificate(), resolvedReason, location, opts.finalVersion()));
+        buildAppearanceText(material.signingCertificate(), reason, location, opts.finalVersion()));
     appearance.setRenderingMode(PdfSignatureAppearance.RenderingMode.DESCRIPTION);
     appearance.setReuseAppearance(false);
   }
@@ -805,7 +808,8 @@ public final class PdfSignerService {
     String when = APPEARANCE_TIMESTAMP_UTC.format(java.time.Instant.now());
     StringBuilder sb = new StringBuilder();
     if (finalVersion) {
-      sb.append("FINAL VERSION\nNo further edits permitted.\n");
+      // sb.append("FINAL VERSION\nNo further edits permitted.\n");
+      sb.append("FINAL VERSION\n");
     }
     sb.append("Digitally signed by ").append(subject).append('\n');
     sb.append(when);
@@ -818,15 +822,15 @@ public final class PdfSignerService {
     return sb.toString();
   }
 
-  private static String resolveReason(String reason, boolean finalVersion) {
-    if (reason != null && !reason.isBlank()) {
-      String t = reason.trim();
-      return finalVersion ? t + FINAL_VERSION_REASON_SUFFIX : t;
-    }
-    return finalVersion
-        ? "TrustSign digital signature" + FINAL_VERSION_REASON_SUFFIX
-        : "TrustSign digital signature";
-  }
+  // private static String resolveReason(String reason, boolean finalVersion) {
+  //   if (reason != null && !reason.isBlank()) {
+  //     String t = reason.trim();
+  //     return finalVersion ? t + FINAL_VERSION_REASON_SUFFIX : t;
+  //   }
+  //   return finalVersion
+  //       ? "TrustSign digital signature" + FINAL_VERSION_REASON_SUFFIX
+  //       : "TrustSign digital signature";
+  // }
 
   private static void requireNonEmptyPdf(byte[] pdfBytes) {
     if (pdfBytes == null || pdfBytes.length == 0) {
