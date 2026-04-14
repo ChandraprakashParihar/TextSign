@@ -103,6 +103,11 @@ public class V1Controller {
     api.handlePost(req, resp, "/verify-text");
   }
 
+  @PostMapping("/validate-token")
+  public void validateToken(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/validate-token");
+  }
+
   @PostMapping("/debug-bytes")
   public void debugBytes(HttpServletRequest req, HttpServletResponse resp) throws IOException {
     api.handlePost(req, resp, "/debug-bytes");

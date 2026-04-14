@@ -4,6 +4,7 @@ import com.trustsign.core.AgentConfig;
 import com.trustsign.core.AgentConfig.ServerConfig;
 import com.trustsign.core.ConfigLoader;
 import com.trustsign.core.HsmPdfSignerService;
+import com.trustsign.core.LtvEnabler.RevocationProbeResult;
 import com.trustsign.core.PdfSignerService;
 import com.trustsign.core.PdfSignerService.PdfSigningOptions;
 import com.trustsign.core.PdfSignerService.DocMdpNoChangesLockException;
@@ -26,6 +27,9 @@ import com.trustsign.core.LicenceEnforcer;
 import com.trustsign.hsm.HsmPkcs11ConfigurationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
 import java.io.File;
 import java.io.IOException;
 import java.security.KeyStore;
@@ -41,6 +45,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
+import java.util.Enumeration;
+import java.util.HexFormat;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -973,6 +979,18 @@ public final class ApiServlet {
           }
           SessionManager.Session s = sessions.createSessionMinutes(10);
           writeJson(resp, 200, Map.of("token", s.token(), "expiresAt", s.expiresAt().toString()));
+          return;
+        }
+
+        case "/validate-token" -> {
+          // requireSession(req);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) {
+            return;
+          }
+          ValidationResponse validation = validateTokenAndCertificate(cfg, ctx);
+          int status = validation.ok ? 200 : 422;
+          writeJson(resp, status, validation.body);
           return;
         }
 
@@ -2744,6 +2762,297 @@ public final class ApiServlet {
     }
 
     return null;
+  }
+
+  private record ValidationResponse(boolean ok, Map<String, Object> body) {
+  }
+
+  private ValidationResponse validateTokenAndCertificate(AgentConfig cfg, String ctx) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    Map<String, Object> steps = new LinkedHashMap<>();
+    body.put("ts", Instant.now().toString());
+    body.put("steps", steps);
+
+    LOG.info("{} /validate-token step=tokenPresence start", ctx);
+    List<String> libs;
+    try {
+      libs = resolvePkcs11Libraries(cfg);
+    } catch (Exception e) {
+      return validationFailure(body, steps, "tokenPresence", "No PKCS#11 libraries configured", safeMsg(e));
+    }
+    if (libs.isEmpty()) {
+      return validationFailure(body, steps, "tokenPresence", "No PKCS#11 libraries configured for this OS", null);
+    }
+
+    char[] pin;
+    try {
+      pin = resolvePin(cfg);
+    } catch (SecurityException e) {
+      return validationFailure(body, steps, "tokenPresence", "Token PIN missing", safeMsg(e));
+    }
+
+    Pkcs11Token.Loaded loaded;
+    try {
+      loaded = Pkcs11Token.load(pin, libs);
+      body.put("libraryPath", loaded.libraryPath());
+      stepOk(steps, "tokenPresence", Map.of("libraryPath", loaded.libraryPath()));
+      LOG.info("{} /validate-token step=tokenPresence ok library={}", ctx, loaded.libraryPath());
+    } catch (RuntimeException e) {
+      return validationFailure(body, steps, "tokenPresence", "Token not found or not accessible", buildTokenErrorDetail(e));
+    }
+
+    LOG.info("{} /validate-token step=certificateExtraction start", ctx);
+    CertificateSelection selection;
+    String selectionMode;
+    try {
+      List<PublicKey> configured = loadConfiguredPublicKeysOrThrow();
+      selection = selectCertificateForPublicKeys(loaded.keyStore(), configured);
+      selectionMode = "public-key-match";
+      if (selection == null) {
+        selection = selectBestSigningCertificate(loaded.keyStore());
+        selectionMode = "best-signing-cert";
+      }
+    } catch (Exception e) {
+      return validationFailure(body, steps, "certificateExtraction",
+          "Failed to extract signing certificate from token", safeMsg(e));
+    }
+    if (selection == null || selection.certificate == null) {
+      return validationFailure(body, steps, "certificateExtraction", "No usable signing certificate found on token", null);
+    }
+    body.put("alias", selection.alias);
+    body.put("certificate", toCertificateJson(selection.certificate));
+    stepOk(steps, "certificateExtraction", Map.of("alias", selection.alias, "mode", selectionMode));
+    LOG.info("{} /validate-token step=certificateExtraction ok alias={} mode={}", ctx, selection.alias, selectionMode);
+
+    LOG.info("{} /validate-token step=certificateValidity start alias={}", ctx, selection.alias);
+    try {
+      selection.certificate.checkValidity();
+      stepOk(steps, "certificateValidity", Map.of(
+          "notBefore", selection.certificate.getNotBefore().toInstant().toString(),
+          "notAfter", selection.certificate.getNotAfter().toInstant().toString()));
+      LOG.info("{} /validate-token step=certificateValidity ok", ctx);
+    } catch (Exception e) {
+      return validationFailure(body, steps, "certificateValidity", "Certificate is not currently valid", safeMsg(e));
+    }
+
+    LOG.info("{} /validate-token step=certificateChainValidation start", ctx);
+    X509Certificate[] x509Chain = toX509Chain(selection);
+    try {
+      validateChainAgainstTrustStore(selection.certificate, x509Chain);
+      stepOk(steps, "certificateChainValidation", Map.of("chainLength", x509Chain.length));
+      LOG.info("{} /validate-token step=certificateChainValidation ok chainLength={}", ctx, x509Chain.length);
+    } catch (Exception e) {
+      return validationFailure(body, steps, "certificateChainValidation",
+          "Certificate chain validation failed", safeMsg(e));
+    }
+
+    LOG.info("{} /validate-token step=revocationCheck start", ctx);
+    X509Certificate issuer = resolveIssuerForRevocation(selection, x509Chain);
+    if (issuer == null) {
+      return validationFailure(body, steps, "revocationCheck",
+          "Issuer certificate not found for revocation check", "Missing intermediate or truststore issuer");
+    }
+    LtvEnabler.Config ltvCfg = ltvConfigFromAgentConfig(cfg);
+    if (!ltvCfg.enabled()) {
+      ltvCfg = new LtvEnabler.Config(true, false, 10_000, 15_000, 10_000, 15_000);
+    }
+    RevocationProbeResult probe = LtvEnabler.probeRevocation(selection.certificate, issuer, ltvCfg);
+    Map<String, Object> rev = new LinkedHashMap<>();
+    rev.put("ocspOk", probe.ocspOk());
+    rev.put("ocspLatencyMs", probe.ocspLatencyMs());
+    rev.put("ocspError", probe.ocspError());
+    rev.put("crlAttempted", probe.crlAttempted());
+    rev.put("crlOk", probe.crlOk());
+    rev.put("crlLatencyMs", probe.crlLatencyMs());
+    rev.put("crlError", probe.crlError());
+    rev.put("source", probe.source());
+    if (!probe.ok()) {
+      return validationFailure(body, steps, "revocationCheck",
+          "OCSP and CRL both failed for certificate", rev.toString());
+    }
+    stepOk(steps, "revocationCheck", rev);
+    LOG.info("{} /validate-token step=revocationCheck ok source={}", ctx, probe.source());
+
+    LOG.info("{} /validate-token step=signatureCapability start", ctx);
+    if (!supportsDigitalSignatureUsage(selection.certificate)) {
+      return validationFailure(body, steps, "signatureCapability",
+          "Certificate key usage does not permit digital signing", null);
+    }
+    stepOk(steps, "signatureCapability", Map.of("digitalSignatureCapable", true));
+    LOG.info("{} /validate-token step=signatureCapability ok", ctx);
+
+    body.put("ok", true);
+    return new ValidationResponse(true, body);
+  }
+
+  private static X509Certificate[] toX509Chain(CertificateSelection selection) {
+    if (selection == null || selection.certificate == null) {
+      return new X509Certificate[0];
+    }
+    if (selection.chain == null || selection.chain.length == 0) {
+      return new X509Certificate[] { selection.certificate };
+    }
+    java.util.ArrayList<X509Certificate> out = new java.util.ArrayList<>();
+    for (Certificate c : selection.chain) {
+      if (c instanceof X509Certificate x) {
+        out.add(x);
+      }
+    }
+    if (out.isEmpty()) {
+      out.add(selection.certificate);
+    }
+    return out.toArray(new X509Certificate[0]);
+  }
+
+  private static X509Certificate resolveIssuerForRevocation(CertificateSelection sel, X509Certificate[] chain) {
+    if (chain != null && chain.length > 1) {
+      return chain[1];
+    }
+    try {
+      return CertificateValidator.findIssuerInConfiguredTruststore(sel.certificate);
+    } catch (Exception ignored) {
+      return null;
+    }
+  }
+
+  private static boolean supportsDigitalSignatureUsage(X509Certificate cert) {
+    boolean[] ku = cert.getKeyUsage();
+    // When key usage extension is absent, treat as allowed.
+    if (ku == null) {
+      return true;
+    }
+    return (ku.length > 0 && ku[0]) || (ku.length > 1 && ku[1]);
+  }
+
+  private static CertificateSelection selectBestSigningCertificate(KeyStore ks) throws Exception {
+    CertificateSelection best = null;
+    int bestScore = Integer.MIN_VALUE;
+    for (Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
+      String alias = e.nextElement();
+      if (!ks.isKeyEntry(alias)) {
+        continue;
+      }
+      Certificate cert = ks.getCertificate(alias);
+      if (!(cert instanceof X509Certificate x509)) {
+        continue;
+      }
+      Certificate[] chain = ks.getCertificateChain(alias);
+      int score = 0;
+      try {
+        x509.checkValidity();
+        score += 10;
+      } catch (Exception ignored) {
+      }
+      if (supportsDigitalSignatureUsage(x509)) {
+        score += 5;
+      }
+      score += chain == null ? 0 : chain.length;
+      if (score > bestScore) {
+        bestScore = score;
+        best = new CertificateSelection(alias, x509, chain);
+      }
+    }
+    return best;
+  }
+
+  private static void validateChainAgainstTrustStore(X509Certificate leaf, X509Certificate[] chain) throws Exception {
+    X509Certificate[] toValidate = (chain != null && chain.length > 0) ? chain : new X509Certificate[] { leaf };
+    KeyStore trustStore = loadConfiguredTruststoreIfPresent();
+    TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+    if (trustStore != null) {
+      tmf.init(trustStore);
+    } else {
+      tmf.init((KeyStore) null);
+    }
+    X509TrustManager x509Tm = null;
+    for (TrustManager tm : tmf.getTrustManagers()) {
+      if (tm instanceof X509TrustManager xtm) {
+        x509Tm = xtm;
+        break;
+      }
+    }
+    if (x509Tm == null) {
+      throw new SecurityException("No X509TrustManager available");
+    }
+    try {
+      x509Tm.checkClientTrusted(toValidate, "RSA");
+    } catch (Exception e) {
+      String msg = e.getMessage();
+      if (msg != null
+          && (msg.contains("Extended key usage does not permit use for TLS client authentication")
+              || msg.contains("Extended key usage does not permit use for TLS server authentication"))) {
+        // Signing certificates often omit TLS EKU; keep chain validation pass for signing use-cases.
+        return;
+      }
+      throw e;
+    }
+  }
+
+  private static KeyStore loadConfiguredTruststoreIfPresent() throws Exception {
+    String path = System.getProperty("trustsign.truststore.path");
+    if (path == null || path.isBlank()) {
+      return null;
+    }
+    String type = System.getProperty("trustsign.truststore.type", KeyStore.getDefaultType());
+    String password = System.getProperty("trustsign.truststore.password", "");
+    KeyStore ks = KeyStore.getInstance(type);
+    try (java.io.FileInputStream fis = new java.io.FileInputStream(path)) {
+      char[] pwd = password.isEmpty() ? null : password.toCharArray();
+      ks.load(fis, pwd);
+    }
+    return ks;
+  }
+
+  private static Map<String, Object> toCertificateJson(X509Certificate cert) {
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("subject", cert.getSubjectX500Principal().getName());
+    out.put("issuer", cert.getIssuerX500Principal().getName());
+    out.put("serialHex", cert.getSerialNumber() == null ? null : cert.getSerialNumber().toString(16));
+    out.put("notBefore", cert.getNotBefore() == null ? null : cert.getNotBefore().toInstant().toString());
+    out.put("notAfter", cert.getNotAfter() == null ? null : cert.getNotAfter().toInstant().toString());
+    out.put("pubKeyAlg", cert.getPublicKey() == null ? null : cert.getPublicKey().getAlgorithm());
+    out.put("sha256Fingerprint", sha256Fingerprint(cert));
+    return out;
+  }
+
+  private static String sha256Fingerprint(X509Certificate cert) {
+    try {
+      byte[] der = cert.getEncoded();
+      byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(der);
+      return HexFormat.of().formatHex(digest);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private ValidationResponse validationFailure(
+      Map<String, Object> body,
+      Map<String, Object> steps,
+      String step,
+      String error,
+      String details) {
+    Map<String, Object> stepBody = new LinkedHashMap<>();
+    stepBody.put("ok", false);
+    stepBody.put("error", error);
+    if (details != null && !details.isBlank()) {
+      stepBody.put("details", details);
+    }
+    steps.put(step, stepBody);
+    body.put("ok", false);
+    body.put("error", error);
+    if (details != null && !details.isBlank()) {
+      body.put("details", details);
+    }
+    return new ValidationResponse(false, body);
+  }
+
+  private static void stepOk(Map<String, Object> steps, String step, Map<String, Object> details) {
+    Map<String, Object> stepBody = new LinkedHashMap<>();
+    stepBody.put("ok", true);
+    if (details != null && !details.isEmpty()) {
+      stepBody.putAll(details);
+    }
+    steps.put(step, stepBody);
   }
 
   /**
