@@ -49,6 +49,12 @@ public final class MultiWidgetPdfSigner extends PdfSigner {
 
   @Override
   protected PdfSigFieldLock createNewSignatureFormField(PdfAcroForm acroForm, String name) throws IOException {
+    // For a single widget/page, defer to stock PdfSigner behavior.
+    // The custom multi-widget wiring is only needed when we actually have >1 widgets.
+    if (widgetPages1Based.size() == 1) {
+      return super.createNewSignatureFormField(acroForm, name);
+    }
+
     PdfSignatureAppearance appearance = getSignatureAppearance();
     PdfDocument document = getDocument();
 
