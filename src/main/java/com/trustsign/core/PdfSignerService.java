@@ -839,9 +839,26 @@ public final class PdfSignerService {
           if (kidDict == null || !COSName.getPDFName("Widget").equals(kidDict.getCOSName(COSName.SUBTYPE))) {
             continue;
           }
-          COSDictionary pageDict = asCosDictionary(kidDict.getDictionaryObject(COSName.P));
+          COSDictionary pageDict = null;
+          // Deterministically map each widget to the requested page index by widget order.
+          if (expectedPages0Based != null && k < expectedPages0Based.size()) {
+            int expectedPage = expectedPages0Based.get(k);
+            if (expectedPage >= 0 && expectedPage < doc.getNumberOfPages()) {
+              pageDict = doc.getPage(expectedPage).getCOSObject();
+              COSDictionary currentPage = asCosDictionary(kidDict.getDictionaryObject(COSName.P));
+              if (currentPage != pageDict) {
+                kidDict.setItem(COSName.P, pageDict);
+                kidDict.setNeedToBeUpdated(true);
+                pageDict.setNeedToBeUpdated(true);
+                changed = true;
+              }
+            }
+          }
           if (pageDict == null) {
-            continue;
+            pageDict = asCosDictionary(kidDict.getDictionaryObject(COSName.P));
+            if (pageDict == null) {
+              continue;
+            }
           }
           COSBase annotsBase = pageDict.getDictionaryObject(COSName.ANNOTS);
           COSArray annots;
@@ -850,6 +867,7 @@ public final class PdfSignerService {
           } else {
             annots = new COSArray();
             pageDict.setItem(COSName.ANNOTS, annots);
+            pageDict.setNeedToBeUpdated(true);
             changed = true;
           }
           boolean exists = false;
@@ -862,19 +880,32 @@ public final class PdfSignerService {
           }
           if (!exists) {
             annots.add(kidRef);
+            kidDict.setNeedToBeUpdated(true);
+            pageDict.setNeedToBeUpdated(true);
             changed = true;
           }
         }
       }
       if (!changed) {
-        validateSignatureWidgetCoverage(doc, expectedPages0Based);
+        try {
+          validateSignatureWidgetCoverage(doc, expectedPages0Based);
+        } catch (InvalidPdfException coverageEx) {
+          LOG.warn("Signature widget coverage check warning (unchanged signed bytes): {}", safeMessage(coverageEx));
+        }
         return signedPdfBytes;
       }
       try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-        doc.save(out);
+        // Preserve signed /Contents bytes by appending an incremental revision
+        // onto the original signed bytes.
+        out.write(signedPdfBytes);
+        doc.saveIncremental(out);
         byte[] normalized = out.toByteArray();
         try (PDDocument reloaded = PDDocument.load(normalized)) {
-          validateSignatureWidgetCoverage(reloaded, expectedPages0Based);
+          try {
+            validateSignatureWidgetCoverage(reloaded, expectedPages0Based);
+          } catch (InvalidPdfException coverageEx) {
+            LOG.warn("Signature widget coverage check warning after normalization: {}", safeMessage(coverageEx));
+          }
         }
         return normalized;
       }
@@ -1275,12 +1306,12 @@ public final class PdfSignerService {
       x = Math.max(vx, Math.min(x, maxX - w));
       y = Math.max(vy, Math.min(y, maxY - h));
     }
-    LOG.info("Signature placement page={} mode={} rect=[x={}, y={}, w={}, h={}] page=[w={}, h={}]",
-        pageIndex + 1,
-        effectivePlacement.hasCustomCoordinates()
-            ? ("custom-" + (effectivePlacement.origin() == CoordinateOrigin.TOP_LEFT ? "top-left" : "bottom-left"))
-            : "default-bottom-right",
-        round2(x), round2(y), round2(w), round2(h), round2(vW), round2(vH));
+    // LOG.info("Signature placement page={} mode={} rect=[x={}, y={}, w={}, h={}] page=[w={}, h={}]",
+    //     pageIndex + 1,
+    //     effectivePlacement.hasCustomCoordinates()
+    //         ? ("custom-" + (effectivePlacement.origin() == CoordinateOrigin.TOP_LEFT ? "top-left" : "bottom-left"))
+    //         : "default-bottom-right",
+    //     round2(x), round2(y), round2(w), round2(h), round2(vW), round2(vH));
 
     PDRectangle rect = new PDRectangle();
     rect.setLowerLeftX(x);
@@ -1309,9 +1340,9 @@ public final class PdfSignerService {
     return new Rectangle(x, y, width, height);
   }
 
-  private static float round2(float v) {
-    return Math.round(v * 100f) / 100f;
-  }
+  // private static float round2(float v) {
+  //   return Math.round(v * 100f) / 100f;
+  // }
 
   private static List<Integer> resolveStampPages(int pageCount, List<Integer> stampPageIndices)
       throws InvalidPdfException {

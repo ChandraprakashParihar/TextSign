@@ -4,8 +4,10 @@ import org.bouncycastle.asn1.ASN1OctetString;
 import org.bouncycastle.asn1.ASN1Primitive;
 import org.bouncycastle.asn1.x509.AccessDescription;
 import org.bouncycastle.asn1.x509.AuthorityInformationAccess;
+import org.bouncycastle.asn1.x509.ExtendedKeyUsage;
 import org.bouncycastle.asn1.x509.Extension;
 import org.bouncycastle.asn1.x509.GeneralName;
+import org.bouncycastle.asn1.x509.KeyPurposeId;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
 import org.bouncycastle.cert.ocsp.BasicOCSPResp;
 import org.bouncycastle.cert.ocsp.CertificateID;
@@ -92,14 +94,52 @@ final class OcspClient {
     if (status != org.bouncycastle.cert.ocsp.CertificateStatus.GOOD) {
       throw new IllegalStateException("OCSP cert status is not GOOD");
     }
-    // Basic signature check with issuer key when responder cert is issuer-signed common case.
-    if (!basic.isSignatureValid(
-        new org.bouncycastle.operator.jcajce.JcaContentVerifierProviderBuilder().build(issuer.getPublicKey()))) {
-      throw new IllegalStateException("OCSP response signature invalid against issuer certificate");
+    // Signature can be by issuer OR delegated OCSP responder cert (id-kp-OCSPSigning).
+    boolean signatureValid = basic.isSignatureValid(
+        new org.bouncycastle.operator.jcajce.JcaContentVerifierProviderBuilder().build(issuer.getPublicKey()));
+    if (!signatureValid) {
+      var responderCerts = basic.getCerts();
+      for (var holder : responderCerts) {
+        X509Certificate responder =
+            new org.bouncycastle.cert.jcajce.JcaX509CertificateConverter().getCertificate(holder);
+        if (!basic.isSignatureValid(
+            new org.bouncycastle.operator.jcajce.JcaContentVerifierProviderBuilder().build(responder.getPublicKey()))) {
+          continue;
+        }
+        if (!isOcspSigningCert(responder)) {
+          continue;
+        }
+        if (!issuer.getSubjectX500Principal().equals(responder.getIssuerX500Principal())) {
+          continue;
+        }
+        try {
+          responder.verify(issuer.getPublicKey());
+          signatureValid = true;
+          break;
+        } catch (Exception ignored) {
+          // Try next responder certificate candidate if available.
+        }
+      }
+    }
+    if (!signatureValid) {
+      throw new IllegalStateException("OCSP response signature invalid for issuer/delegated responder");
     }
     // cert/issuer are intentionally read for validation semantics
     if (cert.getSerialNumber() == null || issuer.getSubjectX500Principal() == null) {
       throw new IllegalStateException("Certificate metadata missing");
+    }
+  }
+
+  private static boolean isOcspSigningCert(X509Certificate cert) {
+    try {
+      byte[] ext = cert.getExtensionValue(Extension.extendedKeyUsage.getId());
+      if (ext == null) return false;
+      ASN1Primitive p =
+          ASN1Primitive.fromByteArray(((ASN1OctetString) ASN1Primitive.fromByteArray(ext)).getOctets());
+      ExtendedKeyUsage eku = ExtendedKeyUsage.getInstance(p);
+      return eku != null && eku.hasKeyPurposeId(KeyPurposeId.id_kp_OCSPSigning);
+    } catch (Exception e) {
+      return false;
     }
   }
 

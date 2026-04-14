@@ -170,3 +170,7 @@ Then:
     "crlConnectTimeoutMs": 10000,
     "crlReadTimeoutMs": 15000
   }
+
+
+  output (raw | file | both)
+outputFormat (base64 | hex | binary)

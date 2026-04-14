@@ -31,6 +31,10 @@ public record AgentConfig(
     @JsonProperty(required = false) TsaConfig tsa,
     /** Optional. Long-Term Validation (DSS: certs, OCSP, CRLs) settings for PDF signatures. */
     @JsonProperty(required = false) LtvConfig ltv,
+    /** Optional default output mode for auto-sign APIs: raw, file, or both. */
+    @JsonProperty(required = false) String output,
+    /** Optional default raw output format for auto-sign APIs: base64, hex, or binary. */
+    @JsonProperty(required = false) String outputFormat,
     /**
      * Optional. When set, /auto-sign-text and /auto-sign-text-cms will always write signed
      * files to this directory instead of taking outputDir from the HTTP request.

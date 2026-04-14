@@ -1,8 +1,8 @@
 {
   "port": 8080,
-  "allowedOrigins": ["http://localhost:3000"],
+  "allowedOrigins": ["*"],
   "allowedClientIps": [
-    "127.0.0.1"
+    "0.0.0.0"
   ],
   "logFilePath": "/Users/jainnibha/output/logs/trustsign/application.log",
   "logging": {
@@ -26,6 +26,8 @@
     "gracefulStopTimeoutMs": 30000
   },
   "autoSignOutputDir": "/Users/jainnibha/output",
+  "output": "file",
+  "outputFormat": "base64",
   "signerVersion": "TrustSign_0.1.0",
   "signatureImagePath": "/Users/jainnibha/chandra-workspace/trustsign/assets/greentickrbg.png",
   "truststore": {
@@ -67,6 +69,7 @@
     "crlConnectTimeoutMs": 10000,
     "crlReadTimeoutMs": 15000
   }
+
 }
 
 

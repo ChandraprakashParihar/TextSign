@@ -62,12 +62,21 @@ public class SpringServerConfig {
   }
 
   @Bean
+  public FilterRegistrationBean<RequestTracingFilter> requestTracingFilterRegistration() {
+    FilterRegistrationBean<RequestTracingFilter> bean =
+        new FilterRegistrationBean<>(new RequestTracingFilter());
+    bean.addUrlPatterns("/pki/*");
+    bean.setOrder(Ordered.HIGHEST_PRECEDENCE - 10);
+    return bean;
+  }
+
+  @Bean
   public FilterRegistrationBean<SigningConcurrencyFilter> signingFilterRegistration(
       SigningConcurrencyGate signingGate,
       AgentConfig cfg) {
     FilterRegistrationBean<SigningConcurrencyFilter> bean =
         new FilterRegistrationBean<>(new SigningConcurrencyFilter(signingGate, cfg.server()));
-    bean.addUrlPatterns("/v1/*");
+    bean.addUrlPatterns("/pki/*");
     bean.setOrder(Ordered.HIGHEST_PRECEDENCE);
     return bean;
   }
@@ -127,7 +136,7 @@ public class SpringServerConfig {
           return;
         }
         String[] allowedOrigins = Objects.requireNonNull(cfg.allowedOrigins().toArray(new String[0]));
-        registry.addMapping("/v1/**")
+        registry.addMapping("/pki/**")
             .allowedOrigins(allowedOrigins)
             .allowedMethods("GET", "POST", "OPTIONS")
             .allowedHeaders("*");

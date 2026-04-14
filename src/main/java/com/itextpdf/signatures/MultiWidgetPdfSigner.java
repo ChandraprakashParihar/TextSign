@@ -8,9 +8,12 @@ import com.itextpdf.kernel.geom.Rectangle;
 import com.itextpdf.kernel.pdf.PdfDictionary;
 import com.itextpdf.kernel.pdf.PdfDocument;
 import com.itextpdf.kernel.pdf.PdfName;
+import com.itextpdf.kernel.pdf.PdfArray;
+import com.itextpdf.kernel.pdf.PdfObject;
 import com.itextpdf.kernel.pdf.PdfReader;
 import com.itextpdf.kernel.pdf.StampingProperties;
 import com.itextpdf.kernel.pdf.xobject.PdfFormXObject;
+import com.itextpdf.kernel.pdf.PdfPage;
 import com.itextpdf.kernel.pdf.annot.PdfAnnotation;
 import com.itextpdf.kernel.pdf.annot.PdfWidgetAnnotation;
 
@@ -83,7 +86,11 @@ public final class MultiWidgetPdfSigner extends PdfSigner {
     sigField.addKid(primaryWidget);
     primaryWidget.makeIndirect(document);
 
-    // Additional widgets are attached directly to their pages.
+    // Attach all widgets directly to their pages.
+    // Relying only on acroForm.addField(sigField, primaryPage) can skip page-1
+    // linkage in some viewer/runtime combinations.
+    ensureWidgetOnPage(document.getPage(primaryPage), primaryWidget);
+
     for (int i = 1; i < widgetPages1Based.size(); i++) {
       int pageNum = widgetPages1Based.get(i);
       Rectangle rect = widgetRects.get(i);
@@ -99,7 +106,7 @@ public final class MultiWidgetPdfSigner extends PdfSigner {
       }
       sigField.addKid(widget);
       widget.makeIndirect(document);
-      document.getPage(pageNum).addAnnotation(widget);
+      ensureWidgetOnPage(document.getPage(pageNum), widget);
     }
     acroForm.addField(sigField, document.getPage(primaryPage));
 
@@ -109,6 +116,20 @@ public final class MultiWidgetPdfSigner extends PdfSigner {
       document.getCatalog().setModified();
     }
     return sigFieldLock;
+  }
+
+  private static void ensureWidgetOnPage(PdfPage page, PdfWidgetAnnotation widget) {
+    PdfArray annots = page.getPdfObject().getAsArray(PdfName.Annots);
+    if (annots != null) {
+      PdfObject widgetObj = widget.getPdfObject();
+      for (int i = 0; i < annots.size(); i++) {
+        PdfObject existing = annots.get(i);
+        if (existing == widgetObj || existing == widgetObj.getIndirectReference()) {
+          return;
+        }
+      }
+    }
+    page.addAnnotation(widget);
   }
 
   /**

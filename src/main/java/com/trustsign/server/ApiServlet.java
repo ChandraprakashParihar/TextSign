@@ -105,7 +105,7 @@ public final class ApiServlet {
    * When allowedClientIps is null or empty, all IPs are allowed.
    */
   private boolean isClientIpAllowed(HttpServletRequest req) {
-    String remoteIp = req.getRemoteAddr();
+    String remoteIp = RequestTrace.resolveClientIp(req);
     try {
       File cfgFile = resolveConfigFile();
       if (!cfgFile.exists()) {
@@ -115,6 +115,10 @@ public final class ApiServlet {
       AgentConfig cfg = ConfigLoader.load(cfgFile);
       List<String> allowed = cfg.allowedClientIps();
       if (allowed == null || allowed.isEmpty()) {
+        return true;
+      }
+      // Support wildcard semantics in config for trusted internal deployments.
+      if (allowed.stream().anyMatch(v -> v != null && ("*".equals(v.trim()) || "0.0.0.0".equals(v.trim())))) {
         return true;
       }
       boolean ok = allowed.contains(remoteIp);
@@ -129,6 +133,10 @@ public final class ApiServlet {
   }
 
   private static String requestId(HttpServletRequest req) {
+    String txnId = RequestTrace.resolveTxnId(req);
+    if (txnId != null && !txnId.isBlank()) {
+      return txnId;
+    }
     String h = req != null ? req.getHeader("X-Request-Id") : null;
     if (h != null && !h.isBlank()) {
       return h.trim();
@@ -141,8 +149,7 @@ public final class ApiServlet {
   private static String logCtx(HttpServletRequest req, String requestId) {
     String method = req != null ? req.getMethod() : "";
     String path = req != null ? req.getPathInfo() : "";
-    String ip = req != null ? req.getRemoteAddr() : "";
-    return "[rid=" + requestId + " " + method + " " + path + " ip=" + ip + "]";
+    return "[rid=" + requestId + "] [" + method + " " + path + "]";
   }
 
   /**
@@ -443,6 +450,84 @@ public final class ApiServlet {
     return new LtvEnabler.Config(true, fail, ocspCt, ocspRt, crlCt, crlRt);
   }
 
+  private static boolean isLtvRequired(AgentConfig cfg) {
+    return cfg != null && cfg.ltv() != null && Boolean.TRUE.equals(cfg.ltv().enabled());
+  }
+
+  private static String validateLtvArtifactsIfRequired(byte[] signedPdf, AgentConfig cfg) {
+    if (!isLtvRequired(cfg)) {
+      return null;
+    }
+    PdfLtvInspector.Result ltvResult = PdfLtvInspector.inspect(signedPdf);
+    if (!ltvResult.ok()) {
+      return "LTV inspection failed: " + ltvResult.reason();
+    }
+    if (!ltvResult.dssPresent()) {
+      return "DSS dictionary missing";
+    }
+    if (!ltvResult.vriPresent() || ltvResult.vriEntryCount() <= 0) {
+      return "VRI entries missing";
+    }
+    if (ltvResult.ocspsCount() <= 0 && ltvResult.crlsCount() <= 0) {
+      return "No OCSP/CRL revocation data embedded";
+    }
+    // Acrobat-style LTV readiness: every non-root cert should have OCSP/CRL evidence.
+    // Merely having DSS/VRI plus some revocation objects is not always enough for the UI badge.
+    List<PdfLtvInspector.CertificateRevocationReport> revocation = ltvResult.certificateRevocation();
+    if (revocation != null && !revocation.isEmpty()) {
+      java.util.Set<String> embeddedSubjects = new java.util.HashSet<>();
+      for (PdfLtvInspector.CertificateRevocationReport cert : revocation) {
+        if (cert != null && cert.subject() != null && !cert.subject().isBlank()) {
+          embeddedSubjects.add(cert.subject());
+        }
+      }
+      int missingCount = 0;
+      StringBuilder sampleSubjects = new StringBuilder();
+      for (PdfLtvInspector.CertificateRevocationReport cert : revocation) {
+        if (cert == null) {
+          continue;
+        }
+        String subject = cert.subject();
+        String issuer = cert.issuer();
+        boolean selfSignedRoot = subject != null && issuer != null && subject.equals(issuer);
+        if (selfSignedRoot) {
+          continue;
+        }
+        // Cross-signed/highest CA entries can be non-self-signed but still act as trust anchors
+        // in Acrobat's chain building; do not require revocation evidence if issuer is not embedded.
+        if (issuer == null || issuer.isBlank() || !embeddedSubjects.contains(issuer)) {
+          continue;
+        }
+        String source = cert.revocationSource();
+        boolean hasEvidence = source != null && !source.isBlank() && !"none".equalsIgnoreCase(source.trim());
+        if (!hasEvidence) {
+          missingCount++;
+          if (sampleSubjects.length() < 300) {
+            if (sampleSubjects.length() > 0) {
+              sampleSubjects.append("; ");
+            }
+            sampleSubjects.append(subject != null && !subject.isBlank() ? subject : "<unknown-subject>");
+          }
+        }
+      }
+      if (missingCount > 0) {
+        return "Missing OCSP/CRL evidence for "
+            + missingCount
+            + " non-root certificate(s): "
+            + sampleSubjects;
+      }
+    }
+    return null;
+  }
+
+  private static Map<String, Object> ltvFailureBody(String ltvError) {
+    String reason = (ltvError == null || ltvError.isBlank()) ? "unknown reason" : ltvError;
+    // Keep actionable reason in `error` because `details` can be redacted in production mode.
+    return Map.of(
+        "error", "LTV not enabled in signed PDF: " + reason,
+        "details", reason);
+  }
+
   private Map<String, Object> probeTsaHealth(AgentConfig cfg) {
     TsaClient.Config tsa = tsaConfigFromAgentConfig(cfg);
     Map<String, Object> out = new LinkedHashMap<>();
@@ -643,10 +728,13 @@ public final class ApiServlet {
     }
   }
 
-  private static OutputPreference parseOutputPreference(Multipart.Data mp) {
-    String outputRaw = readMultipartString(mp, "output", true);
+  private static OutputPreference parseOutputPreference(Multipart.Data mp, AgentConfig cfg) {
+    String outputRaw = firstNonBlank(
+        cfg != null ? cfg.output() : null,
+        readMultipartString(mp, "output", true));
     if (outputRaw == null || outputRaw.isBlank()) {
-      throw new IllegalArgumentException("output is required. Supported values: raw, file, both");
+      throw new IllegalArgumentException(
+          "output is required (config.output or request field). Supported values: raw, file, both");
     }
     OutputMode mode = switch (outputRaw.trim().toLowerCase(java.util.Locale.ROOT)) {
       case "raw" -> OutputMode.RAW;
@@ -657,7 +745,9 @@ public final class ApiServlet {
 
     RawOutputFormat format = RawOutputFormat.BASE64;
     if (mode == OutputMode.RAW) {
-      String outputFormatRaw = readMultipartString(mp, "outputFormat", true);
+      String outputFormatRaw = firstNonBlank(
+          cfg != null ? cfg.outputFormat() : null,
+          readMultipartString(mp, "outputFormat", true));
       if (outputFormatRaw != null && !outputFormatRaw.isBlank()) {
         format = switch (outputFormatRaw.trim().toLowerCase(java.util.Locale.ROOT)) {
           case "base64" -> RawOutputFormat.BASE64;
@@ -997,9 +1087,12 @@ public final class ApiServlet {
         case "/auto-sign-text" -> {
           requireSession(req);
           var mp = Multipart.read(req, multipartTextMaxBytes);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null)
+            return;
           OutputPreference outputPreference;
           try {
-            outputPreference = parseOutputPreference(mp);
+            outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
@@ -1015,10 +1108,6 @@ public final class ApiServlet {
                 Map.of("error", "PDF is not allowed on /auto-sign-text. Use /sign-pdf or /auto-sign-pdf."));
             return;
           }
-
-          AgentConfig cfg = loadConfig(resp);
-          if (cfg == null)
-            return;
 
           File outDirFile = null;
           if (outputPreference.includesFile()) {
@@ -1203,9 +1292,12 @@ public final class ApiServlet {
         case "/auto-sign-pdf" -> {
           LOG.info("{} Auto-signing PDF request received", ctx);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null)
+            return;
           OutputPreference outputPreference;
           try {
-            outputPreference = parseOutputPreference(mp);
+            outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
@@ -1236,10 +1328,6 @@ public final class ApiServlet {
             writeJson(resp, 400, Map.of("error", "Uploaded file is not a PDF"));
             return;
           }
-
-          AgentConfig cfg = loadConfig(resp);
-          if (cfg == null)
-            return;
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
@@ -1392,6 +1480,11 @@ public final class ApiServlet {
               return;
             }
             byte[] signedPdf = signResult.signedPdf();
+            String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
+            if (ltvError != null) {
+              writeJson(resp, 422, ltvFailureBody(ltvError));
+              return;
+            }
             String outputPath = null;
             if (reservedOutPath != null) {
               Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
@@ -1418,8 +1511,8 @@ public final class ApiServlet {
             if (signResult.tsaWarning() != null) {
               autoPdfBody.put("tsaWarning", signResult.tsaWarning().getMessage());
             }
-            // writeJson(resp, 200, autoPdfBody);
-            resp.getOutputStream().write(signedPdf);
+            writeJson(resp, 200, autoPdfBody);
+            // resp.getOutputStream().write(signedPdf);
           } finally {
             if (reservedOutPath != null && !outputWritten) {
               try {
@@ -1435,9 +1528,12 @@ public final class ApiServlet {
         case "/auto-sign-text-cms" -> {
           requireSession(req);
           var mp = Multipart.read(req, multipartTextMaxBytes);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null)
+            return;
           OutputPreference outputPreference;
           try {
-            outputPreference = parseOutputPreference(mp);
+            outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
@@ -1452,10 +1548,6 @@ public final class ApiServlet {
                 Map.of("error", "PDF is not allowed on /auto-sign-text-cms. Use /sign-pdf or /auto-sign-pdf."));
             return;
           }
-          AgentConfig cfg = loadConfig(resp);
-          if (cfg == null)
-            return;
-
           File outDirFile = null;
           if (outputPreference.includesFile()) {
             String outputDir;
@@ -1596,9 +1688,12 @@ public final class ApiServlet {
         case "/sign-pdf" -> {
           requireSession(req);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null)
+            return;
           OutputPreference outputPreference;
           try {
-            outputPreference = parseOutputPreference(mp);
+            outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
@@ -1627,10 +1722,6 @@ public final class ApiServlet {
             writeJson(resp, 400, Map.of("error", "Uploaded file is not a PDF"));
             return;
           }
-
-          AgentConfig cfg = loadConfig(resp);
-          if (cfg == null)
-            return;
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
@@ -1724,6 +1815,11 @@ public final class ApiServlet {
             return;
           }
           byte[] signedPdf = signResult.signedPdf();
+          String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
+          if (ltvError != null) {
+            writeJson(resp, 422, ltvFailureBody(ltvError));
+            return;
+          }
           String outputPath = null;
           if (outputPreference.includesFile()) {
             String outputDir;
@@ -1901,6 +1997,11 @@ public final class ApiServlet {
 
           X509Certificate signingCert = hsmResult.signingCertificate();
           byte[] signedPdf = hsmResult.signedPdf();
+          String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
+          if (ltvError != null) {
+            writeJson(resp, 422, ltvFailureBody(ltvError));
+            return;
+          }
           resp.setStatus(200);
           resp.setContentType("application/pdf");
           resp.setHeader("X-Stamped-Pages", String.valueOf(stampPages));
@@ -1917,9 +2018,12 @@ public final class ApiServlet {
 
         case "/hsm/auto-sign-pdf" -> {
           var mp = Multipart.read(req, multipartPdfMaxBytes);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null)
+            return;
           OutputPreference outputPreference;
           try {
-            outputPreference = parseOutputPreference(mp);
+            outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
@@ -1958,10 +2062,6 @@ public final class ApiServlet {
             writeJson(resp, 400, Map.of("error", "Missing pin field (HSM token PIN)"));
             return;
           }
-
-          AgentConfig cfg = loadConfig(resp);
-          if (cfg == null)
-            return;
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
@@ -2071,6 +2171,11 @@ public final class ApiServlet {
             }
 
             byte[] signedPdf = hsmResult.signedPdf();
+            String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
+            if (ltvError != null) {
+              writeJson(resp, 422, ltvFailureBody(ltvError));
+              return;
+            }
             X509Certificate signingCert = hsmResult.signingCertificate();
             String outputPath = null;
             if (reservedOutPath != null) {
@@ -2149,9 +2254,12 @@ public final class ApiServlet {
           requireSession(req);
 
           var mp = Multipart.read(req, multipartTextMaxBytes);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null)
+            return;
           OutputPreference outputPreference;
           try {
-            outputPreference = parseOutputPreference(mp);
+            outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
@@ -2166,9 +2274,6 @@ public final class ApiServlet {
             return;
           }
 
-          AgentConfig cfg = loadConfig(resp);
-          if (cfg == null)
-            return;
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
@@ -2512,7 +2617,47 @@ public final class ApiServlet {
     resp.setStatus(status);
     resp.setContentType("application/json");
     Object normalized = normalizeErrorShape(status, body);
-    Json.MAPPER.writeValue(resp.getOutputStream(), redactErrorDetails(normalized));
+    Object withTxn = attachTxnId(normalized, resp);
+    Json.MAPPER.writeValue(resp.getOutputStream(), redactErrorDetails(withTxn));
+  }
+
+  private Object attachTxnId(Object body, HttpServletResponse resp) {
+    String txnId = RequestTrace.currentTxnId();
+    if (txnId == null || txnId.isBlank()) {
+      txnId = resp.getHeader(RequestTrace.TXN_ID_HEADER);
+    }
+    if (txnId == null || txnId.isBlank()) {
+      return body;
+    }
+    resp.setHeader(RequestTrace.TXN_ID_HEADER, txnId);
+    if (body instanceof Map<?, ?> original) {
+      if (original.containsKey("txnId")) {
+        return body;
+      }
+      Map<String, Object> out = new LinkedHashMap<>();
+      out.put("txnId", txnId);
+      for (Map.Entry<?, ?> e : original.entrySet()) {
+        if (e.getKey() != null) {
+          out.put(String.valueOf(e.getKey()), e.getValue());
+        }
+      }
+      return out;
+    }
+    try {
+      Map<String, Object> converted = Json.MAPPER.convertValue(
+          body,
+          new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
+          });
+      if (!converted.containsKey("txnId")) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("txnId", txnId);
+        out.putAll(converted);
+        return out;
+      }
+      return converted;
+    } catch (Exception ignored) {
+      return Map.of("txnId", txnId, "data", body);
+    }
   }
 
   private Object normalizeErrorShape(int status, Object body) {
@@ -2562,7 +2707,7 @@ public final class ApiServlet {
   }
 
   private boolean allowSessionIssue(HttpServletRequest req) {
-    String ip = req.getRemoteAddr();
+    String ip = RequestTrace.resolveClientIp(req);
     long nowMinute = System.currentTimeMillis() / 60_000L;
     SessionIssueWindow window = sessionIssueWindows.compute(ip, (k, curr) -> {
       if (curr == null || curr.minute != nowMinute) {

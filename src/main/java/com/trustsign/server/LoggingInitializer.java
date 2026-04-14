@@ -31,7 +31,7 @@ public final class LoggingInitializer {
   private static final String DAILY_LOG_SUFFIX = "-%d{yyyy-MM-dd}.log";
 
   private static final String LOG_FORMAT =
-      "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n";
+      "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [txnId=%X{txnId:-na}] [ip=%X{clientIp:-na}] %logger{36} - %msg%n";
 
   public static void initFromConfig(AgentConfig cfg, File configFile) {
     if (cfg == null) {
