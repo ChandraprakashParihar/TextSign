@@ -342,12 +342,16 @@ public final class ApiServlet {
       Multipart.Data mp, boolean finalVersion, AgentConfig cfg) {
     boolean allowResign = parseBooleanLoose(readMultipartString(mp, "allowResignFinalVersion", true));
     SignaturePlacement placement = parseSignaturePlacementFromMultipart(mp);
+    String signatureImagePath = cfg != null && cfg.signatureImagePath() != null && !cfg.signatureImagePath().isBlank()
+        ? cfg.signatureImagePath().trim()
+        : null;
     return new PdfSigningOptions(
         finalVersion,
         allowResign,
         tsaConfigFromAgentConfig(cfg),
         ltvConfigFromAgentConfig(cfg),
-        placement);
+        placement,
+        signatureImagePath);
   }
 
   private static SignaturePlacement parseSignaturePlacementFromMultipart(Multipart.Data mp) {

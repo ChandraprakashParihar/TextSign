@@ -110,4 +110,21 @@ public final class MultiWidgetPdfSigner extends PdfSigner {
     }
     return sigFieldLock;
   }
+
+  /**
+   * Swaps in {@link FullBleedDescriptionSignatureAppearance} so {@link PdfSignatureAppearance.RenderingMode#DESCRIPTION}
+   * text uses the full widget height (no iText 30% top band). Optional {@link PdfSignatureAppearance#setImage} still draws
+   * behind the text when configured.
+   */
+  public void useFullBleedDescriptionAppearance() {
+    PdfSignatureAppearance current = getSignatureAppearance();
+    if (current.isInvisible()) {
+      return;
+    }
+    FullBleedDescriptionSignatureAppearance next = FullBleedDescriptionSignatureAppearance.copyFrom(
+        getDocument(), current);
+    next.setFieldName(getFieldName());
+    next.setSignDate(getSignDate());
+    this.appearance = next;
+  }
 }

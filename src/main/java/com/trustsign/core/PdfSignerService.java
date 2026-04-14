@@ -3,6 +3,8 @@ package com.trustsign.core;
 import com.itextpdf.kernel.geom.Rectangle;
 import com.itextpdf.kernel.pdf.PdfReader;
 import com.itextpdf.kernel.pdf.StampingProperties;
+import com.itextpdf.io.image.ImageData;
+import com.itextpdf.io.image.ImageDataFactory;
 import com.itextpdf.signatures.BouncyCastleDigest;
 import com.itextpdf.signatures.DigestAlgorithms;
 import com.itextpdf.signatures.IExternalDigest;
@@ -27,6 +29,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.InvalidKeyException;
 import java.security.PrivateKey;
@@ -95,6 +99,7 @@ public final class PdfSignerService {
   private static final float DEFAULT_COORDINATE_WIDTH = 150f;
   private static final float DEFAULT_COORDINATE_HEIGHT = 50f;
   private static final float DEFAULT_EDGE_MARGIN = 24f;
+  private static final float SIGNATURE_BACKGROUND_IMAGE_SCALE = 0.10f;
 
   public enum CoordinateOverflowMode {
     ADJUST,
@@ -126,21 +131,24 @@ public final class PdfSignerService {
       boolean allowResignFinalVersion,
       TsaClient.Config tsaConfig,
       LtvEnabler.Config ltvConfig,
-      SignaturePlacement signaturePlacement) {
+      SignaturePlacement signaturePlacement,
+      String signatureImagePath) {
     public static final PdfSigningOptions DEFAULT = new PdfSigningOptions(
         false,
         false,
         TsaClient.Config.DISABLED,
         LtvEnabler.Config.DISABLED,
-        SignaturePlacement.DEFAULT);
+        SignaturePlacement.DEFAULT,
+        null);
 
     public PdfSigningOptions(boolean finalVersion) {
-      this(finalVersion, false, TsaClient.Config.DISABLED, LtvEnabler.Config.DISABLED, SignaturePlacement.DEFAULT);
+      this(finalVersion, false, TsaClient.Config.DISABLED, LtvEnabler.Config.DISABLED, SignaturePlacement.DEFAULT,
+          null);
     }
 
     public PdfSigningOptions(boolean finalVersion, boolean allowResignFinalVersion) {
       this(finalVersion, allowResignFinalVersion, TsaClient.Config.DISABLED, LtvEnabler.Config.DISABLED,
-          SignaturePlacement.DEFAULT);
+          SignaturePlacement.DEFAULT, null);
     }
   }
 
@@ -425,7 +433,8 @@ public final class PdfSignerService {
       boolean priorSigs = documentHasCompletedPriorSignatures(doc);
       List<Integer> resolved = resolveStampPages(pageCount, stampPageIndices);
       List<PDRectangle> rects = new ArrayList<>(resolved.size());
-      SignaturePlacement placement = opts.signaturePlacement() == null ? SignaturePlacement.DEFAULT : opts.signaturePlacement();
+      SignaturePlacement placement = opts.signaturePlacement() == null ? SignaturePlacement.DEFAULT
+          : opts.signaturePlacement();
       for (int pageIndex : resolved) {
         rects.add(computeSignatureWidgetRect(doc, pageIndex, opts.finalVersion(), placement));
       }
@@ -801,7 +810,8 @@ public final class PdfSignerService {
    * Some viewers render signature widgets only when each widget reference is
    * present in its page /Annots array. Ensure every /Sig widget kid is linked.
    */
-  private static byte[] ensureSignatureWidgetsLinkedToPageAnnots(byte[] signedPdfBytes, List<Integer> expectedPages0Based)
+  private static byte[] ensureSignatureWidgetsLinkedToPageAnnots(byte[] signedPdfBytes,
+      List<Integer> expectedPages0Based)
       throws IOException, InvalidPdfException {
     try (PDDocument doc = PDDocument.load(signedPdfBytes)) {
       COSDictionary catalog = doc.getDocumentCatalog().getCOSObject();
@@ -944,8 +954,36 @@ public final class PdfSignerService {
     appearance.setCertificate(material.signingCertificate());
     appearance.setLayer2Text(
         buildAppearanceText(material.signingCertificate(), reason, location, opts.finalVersion()));
+    ImageData signatureGraphic = loadSignatureGraphic(opts.signatureImagePath());
+    if (signatureGraphic != null) {
+      // Render the configured image as a background so layer-2 text stays on top.
+      appearance.setImage(signatureGraphic);
+      appearance.setImageScale(SIGNATURE_BACKGROUND_IMAGE_SCALE);
+    }
     appearance.setRenderingMode(PdfSignatureAppearance.RenderingMode.DESCRIPTION);
     appearance.setReuseAppearance(false);
+    // Full-bleed layer-2 text (no iText 30% top band), with or without background image.
+    if (signer instanceof MultiWidgetPdfSigner multi) {
+      multi.useFullBleedDescriptionAppearance();
+    }
+
+  }
+
+  private static ImageData loadSignatureGraphic(String signatureImagePath) {
+    if (signatureImagePath == null || signatureImagePath.isBlank()) {
+      return null;
+    }
+    try {
+      Path path = Path.of(signatureImagePath.trim());
+      if (!Files.isRegularFile(path)) {
+        LOG.warn("Signature image path does not exist or is not a file: {}", path.toAbsolutePath());
+        return null;
+      }
+      return ImageDataFactory.create(Files.readAllBytes(path));
+    } catch (Exception e) {
+      LOG.warn("Unable to load signature image '{}': {}", signatureImagePath, safeMessage(e));
+      return null;
+    }
   }
 
   private static String buildAppearanceText(
@@ -961,7 +999,8 @@ public final class PdfSignerService {
       sb.append("FINAL VERSION\n");
     }
     sb.append("Digitally signed by ").append(subject).append('\n');
-    sb.append(when);
+    // sb.append(when);
+    sb.append("Date: ").append(when);
     if (resolvedReason != null && !resolvedReason.isBlank()) {
       sb.append("\nReason: ").append(resolvedReason.trim());
     }
@@ -972,13 +1011,13 @@ public final class PdfSignerService {
   }
 
   // private static String resolveReason(String reason, boolean finalVersion) {
-  //   if (reason != null && !reason.isBlank()) {
-  //     String t = reason.trim();
-  //     return finalVersion ? t + FINAL_VERSION_REASON_SUFFIX : t;
-  //   }
-  //   return finalVersion
-  //       ? "TrustSign digital signature" + FINAL_VERSION_REASON_SUFFIX
-  //       : "TrustSign digital signature";
+  // if (reason != null && !reason.isBlank()) {
+  // String t = reason.trim();
+  // return finalVersion ? t + FINAL_VERSION_REASON_SUFFIX : t;
+  // }
+  // return finalVersion
+  // ? "TrustSign digital signature" + FINAL_VERSION_REASON_SUFFIX
+  // : "TrustSign digital signature";
   // }
 
   private static void requireNonEmptyPdf(byte[] pdfBytes) {
@@ -1201,10 +1240,12 @@ public final class PdfSignerService {
             : (finalVersion
                 ? Math.max(78f, Math.min((float) (vH * 0.12), 108f))
                 : Math.max(56f, Math.min((float) (vH * 0.075), 78f))));
-    float requestedX = effectivePlacement.hasCustomCoordinates() ? effectivePlacement.x() : vW - boxWidth - DEFAULT_EDGE_MARGIN;
+    float requestedX = effectivePlacement.hasCustomCoordinates() ? effectivePlacement.x()
+        : vW - boxWidth - DEFAULT_EDGE_MARGIN;
     float requestedY;
     if (effectivePlacement.hasCustomCoordinates()) {
-      CoordinateOrigin origin = effectivePlacement.origin() == null ? CoordinateOrigin.BOTTOM_LEFT : effectivePlacement.origin();
+      CoordinateOrigin origin = effectivePlacement.origin() == null ? CoordinateOrigin.BOTTOM_LEFT
+          : effectivePlacement.origin();
       requestedY = origin == CoordinateOrigin.TOP_LEFT
           ? Math.max(0f, vH - effectivePlacement.y() - boxHeight)
           : effectivePlacement.y();

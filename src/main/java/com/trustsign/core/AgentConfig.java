@@ -25,6 +25,8 @@ public record AgentConfig(
     @JsonProperty(required = false) CertificateValidationConfig certificateValidation,
     /** Optional. Emitted as &lt;SIGNER-VERSION&gt; in signed output. Use e.g. "V-NCODE_01.05.2013" for Icegate verification. */
     @JsonProperty(required = false) String signerVersion,
+    /** Optional. File path to an image rendered inside visible PDF signatures. */
+    @JsonProperty(required = false) String signatureImagePath,
     /** Optional. RFC 3161 timestamping settings for PDF signatures. */
     @JsonProperty(required = false) TsaConfig tsa,
     /** Optional. Long-Term Validation (DSS: certs, OCSP, CRLs) settings for PDF signatures. */

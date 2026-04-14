@@ -27,6 +27,7 @@
   },
   "autoSignOutputDir": "/Users/jainnibha/output",
   "signerVersion": "TrustSign_0.1.0",
+  "signatureImagePath": "/Users/jainnibha/chandra-workspace/trustsign/assets/greentickrbg.png",
   "truststore": {
     "path": "config/truststore.jks",
     "password": "trustsign",
@@ -57,6 +58,14 @@
     ],
     "macCandidates": ["/usr/local/lib/libcastle_v2.1.0.0.dylib"],
     "linuxCandidates": []
+  },
+  "ltv": {
+    "enabled": true,
+    "failOnMissingRevocationData": true,
+    "ocspConnectTimeoutMs": 10000,
+    "ocspReadTimeoutMs": 15000,
+    "crlConnectTimeoutMs": 10000,
+    "crlReadTimeoutMs": 15000
   }
 }
 
