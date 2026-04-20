@@ -45,3 +45,26 @@ You can give the PDF to your client together with the TrustSign ZIP package.
     "crlConnectTimeoutMs": 10000,
     "crlReadTimeoutMs": 15000
   }
+
+
+/// Trust Chain Setup 
+Use these exact commands from your repo root (/Users/jainnibha/chandra-workspace/trustsign).
+
+Rebuild truststore with your new chain:
+./scripts/create-truststore.sh \
+  "/Users/jainnibha/client_crt/tayal/CCA_India_2022.cer" \
+  "/Users/jainnibha/client_crt/tayal/Verasys_CA_2022.cer" \
+  "/Users/jainnibha/client_crt/tayal/Verasys_Sub_CA_2022.cer"
+Verify truststore contents:
+keytool -list -v -keystore "config/truststore.jks" -storepass trustsign
+(Optional) print each cert to verify issuer/subject chain:
+keytool -printcert -file "/Users/jainnibha/client_crt/tayal/CCA_India_2022.cer"
+keytool -printcert -file "/Users/jainnibha/client_crt/tayal/Verasys_CA_2022.cer"
+keytool -printcert -file "/Users/jainnibha/client_crt/tayal/Verasys_Sub_CA_2022.cer"
+Run the smoke test that validates chain loading/path validation:
+./gradlew test --tests com.trustsign.core.CertificateChainSmokeTest
+Start server:
+./gradlew run
+In another terminal, hit health endpoint:
+curl -i "http://localhost:80/pki/health"
+If curl health is 200 and the test command is BUILD SUCCESSFUL, your chain setup is good.
