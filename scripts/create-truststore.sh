@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# Creates a JKS truststore from your XT CA certificates for chain validation.
+# Creates a truststore from a CA chain for certificate path validation.
 # Usage:
 #   ./scripts/create-truststore.sh
-#   ./scripts/create-truststore.sh /path/to/xtcacert.cer /path/to/xtsubcacert.cer /path/to/xtcert.cer
+#   ./scripts/create-truststore.sh /path/to/root-ca.cer /path/to/intermediate-ca.cer /path/to/sub-ca.cer
 #
-# Output: config/truststore.jks (default password: changeit)
+# Output: config/truststore.jks (default password: trustsign)
 
 set -e
 
@@ -14,16 +14,16 @@ KEYSTORE="${KEYSTORE:-$PROJECT_DIR/config/truststore.jks}"
 STORE_PASS="${STORE_PASS:-trustsign}"
 
 if [ $# -ge 3 ]; then
-  XTCA="$1"
-  XTSUBCA="$2"
-  XTCERT="$3"
+  ROOT_CA="$1"
+  INTERMEDIATE_CA="$2"
+  SUB_CA="$3"
 else
-  XTCA="${XTCA:-$HOME/Documents/xtcacert.cer}"
-  XTSUBCA="${XTSUBCA:-$HOME/Documents/xtsubcacert.cer}"
-  XTCERT="${XTCERT:-$HOME/Documents/xtcert.cer}"
+  ROOT_CA="${ROOT_CA:-$HOME/Documents/root-ca.cer}"
+  INTERMEDIATE_CA="${INTERMEDIATE_CA:-$HOME/Documents/intermediate-ca.cer}"
+  SUB_CA="${SUB_CA:-$HOME/Documents/sub-ca.cer}"
 fi
 
-for f in "$XTCA" "$XTSUBCA" "$XTCERT"; do
+for f in "$ROOT_CA" "$INTERMEDIATE_CA" "$SUB_CA"; do
   if [ ! -f "$f" ]; then
     echo "Missing: $f"
     exit 1
@@ -32,10 +32,13 @@ done
 
 mkdir -p "$(dirname "$KEYSTORE")"
 
-# Create JKS and import root CA first, then sub CA, then cert (order can help with chain building)
-keytool -importcert -alias xtca -file "$XTCA" -keystore "$KEYSTORE" -storepass "$STORE_PASS" -noprompt
-keytool -importcert -alias xtsubca -file "$XTSUBCA" -keystore "$KEYSTORE" -storepass "$STORE_PASS" -noprompt
-keytool -importcert -alias xtcert -file "$XTCERT" -keystore "$KEYSTORE" -storepass "$STORE_PASS" -noprompt
+# Recreate store to avoid stale/duplicate aliases from previous chains.
+rm -f "$KEYSTORE"
+
+# Import chain as trust anchors: root -> intermediate -> sub CA.
+keytool -importcert -alias root-ca -file "$ROOT_CA" -keystore "$KEYSTORE" -storepass "$STORE_PASS" -storetype PKCS12 -noprompt
+keytool -importcert -alias intermediate-ca -file "$INTERMEDIATE_CA" -keystore "$KEYSTORE" -storepass "$STORE_PASS" -storetype PKCS12 -noprompt
+keytool -importcert -alias sub-ca -file "$SUB_CA" -keystore "$KEYSTORE" -storepass "$STORE_PASS" -storetype PKCS12 -noprompt
 
 echo "Created $KEYSTORE (password: $STORE_PASS)"
 echo "Add to config.json: \"truststore\": { \"path\": \"config/truststore.jks\", \"password\": \"$STORE_PASS\", \"enablePathValidation\": true }"

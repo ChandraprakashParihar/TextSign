@@ -91,11 +91,12 @@ public final class Main {
     if (cfg.truststore() == null || cfg.truststore().path() == null || cfg.truststore().path().isBlank()) {
       return;
     }
-    String path = cfg.truststore().path();
-    if (!new File(path).isAbsolute()) {
-      path = new File(path).getAbsolutePath();
+    File configuredPath = new File(cfg.truststore().path().trim());
+    if (!configuredPath.isAbsolute()) {
+      File configDir = configFile.getParentFile() != null ? configFile.getParentFile() : new File(".");
+      configuredPath = new File(configDir, cfg.truststore().path().trim());
     }
-    System.setProperty("trustsign.truststore.path", path);
+    System.setProperty("trustsign.truststore.path", configuredPath.getAbsolutePath());
     if (cfg.truststore().password() != null) {
       System.setProperty("trustsign.truststore.password", cfg.truststore().password());
     }
