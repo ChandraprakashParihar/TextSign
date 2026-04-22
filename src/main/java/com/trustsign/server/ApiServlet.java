@@ -1005,6 +1005,10 @@ public final class ApiServlet {
           writeJson(resp, 200, performanceSnapshot());
           return;
         }
+        case "/health/licence" -> {
+          writeJson(resp, 200, licenceHealthSnapshot());
+          return;
+        }
         case "/health/tsa" -> {
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null)
@@ -2648,6 +2652,56 @@ public final class ApiServlet {
             "config", configCacheStats(),
             "publicKeys", publicKeyCacheStats(),
             "truststore", CertificateValidator.cacheStats()));
+  }
+
+  private Map<String, Object> licenceHealthSnapshot() {
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("ts", Instant.now().toString());
+    LicenceEnforcer.Result check = licenceEnforcer.check();
+    out.put("allowed", check.allowed());
+    out.put("message", check.message());
+    try {
+      File cfgFile = resolveConfigFile();
+      Path configDir = cfgFile.getParentFile() != null ? cfgFile.getParentFile().toPath() : Path.of(".");
+      Path licencePath = configDir.resolve("licence.json");
+      Path statePath = configDir.resolve(".licence-state");
+      out.put("licencePath", licencePath.toAbsolutePath().toString());
+      out.put("statePath", statePath.toAbsolutePath().toString());
+
+      if (Files.isRegularFile(licencePath)) {
+        com.fasterxml.jackson.databind.JsonNode lic = Json.MAPPER.readTree(Files.readString(licencePath));
+        int durationDays = lic != null && lic.has("durationDays") ? lic.get("durationDays").asInt(-1) : -1;
+        out.put("durationDays", durationDays);
+        if (Files.isRegularFile(statePath)) {
+          List<String> lines = Files.readAllLines(statePath, StandardCharsets.UTF_8);
+          if (lines.size() >= 2) {
+            long firstUseMs = Long.parseLong(lines.get(0).trim());
+            long lastSeenMs = Long.parseLong(lines.get(1).trim());
+            out.put("firstUseMs", firstUseMs);
+            out.put("firstUse", Instant.ofEpochMilli(firstUseMs).toString());
+            out.put("lastSeenMs", lastSeenMs);
+            out.put("lastSeen", Instant.ofEpochMilli(lastSeenMs).toString());
+            if (durationDays > 0) {
+              long expiryMs = firstUseMs + durationDays * 24L * 60L * 60L * 1000L;
+              long remainingMs = expiryMs - System.currentTimeMillis();
+              out.put("expiryMs", expiryMs);
+              out.put("expiry", Instant.ofEpochMilli(expiryMs).toString());
+              out.put("remainingMs", remainingMs);
+              out.put("remainingDays", remainingMs / 86_400_000.0);
+            }
+          } else {
+            out.put("stateWarning", "State file present but incomplete");
+          }
+        } else {
+          out.put("stateWarning", "State file not found yet (first use may not be initialized)");
+        }
+      } else {
+        out.put("licenceWarning", "Licence file not found");
+      }
+    } catch (Exception e) {
+      out.put("healthError", safeMsg(e));
+    }
+    return out;
   }
 
   private Map<String, Object> configCacheStats() {

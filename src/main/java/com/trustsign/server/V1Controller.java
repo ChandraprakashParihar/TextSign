@@ -33,6 +33,11 @@ public class V1Controller {
     api.handleGet(req, resp, "/health/ltv");
   }
 
+  @GetMapping("/health/licence")
+  public void healthLicence(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handleGet(req, resp, "/health/licence");
+  }
+
   @GetMapping("/pkcs11/candidates")
   public void pkcs11Candidates(HttpServletRequest req, HttpServletResponse resp) throws IOException {
     api.handleGet(req, resp, "/pkcs11/candidates");
