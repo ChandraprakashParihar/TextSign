@@ -10,9 +10,7 @@ import org.bouncycastle.asn1.x509.GeneralName;
 import org.bouncycastle.asn1.x509.GeneralNames;
 import org.bouncycastle.asn1.x509.PolicyInformation;
 
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
-import javax.net.ssl.X509TrustManager;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.net.URL;
@@ -27,6 +25,9 @@ import java.util.Enumeration;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Helper for validating signing certificates from the token.
@@ -40,6 +41,12 @@ import java.util.Locale;
  * - optional class validation (certificate policy OID must be in allowed list)
  */
 public final class CertificateValidator {
+  private static final Logger LOG = LoggerFactory.getLogger(CertificateValidator.class);
+  private static final long TRUSTSTORE_STAT_TTL_MS = 1_000L;
+  private static volatile KeyStore cachedTrustStore;
+  private static volatile String cachedTrustStoreCacheKey;
+  private static volatile long cachedTrustStoreMtime = -1L;
+  private static volatile long cachedTrustStoreCheckedAtMs = 0L;
 
   /**
    * Validates that the given certificate is suitable for signing according to
@@ -286,56 +293,141 @@ public final class CertificateValidator {
    */
   private static void validateTrustChain(X509Certificate leaf, X509Certificate[] chain) {
     try {
-      X509Certificate[] toValidate;
-      if (chain != null && chain.length > 0) {
-        toValidate = chain;
-      } else {
-        toValidate = new X509Certificate[]{leaf};
-      }
-
-      KeyStore trustStore = loadTrustStoreIfConfigured();
-
-      TrustManagerFactory tmf = TrustManagerFactory.getInstance(
-          TrustManagerFactory.getDefaultAlgorithm()
-      );
-      if (trustStore != null) {
-        tmf.init(trustStore);
-      } else {
-        tmf.init((KeyStore) null); // system default
-      }
-
-      X509TrustManager x509Tm = null;
-      for (TrustManager tm : tmf.getTrustManagers()) {
-        if (tm instanceof X509TrustManager xtm) {
-          x509Tm = xtm;
-          break;
-        }
-      }
-      if (x509Tm == null) {
-        throw new SecurityException("No X509TrustManager available for path validation");
-      }
-
-      // Use client-style validation for signing certificates.
-      // Many trust managers applying TLS rules enforce Extended Key Usage
-      // for client/server auth; for pure signing certificates we ignore
-      // those specific EKU errors while still enforcing chain validity.
-      try {
-        x509Tm.checkClientTrusted(toValidate, "RSA");
-      } catch (Exception e) {
-        String msg = e.getMessage();
-        if (msg != null &&
-            (msg.contains("Extended key usage does not permit use for TLS client authentication")
-                || msg.contains("Extended key usage does not permit use for TLS server authentication"))) {
-          // Treat EKU-for-TLS-only complaints as non-fatal for signing use cases.
-          return;
-        }
-        throw e;
-      }
+      validateStrictChainAgainstTrustStore(leaf, chain);
     } catch (SecurityException se) {
       throw se;
     } catch (Exception e) {
       throw new SecurityException("Certificate path validation failed: " + e.getMessage(), e);
     }
+  }
+
+  /**
+   * Strictly validates the provided chain against the configured trust store.
+   *
+   * Rules enforced:
+   * - configured truststore must exist
+   * - provided chain must include leaf certificate as first element
+   * - every certificate in chain must be valid in time window
+   * - every adjacent certificate must verify issuer signature
+   * - chain must exactly match the issuer path present in truststore
+   * - no missing or extra certificates are allowed
+   */
+  public static void validateStrictChainAgainstTrustStore(X509Certificate leaf, X509Certificate[] chain) {
+    if (leaf == null) {
+      throw new SecurityException("Signing certificate is missing");
+    }
+    try {
+      KeyStore trustStore = loadTrustStoreIfConfigured();
+      if (trustStore == null) {
+        throw new SecurityException("Strict chain validation requires configured truststore");
+      }
+      X509Certificate[] provided = normalizeProvidedChain(leaf, chain);
+      validateProvidedChainOrderSignaturesAndValidity(provided);
+      List<X509Certificate> expectedIssuers = buildExpectedIssuerPathFromTrustStore(leaf, trustStore);
+      enforceExactChainMatch(provided, expectedIssuers);
+
+      X509Certificate root = provided[provided.length - 1];
+      LOG.info("Strict certificate chain validation successful: subject='{}', chainLength={}, root='{}'",
+          leaf.getSubjectX500Principal().getName(),
+          provided.length,
+          root.getSubjectX500Principal().getName());
+    } catch (SecurityException se) {
+      LOG.warn("Strict certificate chain validation failed: subject='{}', reason={}",
+          leaf.getSubjectX500Principal().getName(), se.getMessage());
+      throw se;
+    } catch (Exception e) {
+      throw new SecurityException("Certificate path validation failed: " + e.getMessage(), e);
+    }
+  }
+
+  private static X509Certificate[] normalizeProvidedChain(X509Certificate leaf, X509Certificate[] chain) {
+    if (chain == null || chain.length == 0) {
+      throw new SecurityException("Strict chain validation requires full certificate chain");
+    }
+    if (!leaf.equals(chain[0])) {
+      throw new SecurityException("Chain order mismatch: first certificate is not the signing certificate");
+    }
+    return chain;
+  }
+
+  private static void validateProvidedChainOrderSignaturesAndValidity(X509Certificate[] chain) {
+    for (int i = 0; i < chain.length; i++) {
+      X509Certificate cert = chain[i];
+      try {
+        cert.checkValidity();
+      } catch (Exception e) {
+        throw new SecurityException("Certificate in chain is not currently valid at position " + i + ": " + e.getMessage(), e);
+      }
+      if (i == chain.length - 1) {
+        if (!cert.getSubjectX500Principal().equals(cert.getIssuerX500Principal())) {
+          throw new SecurityException("Root certificate must be self-signed");
+        }
+        try {
+          cert.verify(cert.getPublicKey());
+        } catch (Exception e) {
+          throw new SecurityException("Root self-signature verification failed: " + e.getMessage(), e);
+        }
+      } else {
+        X509Certificate issuer = chain[i + 1];
+        if (!cert.getIssuerX500Principal().equals(issuer.getSubjectX500Principal())) {
+          throw new SecurityException("Issuer mismatch between chain certificates at positions " + i + " and " + (i + 1));
+        }
+        try {
+          cert.verify(issuer.getPublicKey());
+        } catch (Exception e) {
+          throw new SecurityException("Signature verification failed between chain certificates at positions " + i + " and " + (i + 1) + ": " + e.getMessage(), e);
+        }
+      }
+    }
+  }
+
+  private static List<X509Certificate> buildExpectedIssuerPathFromTrustStore(X509Certificate leaf, KeyStore trustStore) throws Exception {
+    List<X509Certificate> path = new ArrayList<>();
+    X509Certificate current = leaf;
+    while (true) {
+      X509Certificate issuer = findIssuerInTrustStore(current, trustStore);
+      if (issuer == null) {
+        throw new SecurityException("Issuer certificate not present in truststore for subject: " + current.getSubjectX500Principal().getName());
+      }
+      path.add(issuer);
+      if (issuer.getSubjectX500Principal().equals(issuer.getIssuerX500Principal())) {
+        break;
+      }
+      current = issuer;
+      if (path.size() > 16) {
+        throw new SecurityException("Unexpected truststore issuer path depth; possible loop");
+      }
+    }
+    return path;
+  }
+
+  private static void enforceExactChainMatch(X509Certificate[] provided, List<X509Certificate> expectedIssuers) {
+    int expectedLength = expectedIssuers.size() + 1; // plus leaf cert
+    if (provided.length != expectedLength) {
+      throw new SecurityException("Chain length mismatch: provided=" + provided.length + ", expected=" + expectedLength);
+    }
+    for (int i = 0; i < expectedIssuers.size(); i++) {
+      X509Certificate expected = expectedIssuers.get(i);
+      X509Certificate actual = provided[i + 1];
+      if (!expected.equals(actual)) {
+        throw new SecurityException("Chain certificate mismatch at position " + (i + 1) +
+            ": expected subject='" + expected.getSubjectX500Principal().getName() +
+            "', actual subject='" + actual.getSubjectX500Principal().getName() + "'");
+      }
+    }
+  }
+
+  private static X509Certificate findIssuerInTrustStore(X509Certificate cert, KeyStore trustStore) throws Exception {
+    var issuerDn = cert.getIssuerX500Principal();
+    Enumeration<String> aliases = trustStore.aliases();
+    while (aliases.hasMoreElements()) {
+      String alias = aliases.nextElement();
+      Certificate c = trustStore.getCertificate(alias);
+      if (c instanceof X509Certificate x509 && x509.getSubjectX500Principal().equals(issuerDn)) {
+        return x509;
+      }
+    }
+    return null;
   }
 
   /**
@@ -372,13 +464,59 @@ public final class CertificateValidator {
     }
     String type = System.getProperty("trustsign.truststore.type", KeyStore.getDefaultType());
     String password = System.getProperty("trustsign.truststore.password", "");
-
-    KeyStore ks = KeyStore.getInstance(type);
-    try (FileInputStream fis = new FileInputStream(path)) {
-      char[] pwd = password.isEmpty() ? null : password.toCharArray();
-      ks.load(fis, pwd);
+    String cacheKey = path.trim() + "|" + type.trim() + "|" + password;
+    File truststoreFile = new File(path.trim());
+    long now = System.currentTimeMillis();
+    KeyStore current = cachedTrustStore;
+    if (current != null
+        && cacheKey.equals(cachedTrustStoreCacheKey)
+        && (now - cachedTrustStoreCheckedAtMs) < TRUSTSTORE_STAT_TTL_MS) {
+      return current;
     }
-    return ks;
+
+    synchronized (CertificateValidator.class) {
+      KeyStore inside = cachedTrustStore;
+      long nowInside = System.currentTimeMillis();
+      if (inside != null
+          && cacheKey.equals(cachedTrustStoreCacheKey)
+          && (nowInside - cachedTrustStoreCheckedAtMs) < TRUSTSTORE_STAT_TTL_MS) {
+        return inside;
+      }
+
+      if (!truststoreFile.exists()) {
+        throw new SecurityException("Configured truststore file not found: " + truststoreFile.getAbsolutePath());
+      }
+
+      long mtime = truststoreFile.lastModified();
+      if (inside != null
+          && cacheKey.equals(cachedTrustStoreCacheKey)
+          && mtime == cachedTrustStoreMtime) {
+        cachedTrustStoreCheckedAtMs = nowInside;
+        return inside;
+      }
+
+      KeyStore ks = KeyStore.getInstance(type);
+      try (FileInputStream fis = new FileInputStream(truststoreFile)) {
+        char[] pwd = password.isEmpty() ? null : password.toCharArray();
+        ks.load(fis, pwd);
+      }
+      cachedTrustStore = ks;
+      cachedTrustStoreCacheKey = cacheKey;
+      cachedTrustStoreMtime = mtime;
+      cachedTrustStoreCheckedAtMs = nowInside;
+      LOG.info("Reloaded truststore from disk: {}", truststoreFile.getAbsolutePath());
+      return ks;
+    }
+  }
+
+  public static Map<String, Object> cacheStats() {
+    Map<String, Object> out = new java.util.LinkedHashMap<>();
+    out.put("truststoreCached", cachedTrustStore != null);
+    out.put("truststoreCacheKey", cachedTrustStoreCacheKey);
+    out.put("truststoreLastModifiedMs", cachedTrustStoreMtime);
+    out.put("truststoreLastCheckedAtMs", cachedTrustStoreCheckedAtMs);
+    out.put("truststoreStatTtlMs", TRUSTSTORE_STAT_TTL_MS);
+    return out;
   }
 
   private CertificateValidator() {}

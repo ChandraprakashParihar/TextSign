@@ -54,3 +54,17 @@ You can give the PDF to your client together with the TrustSign ZIP package.
     "failOnError": false
   }
 }
+
+
+Use this instead (single command, all 3 args on one line):
+
+./scripts/create-truststore.sh "/Users/jainnibha/chandra-workspace/xtratrust_truststore_chain/CCA_India_2022.cer" "/Users/jainnibha/chandra-workspace/xtratrust_truststore_chain/XtraTrustCA2022.cer" "/Users/jainnibha/chandra-workspace/xtratrust_truststore_chain/XtraTrustSubCA2022.cer"
+Or multiline with continuations:
+
+./scripts/create-truststore.sh \
+  "/Users/jainnibha/chandra-workspace/xtratrust_truststore_chain/CCA_India_2022.cer" \
+  "/Users/jainnibha/chandra-workspace/xtratrust_truststore_chain/XtraTrustCA2022.cer" \
+  "/Users/jainnibha/chandra-workspace/xtratrust_truststore_chain/XtraTrustSubCA2022.cer"
+After it succeeds, verify:
+
+keytool -list -keystore config/truststore.jks -storepass trustsign -storetype PKCS12

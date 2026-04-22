@@ -135,6 +135,8 @@ public record AgentConfig(
       @JsonProperty(required = false) Boolean enabled,
       /** If true, signing fails when OCSP and CRL are both unavailable for any signer cert. */
       @JsonProperty(required = false) Boolean failOnMissingRevocationData,
+      /** If true, require revocation evidence for each non-root certificate in the embedded DSS chain. */
+      @JsonProperty(required = false) Boolean strictPerCertEvidence,
       @JsonProperty(required = false) Integer ocspConnectTimeoutMs,
       @JsonProperty(required = false) Integer ocspReadTimeoutMs,
       @JsonProperty(required = false) Integer crlConnectTimeoutMs,

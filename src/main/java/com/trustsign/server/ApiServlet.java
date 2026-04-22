@@ -27,9 +27,6 @@ import com.trustsign.core.LicenceEnforcer;
 import com.trustsign.hsm.HsmPkcs11ConfigurationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
-import javax.net.ssl.X509TrustManager;
 import java.io.File;
 import java.io.IOException;
 import java.security.KeyStore;
@@ -55,8 +52,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
+// import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.regex.Pattern;
@@ -76,6 +75,17 @@ public final class ApiServlet {
   private final boolean exposeErrorDetails;
   private final int sessionIssueRateLimitPerMinute;
   private final ConcurrentHashMap<String, SessionIssueWindow> sessionIssueWindows = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, EndpointMetric> endpointMetrics = new ConcurrentHashMap<>();
+  private static final long CONFIG_STAT_TTL_MS = 1_000L;
+  private static final long PUBLIC_KEY_STAT_TTL_MS = 1_000L;
+  private volatile AgentConfig cachedConfig;
+  private volatile String cachedConfigPath;
+  private volatile long cachedConfigMtime = -1L;
+  private volatile long cachedConfigCheckedAtMs = 0L;
+  private static volatile List<PublicKey> cachedPublicKeys;
+  private static volatile String cachedPublicKeyPath;
+  private static volatile long cachedPublicKeyMtime = -1L;
+  private static volatile long cachedPublicKeyCheckedAtMs = 0L;
 
   public ApiServlet(SessionManager sessions, LicenceEnforcer licenceEnforcer, SigningConcurrencyGate signingGate) {
     this(sessions, licenceEnforcer, signingGate, null);
@@ -107,12 +117,7 @@ public final class ApiServlet {
   private boolean isClientIpAllowed(HttpServletRequest req) {
     String remoteIp = RequestTrace.resolveClientIp(req);
     try {
-      File cfgFile = resolveConfigFile();
-      if (!cfgFile.exists()) {
-        LOG.warn("Config file not found for IP check: {}", cfgFile.getAbsolutePath());
-        return false;
-      }
-      AgentConfig cfg = ConfigLoader.load(cfgFile);
+      AgentConfig cfg = getCachedConfigOrThrow();
       List<String> allowed = cfg.allowedClientIps();
       if (allowed == null || allowed.isEmpty()) {
         return true;
@@ -123,51 +128,95 @@ public final class ApiServlet {
       }
       boolean ok = allowed.contains(remoteIp);
       if (!ok) {
-        LOG.warn("Rejecting request from disallowed IP: {}", remoteIp);
+        LOG.error("Rejecting request from disallowed IP: {}", remoteIp);
       }
       return ok;
     } catch (Exception e) {
-      LOG.warn("Failed to evaluate client IP allowlist: {}", safeMsg(e));
+      LOG.error("Failed to evaluate client IP allowlist: {}", safeMsg(e));
       return false;
     }
   }
 
-  private static String requestId(HttpServletRequest req) {
-    String txnId = RequestTrace.resolveTxnId(req);
-    if (txnId != null && !txnId.isBlank()) {
-      return txnId;
-    }
-    String h = req != null ? req.getHeader("X-Request-Id") : null;
-    if (h != null && !h.isBlank()) {
-      return h.trim();
-    }
-    // Short id keeps logs readable; uniqueness is per-process/time and sufficient
-    // for correlation.
-    return UUID.randomUUID().toString().substring(0, 12);
-  }
+  // private static String requestId(HttpServletRequest req) {
+  // String txnId = RequestTrace.resolveTxnId(req);
+  // if (txnId != null && !txnId.isBlank()) {
+  // return txnId;
+  // }
+  // String h = req != null ? req.getHeader("X-Request-Id") : null;
+  // if (h != null && !h.isBlank()) {
+  // return h.trim();
+  // }
+  // // Short id keeps logs readable; uniqueness is per-process/time and
+  // sufficient
+  // // for correlation.
+  // return UUID.randomUUID().toString().substring(0, 12);
+  // }
 
-  private static String logCtx(HttpServletRequest req, String requestId) {
-    String method = req != null ? req.getMethod() : "";
-    String path = req != null ? req.getPathInfo() : "";
-    return "[rid=" + requestId + "] [" + method + " " + path + "]";
-  }
+  // private static String logCtx(HttpServletRequest req, String requestId) {
+  // String method = req != null ? req.getMethod() : "";
+  // String path = req != null ? req.getPathInfo() : "";
+  // return "[rid=" + requestId + "] [" + method + " " + path + "]";
+  // }
 
   /**
    * Loads config from resolved path. On failure writes error response and returns
    * null.
    */
   private AgentConfig loadConfig(HttpServletResponse resp) throws IOException {
-    File f = resolveConfigFile();
-    if (!f.exists()) {
-      writeJson(resp, 500, Map.of("error", "Config file not found", "path", f.getAbsolutePath()));
+    try {
+      return getCachedConfigOrThrow();
+    } catch (Exception e) {
+      LOG.error("Config load failed: {}", safeMsg(e));
+      String msg = safeMsg(e);
+      if (msg != null && msg.toLowerCase(java.util.Locale.ROOT).contains("config file not found")) {
+        File f = resolveConfigFile();
+        writeJson(resp, 500, Map.of("error", "Config file not found", "path", f.getAbsolutePath()));
+      } else {
+        writeJson(resp, 500, Map.of("error", "Invalid config", "details", msg));
+      }
       return null;
     }
-    try {
-      return ConfigLoader.load(f);
-    } catch (Exception e) {
-      LOG.warn("Config load failed: {}", safeMsg(e));
-      writeJson(resp, 500, Map.of("error", "Invalid config", "details", safeMsg(e)));
-      return null;
+  }
+
+  private AgentConfig getCachedConfigOrThrow() throws Exception {
+    File cfgFile = resolveConfigFile();
+    String path = cfgFile.getAbsolutePath();
+    long now = System.currentTimeMillis();
+    AgentConfig current = cachedConfig;
+    if (current != null
+        && path.equals(cachedConfigPath)
+        && (now - cachedConfigCheckedAtMs) < CONFIG_STAT_TTL_MS) {
+      return current;
+    }
+
+    synchronized (this) {
+      AgentConfig inside = cachedConfig;
+      long nowInside = System.currentTimeMillis();
+      if (inside != null
+          && path.equals(cachedConfigPath)
+          && (nowInside - cachedConfigCheckedAtMs) < CONFIG_STAT_TTL_MS) {
+        return inside;
+      }
+
+      if (!cfgFile.exists()) {
+        throw new IOException("Config file not found: " + path);
+      }
+
+      long mtime = cfgFile.lastModified();
+      if (inside != null
+          && path.equals(cachedConfigPath)
+          && mtime == cachedConfigMtime) {
+        cachedConfigCheckedAtMs = nowInside;
+        return inside;
+      }
+
+      AgentConfig loaded = ConfigLoader.load(cfgFile);
+      cachedConfig = loaded;
+      cachedConfigPath = path;
+      cachedConfigMtime = mtime;
+      cachedConfigCheckedAtMs = nowInside;
+      LOG.info("Reloaded config from disk: {}", path);
+      return loaded;
     }
   }
 
@@ -471,8 +520,10 @@ public final class ApiServlet {
     if (ltvResult.ocspsCount() <= 0 && ltvResult.crlsCount() <= 0) {
       return "No OCSP/CRL revocation data embedded";
     }
-    // Acrobat-style LTV readiness: every non-root cert should have OCSP/CRL evidence.
-    // Merely having DSS/VRI plus some revocation objects is not always enough for the UI badge.
+    // Acrobat-style LTV readiness: every non-root cert should have OCSP/CRL
+    // evidence.
+    // Merely having DSS/VRI plus some revocation objects is not always enough for
+    // the UI badge.
     List<PdfLtvInspector.CertificateRevocationReport> revocation = ltvResult.certificateRevocation();
     if (revocation != null && !revocation.isEmpty()) {
       java.util.Set<String> embeddedSubjects = new java.util.HashSet<>();
@@ -493,8 +544,10 @@ public final class ApiServlet {
         if (selfSignedRoot) {
           continue;
         }
-        // Cross-signed/highest CA entries can be non-self-signed but still act as trust anchors
-        // in Acrobat's chain building; do not require revocation evidence if issuer is not embedded.
+        // Cross-signed/highest CA entries can be non-self-signed but still act as trust
+        // anchors
+        // in Acrobat's chain building; do not require revocation evidence if issuer is
+        // not embedded.
         if (issuer == null || issuer.isBlank() || !embeddedSubjects.contains(issuer)) {
           continue;
         }
@@ -511,10 +564,27 @@ public final class ApiServlet {
         }
       }
       if (missingCount > 0) {
-        return "Missing OCSP/CRL evidence for "
+        String msg = "Missing OCSP/CRL evidence for "
             + missingCount
             + " non-root certificate(s): "
             + sampleSubjects;
+        boolean strictPerCertEvidence = cfg != null
+            && cfg.ltv() != null
+            && Boolean.TRUE.equals(cfg.ltv().strictPerCertEvidence());
+        if (!strictPerCertEvidence) {
+          // Backward-compatible JVM override when config key is absent/false.
+          strictPerCertEvidence = Boolean.parseBoolean(
+              System.getProperty("trustsign.ltv.strictPerCertEvidence", "false"));
+        }
+        if (strictPerCertEvidence) {
+          return msg;
+        }
+        // Acrobat may still mark LTV enabled for some cross-signed/anchor-resolved
+        // chains.
+        // Keep structural checks strict (DSS/VRI/revocation objects), but avoid false
+        // hard-fails
+        // unless explicitly requested via trustsign.ltv.strictPerCertEvidence=true.
+        LOG.warn("LTV per-certificate revocation evidence incomplete (soft): {}", msg);
       }
     }
     return null;
@@ -522,7 +592,8 @@ public final class ApiServlet {
 
   private static Map<String, Object> ltvFailureBody(String ltvError) {
     String reason = (ltvError == null || ltvError.isBlank()) ? "unknown reason" : ltvError;
-    // Keep actionable reason in `error` because `details` can be redacted in production mode.
+    // Keep actionable reason in `error` because `details` can be redacted in
+    // production mode.
     return Map.of(
         "error", "LTV not enabled in signed PDF: " + reason,
         "details", reason);
@@ -862,8 +933,10 @@ public final class ApiServlet {
    * does not cancel {@code allPages=true})
    * - {@code lastPage}: if true, stamps only the final page
    * - {@code pages}: comma-separated 1-based page numbers (e.g. {@code 1,3,5})
-   * - {@code startPage}: 1-based page; stamps from this page through the final page
-   * - {@code page}: single 1-based page (field or file part, like other multipart text)
+   * - {@code startPage}: 1-based page; stamps from this page through the final
+   * page
+   * - {@code page}: single 1-based page (field or file part, like other multipart
+   * text)
    * - default: page 1 only (no config; use {@code allPages}, {@code pages},
    * {@code page}, or {@code startPage} to change)
    */
@@ -901,8 +974,8 @@ public final class ApiServlet {
   }
 
   public void handleGet(HttpServletRequest req, HttpServletResponse resp, String forcedPath) throws IOException {
-    final String rid = requestId(req);
-    final String ctx = logCtx(req, rid);
+    // final String rid = requestId(req);
+    // final String ctx = logCtx(req, rid);
     final long startMs = System.currentTimeMillis();
     if (!isClientIpAllowed(req)) {
       writeJson(resp, 403, Map.of("error", "IP not allowed", "ip", req.getRemoteAddr()));
@@ -926,6 +999,10 @@ public final class ApiServlet {
             health.put("signingSlotsTotal", signingGate.totalPermits());
           }
           writeJson(resp, 200, health);
+          return;
+        }
+        case "/health/performance" -> {
+          writeJson(resp, 200, performanceSnapshot());
           return;
         }
         case "/health/tsa" -> {
@@ -982,8 +1059,8 @@ public final class ApiServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
-            LOG.warn("{} Token load failed (certificates). tookMs={} details={}",
-                ctx, System.currentTimeMillis() - startMs, detail);
+            LOG.error("Token load failed (certificates). tookMs={} details={}",
+                System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of(
                 "error", "Token load failed",
                 "details", detail));
@@ -1040,14 +1117,16 @@ public final class ApiServlet {
     } catch (SecurityException se) {
       writeJson(resp, 403, Map.of("error", se.getMessage()));
     } catch (Exception e) {
-      LOG.warn("{} GET error after {} ms: {}", ctx, System.currentTimeMillis() - startMs, safeMsg(e), e);
+      LOG.error("GET error after {} ms: {}", System.currentTimeMillis() - startMs, safeMsg(e), e);
       writeJson(resp, 500, Map.of("error", "Internal error", "details", safeMsg(e)));
+    } finally {
+      recordEndpointMetric("GET " + path, System.currentTimeMillis() - startMs, resp.getStatus());
     }
   }
 
   public void handlePost(HttpServletRequest req, HttpServletResponse resp, String forcedPath) throws IOException {
-    final String rid = requestId(req);
-    final String ctx = logCtx(req, rid);
+    // final String rid = requestId(req);
+    // final String ctx = logCtx(req, rid);
     final long startMs = System.currentTimeMillis();
     if (!isClientIpAllowed(req)) {
       writeJson(resp, 403, Map.of("error", "IP not allowed", "ip", req.getRemoteAddr()));
@@ -1078,7 +1157,7 @@ public final class ApiServlet {
           if (cfg == null) {
             return;
           }
-          ValidationResponse validation = validateTokenAndCertificate(cfg, ctx);
+          ValidationResponse validation = validateTokenAndCertificate(cfg);
           int status = validation.ok ? 200 : 422;
           writeJson(resp, status, validation.body);
           return;
@@ -1145,8 +1224,8 @@ public final class ApiServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
-            LOG.warn("{} Token load failed (auto-sign-text). tookMs={} details={}",
-                ctx, System.currentTimeMillis() - startMs, detail);
+            LOG.error("Token load failed (auto-sign-text). tookMs={} details={}",
+                System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of(
                 "error", "Token load failed",
                 "details", detail));
@@ -1251,7 +1330,7 @@ public final class ApiServlet {
                   Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
                   ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.warn("/auto-sign-text: failed to reserve output path: {}", safeMsg(e));
+              LOG.error("/auto-sign-text: failed to reserve output path: ", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -1269,7 +1348,7 @@ public final class ApiServlet {
                 try {
                   Files.deleteIfExists(reservedOutPath);
                 } catch (IOException e) {
-                  LOG.warn("/auto-sign-text: failed to delete reserved output: {}", safeMsg(e));
+                  LOG.error("/auto-sign-text: failed to delete reserved output: ", safeMsg(e));
                 }
               }
             }
@@ -1290,15 +1369,18 @@ public final class ApiServlet {
         }
 
         case "/auto-sign-pdf" -> {
-          LOG.info("{} Auto-signing PDF request received", ctx);
+          LOG.info("Auto-signing PDF request received");
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           AgentConfig cfg = loadConfig(resp);
-          if (cfg == null)
+          if (cfg == null) {
+            LOG.error("Auto-signing PDF request received but config is null");
             return;
+          }
           OutputPreference outputPreference;
           try {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
+            LOG.error("Error parsing output preference: ", e.getMessage());
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
           }
@@ -1308,12 +1390,14 @@ public final class ApiServlet {
           // Some clients send text fields as "file" parts with filename present/empty.
           // Fall back to interpreting them as text when mp.field(...) is null.
           if (reason == null) {
+            LOG.info("Reason is null, falling back to interpreting them as text");
             byte[] rb = mp.file("reason");
             if (rb != null && rb.length > 0) {
               reason = new String(rb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
           if (location == null) {
+            LOG.info("Location is null, falling back to interpreting them as text");
             byte[] lb = mp.file("location");
             if (lb != null && lb.length > 0) {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
@@ -1321,10 +1405,12 @@ public final class ApiServlet {
           }
 
           if (data == null || data.length == 0) {
+            LOG.error("PDF file is null or empty");
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
             return;
           }
           if (!isPdfUpload(data, mp.filename("file"))) {
+            LOG.error("Uploaded PDF file is not a PDF");
             writeJson(resp, 400, Map.of("error", "Uploaded file is not a PDF"));
             return;
           }
@@ -1335,6 +1421,7 @@ public final class ApiServlet {
           try {
             pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
           } catch (IllegalArgumentException e) {
+            LOG.error("Error parsing PDF signing options: ", e.getMessage());
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
           }
@@ -1375,8 +1462,8 @@ public final class ApiServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
-            LOG.warn("{} Token load failed (auto-sign-pdf). tookMs={} details={}",
-                ctx, System.currentTimeMillis() - startMs, detail);
+            LOG.error("Token load failed (auto-sign-pdf). tookMs={} details={}",
+                System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of(
                 "error", "Token load failed",
                 "details", detail));
@@ -1438,7 +1525,7 @@ public final class ApiServlet {
                   Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
                   ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.warn("/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
+              LOG.error("/auto-sign-pdf: failed to reserve output path: ", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -1462,20 +1549,20 @@ public final class ApiServlet {
                   location,
                   stampPages,
                   pdfOpts);
-              LOG.info("{} PDF signed. alias={} pages={} timestamped={} tookMs={}",
-                  ctx, matchedAlias, stampPages != null ? stampPages.size() : 0, signResult.isTimestamped(),
+              LOG.info("PDF signed. alias={} pages={} timestamped={} tookMs={}",
+                  matchedAlias, stampPages != null ? stampPages.size() : 0, signResult.isTimestamped(),
                   System.currentTimeMillis() - signStartMs);
             } catch (DocMdpNoChangesLockException e) {
               writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
               return;
             } catch (PdfSignerService.PdfSigningException e) {
-              LOG.warn("{} PDF signing failed. alias={} tookMs={} err={}",
-                  ctx, matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
+              LOG.error("PDF signing failed. alias={} tookMs={} err={}",
+                  matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
               writeJson(resp, 500, Map.of("error", "PDF signing failed", "details", safeMsg(e)));
               return;
             } catch (IOException e) {
-              LOG.warn("{} Invalid PDF structure. alias={} tookMs={} err={}",
-                  ctx, matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e));
+              LOG.error("Invalid PDF structure. alias={} tookMs={} err={}",
+                  matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e));
               writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
               return;
             }
@@ -1518,7 +1605,7 @@ public final class ApiServlet {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
-                LOG.warn("/auto-sign-pdf: failed to delete reserved output: {}", safeMsg(e));
+                LOG.error("/auto-sign-pdf: failed to delete reserved output: ", safeMsg(e));
               }
             }
           }
@@ -1582,8 +1669,8 @@ public final class ApiServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
-            LOG.warn("{} Token load failed (auto-sign-text-cms). tookMs={} details={}",
-                ctx, System.currentTimeMillis() - startMs, detail);
+            LOG.error("Token load failed (auto-sign-text-cms). tookMs={} details={}",
+                System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
             return;
           }
@@ -1650,7 +1737,7 @@ public final class ApiServlet {
                   Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
                   ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.warn("/auto-sign-text-cms: failed to reserve output path: {}", safeMsg(e));
+              LOG.error("/auto-sign-text-cms: failed to reserve output path: ", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -1665,7 +1752,7 @@ public final class ApiServlet {
                 try {
                   Files.deleteIfExists(reservedOutPath);
                 } catch (IOException e) {
-                  LOG.warn("/auto-sign-text-cms: failed to delete reserved output: {}", safeMsg(e));
+                  LOG.error("/auto-sign-text-cms: failed to delete reserved output: ", safeMsg(e));
                 }
               }
             }
@@ -1797,20 +1884,20 @@ public final class ApiServlet {
                 location,
                 stampPages,
                 pdfOpts);
-            LOG.info("{} PDF signed. alias={} pages={} timestamped={} tookMs={}",
-                ctx, matchedAlias, stampPages != null ? stampPages.size() : 0, signResult.isTimestamped(),
+            LOG.info("PDF signed. alias={} pages={} timestamped={} tookMs={}",
+                matchedAlias, stampPages != null ? stampPages.size() : 0, signResult.isTimestamped(),
                 System.currentTimeMillis() - signStartMs);
           } catch (DocMdpNoChangesLockException e) {
             writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
             return;
           } catch (PdfSignerService.PdfSigningException e) {
-            LOG.warn("{} PDF signing failed. alias={} tookMs={} err={}",
-                ctx, matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
+            LOG.error("PDF signing failed. alias={} tookMs={} err={}",
+                matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
             writeJson(resp, 500, Map.of("error", "PDF signing failed", "details", safeMsg(e)));
             return;
           } catch (IOException e) {
-            LOG.warn("{} Invalid PDF structure. alias={} tookMs={} err={}",
-                ctx, matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e));
+            LOG.error("Invalid PDF structure. alias={} tookMs={} err={}",
+                matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e));
             writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
             return;
           }
@@ -1852,7 +1939,7 @@ public final class ApiServlet {
               reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
                   outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.warn("/sign-pdf: failed to reserve output path: {}", safeMsg(e));
+              LOG.error("/sign-pdf: failed to reserve output path: ", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -1866,7 +1953,7 @@ public final class ApiServlet {
                 try {
                   Files.deleteIfExists(reservedOutPath);
                 } catch (IOException e) {
-                  LOG.warn("/sign-pdf: failed to delete reserved output: {}", safeMsg(e));
+                  LOG.error("/sign-pdf: failed to delete reserved output: ", safeMsg(e));
                 }
               }
             }
@@ -1970,24 +2057,24 @@ public final class ApiServlet {
                 location,
                 stampPages,
                 pdfOpts);
-            LOG.info("{} HSM PDF signed. pages={} tookMs={}",
-                ctx, stampPages != null ? stampPages.size() : 0, System.currentTimeMillis() - signStartMs);
+            LOG.info("HSM PDF signed. pages={} tookMs={}",
+                stampPages != null ? stampPages.size() : 0, System.currentTimeMillis() - signStartMs);
           } catch (DocMdpNoChangesLockException e) {
             writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
             return;
           } catch (IOException e) {
-            LOG.warn("{} HSM invalid PDF structure. tookMs={} err={}",
-                ctx, System.currentTimeMillis() - startMs, safeMsg(e));
+            LOG.error("HSM invalid PDF structure. tookMs={} err={}",
+                System.currentTimeMillis() - startMs, safeMsg(e));
             writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
             return;
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
-            LOG.warn("{} HSM token load or signing failed. tookMs={} details={}",
-                ctx, System.currentTimeMillis() - startMs, detail, e);
+            LOG.error("HSM token load or signing failed. tookMs={} details={}",
+                System.currentTimeMillis() - startMs, detail, e);
             writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
             return;
           } catch (Exception e) {
-            LOG.warn("{} /hsm/sign-pdf failed. tookMs={} err={}", ctx, System.currentTimeMillis() - startMs, safeMsg(e),
+            LOG.error("/hsm/sign-pdf failed. tookMs={} err={}", System.currentTimeMillis() - startMs, safeMsg(e),
                 e);
             writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
             return;
@@ -2119,7 +2206,7 @@ public final class ApiServlet {
                   Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
                   ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.warn("/hsm/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
+              LOG.error("/hsm/auto-sign-pdf: failed to reserve output path: ", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -2145,25 +2232,25 @@ public final class ApiServlet {
                   location,
                   stampPages,
                   pdfOpts);
-              LOG.info("{} HSM auto-sign PDF signed. pages={} tookMs={}",
-                  ctx, stampPages != null ? stampPages.size() : 0, System.currentTimeMillis() - signStartMs);
+              LOG.info("HSM auto-sign PDF signed. pages={} tookMs={}",
+                  stampPages != null ? stampPages.size() : 0, System.currentTimeMillis() - signStartMs);
             } catch (DocMdpNoChangesLockException e) {
               writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
               return;
             } catch (IOException e) {
-              LOG.warn("{} HSM auto-sign invalid PDF structure. tookMs={} err={}",
-                  ctx, System.currentTimeMillis() - startMs, safeMsg(e));
+              LOG.error("HSM auto-sign invalid PDF structure. tookMs={} err={}",
+                  System.currentTimeMillis() - startMs, safeMsg(e));
               writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
               return;
             } catch (RuntimeException e) {
               String detail = buildTokenErrorDetail(e);
-              LOG.warn("{} HSM auto-sign token load or signing failed. tookMs={} details={}",
-                  ctx, System.currentTimeMillis() - startMs, detail, e);
+              LOG.error("HSM auto-sign token load or signing failed. tookMs={} details={}",
+                  System.currentTimeMillis() - startMs, detail, e);
               writeJson(resp, 400, Map.of("error", "HSM token load or signing failed", "details", detail));
               return;
             } catch (Exception e) {
-              LOG.warn("{} /hsm/auto-sign-pdf failed. tookMs={} err={}",
-                  ctx, System.currentTimeMillis() - startMs, safeMsg(e), e);
+              LOG.error("/hsm/auto-sign-pdf failed. tookMs={} err={}",
+                  System.currentTimeMillis() - startMs, safeMsg(e), e);
               writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
               return;
             } finally {
@@ -2205,7 +2292,7 @@ public final class ApiServlet {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
-                LOG.warn("/hsm/auto-sign-pdf: failed to delete reserved output: {}", safeMsg(e));
+                LOG.error("/hsm/auto-sign-pdf: failed to delete reserved output: ", safeMsg(e));
               }
             }
           }
@@ -2234,7 +2321,7 @@ public final class ApiServlet {
             return;
           }
           requireSession(req);
-          LOG.info("{} LTV debug request received", ctx);
+          LOG.info("LTV debug request received");
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
           if (data == null || data.length == 0) {
@@ -2286,8 +2373,8 @@ public final class ApiServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
-            LOG.warn("{} Token load failed (sign-text). tookMs={} details={}",
-                ctx, System.currentTimeMillis() - startMs, detail);
+            LOG.error("Token load failed (sign-text). tookMs={} details={}",
+                System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
             return;
           }
@@ -2397,7 +2484,7 @@ public final class ApiServlet {
               reservedOutPath = SignedPdfOutputPaths.reserveNextSignedTextPath(
                   outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.warn("/sign-text: failed to reserve output path: {}", safeMsg(e));
+              LOG.error("/sign-text: failed to reserve output path: ", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -2415,7 +2502,7 @@ public final class ApiServlet {
                 try {
                   Files.deleteIfExists(reservedOutPath);
                 } catch (IOException e) {
-                  LOG.warn("/sign-text: failed to delete reserved output: {}", safeMsg(e));
+                  LOG.error("/sign-text: failed to delete reserved output: ", safeMsg(e));
                 }
               }
             }
@@ -2523,9 +2610,65 @@ public final class ApiServlet {
     } catch (SecurityException se) {
       writeJson(resp, 403, Map.of("error", se.getMessage()));
     } catch (Exception e) {
-      LOG.warn("{} POST error after {} ms: {}", ctx, System.currentTimeMillis() - startMs, safeMsg(e), e);
+      LOG.warn("POST error after {} ms: {}", System.currentTimeMillis() - startMs, safeMsg(e), e);
       writeJson(resp, 500, Map.of("error", "Internal error", "details", safeMsg(e)));
+    } finally {
+      recordEndpointMetric("POST " + path, System.currentTimeMillis() - startMs, resp.getStatus());
     }
+  }
+
+  private void recordEndpointMetric(String endpoint, long latencyMs, int status) {
+    EndpointMetric metric = endpointMetrics.computeIfAbsent(endpoint, k -> new EndpointMetric());
+    metric.requests.increment();
+    metric.totalLatencyMs.add(Math.max(0L, latencyMs));
+    metric.maxLatencyMs.accumulateAndGet(Math.max(0L, latencyMs), Math::max);
+    if (status >= 400) {
+      metric.errors.increment();
+    }
+  }
+
+  private Map<String, Object> performanceSnapshot() {
+    Map<String, Object> endpoints = new LinkedHashMap<>();
+    for (Map.Entry<String, EndpointMetric> entry : endpointMetrics.entrySet()) {
+      EndpointMetric m = entry.getValue();
+      long requests = m.requests.sum();
+      long totalLatencyMs = m.totalLatencyMs.sum();
+      double avgLatencyMs = requests == 0 ? 0.0 : (double) totalLatencyMs / requests;
+      endpoints.put(entry.getKey(), Map.of(
+          "requests", requests,
+          "errors", m.errors.sum(),
+          "avgLatencyMs", avgLatencyMs,
+          "maxLatencyMs", m.maxLatencyMs.get()));
+    }
+    return Map.of(
+        "ts", Instant.now().toString(),
+        "endpoints", endpoints,
+        "pkcs11", Pkcs11Token.metricsSnapshot(),
+        "caches", Map.of(
+            "config", configCacheStats(),
+            "publicKeys", publicKeyCacheStats(),
+            "truststore", CertificateValidator.cacheStats()));
+  }
+
+  private Map<String, Object> configCacheStats() {
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("cached", cachedConfig != null);
+    out.put("path", cachedConfigPath);
+    out.put("lastModifiedMs", cachedConfigMtime);
+    out.put("lastCheckedAtMs", cachedConfigCheckedAtMs);
+    out.put("statTtlMs", CONFIG_STAT_TTL_MS);
+    return out;
+  }
+
+  private Map<String, Object> publicKeyCacheStats() {
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("cached", cachedPublicKeys != null);
+    out.put("path", cachedPublicKeyPath);
+    out.put("lastModifiedMs", cachedPublicKeyMtime);
+    out.put("lastCheckedAtMs", cachedPublicKeyCheckedAtMs);
+    out.put("statTtlMs", PUBLIC_KEY_STAT_TTL_MS);
+    out.put("count", cachedPublicKeys == null ? 0 : cachedPublicKeys.size());
+    return out;
   }
 
   private void requireSession(HttpServletRequest req) {
@@ -2616,7 +2759,7 @@ public final class ApiServlet {
   private void writeJson(HttpServletResponse resp, int status, Object body) throws IOException {
     resp.setStatus(status);
     resp.setContentType("application/json");
-    Object normalized = normalizeErrorShape(status, body);
+    Object normalized = normalizeResponseShape(status, body);
     Object withTxn = attachTxnId(normalized, resp);
     Json.MAPPER.writeValue(resp.getOutputStream(), redactErrorDetails(withTxn));
   }
@@ -2660,19 +2803,112 @@ public final class ApiServlet {
     }
   }
 
-  private Object normalizeErrorShape(int status, Object body) {
-    if (!(body instanceof Map<?, ?> original) || !original.containsKey("error") || original.containsKey("code")) {
-      return body;
-    }
+  private Object normalizeResponseShape(int httpStatus, Object body) {
     Map<String, Object> normalized = new LinkedHashMap<>();
-    normalized.put("code", codeForStatus(status));
-    for (Map.Entry<?, ?> e : original.entrySet()) {
-      if (e.getKey() == null) {
-        continue;
+    if (body instanceof Map<?, ?> original) {
+      for (Map.Entry<?, ?> e : original.entrySet()) {
+        if (e.getKey() != null) {
+          normalized.put(String.valueOf(e.getKey()), normalizeNestedResponseValue(e.getValue(), true));
+        }
       }
-      normalized.put(String.valueOf(e.getKey()), e.getValue());
+    } else {
+      normalized.put("data", normalizeNestedResponseValue(body, true));
+    }
+
+    applyStatusMessageNormalization(normalized, httpStatus < 400, httpStatus);
+    if (httpStatus >= 400 && !normalized.containsKey("code")) {
+      normalized.put("code", codeForStatus(httpStatus));
     }
     return normalized;
+  }
+
+  private Object normalizeNestedResponseValue(Object value, boolean defaultStatus) {
+    if (value instanceof Map<?, ?> original) {
+      Map<String, Object> nested = new LinkedHashMap<>();
+      for (Map.Entry<?, ?> e : original.entrySet()) {
+        if (e.getKey() != null) {
+          nested.put(String.valueOf(e.getKey()), normalizeNestedResponseValue(e.getValue(), defaultStatus));
+        }
+      }
+      if (containsStatusShapeKeys(nested)) {
+        applyStatusMessageNormalization(nested, defaultStatus, 200);
+      }
+      return nested;
+    }
+    if (value instanceof List<?> list) {
+      java.util.ArrayList<Object> out = new java.util.ArrayList<>(list.size());
+      for (Object item : list) {
+        out.add(normalizeNestedResponseValue(item, defaultStatus));
+      }
+      return out;
+    }
+    return value;
+  }
+
+  private static boolean containsStatusShapeKeys(Map<String, Object> body) {
+    return body.containsKey("status") || body.containsKey("ok") || body.containsKey("error")
+        || body.containsKey("message");
+  }
+
+  private static void applyStatusMessageNormalization(Map<String, Object> body, boolean defaultStatus, int httpStatus) {
+    Boolean status = extractBooleanStatus(body.get("status"));
+    if (status == null) {
+      status = extractBooleanStatus(body.get("ok"));
+    }
+    if (status == null) {
+      status = defaultStatus;
+    }
+
+    Object existingStatus = body.get("status");
+    if (!(existingStatus instanceof Boolean) && existingStatus != null) {
+      body.put("state", existingStatus);
+    }
+
+    String message = extractMessage(body, status, httpStatus);
+    body.remove("ok");
+    body.remove("error");
+    body.put("status", status);
+    body.put("message", message);
+  }
+
+  private static Boolean extractBooleanStatus(Object value) {
+    if (value instanceof Boolean b) {
+      return b;
+    }
+    if (value instanceof String s) {
+      String v = s.trim().toLowerCase(java.util.Locale.ROOT);
+      if ("ok".equals(v) || "success".equals(v) || "true".equals(v)) {
+        return true;
+      }
+      if ("error".equals(v) || "fail".equals(v) || "false".equals(v)) {
+        return false;
+      }
+    }
+    return null;
+  }
+
+  private static String extractMessage(Map<String, Object> body, boolean status, int httpStatus) {
+    Object explicitMessage = body.get("message");
+    if (explicitMessage != null && !String.valueOf(explicitMessage).isBlank()) {
+      return String.valueOf(explicitMessage);
+    }
+    Object legacyError = body.get("error");
+    if (legacyError != null && !String.valueOf(legacyError).isBlank()) {
+      return String.valueOf(legacyError);
+    }
+    if (status) {
+      return "Operation successful";
+    }
+    return switch (httpStatus) {
+      case 400 -> "Bad request";
+      case 401 -> "Unauthorized";
+      case 403 -> "Forbidden";
+      case 404 -> "Not found";
+      case 409 -> "Conflict";
+      case 422 -> "Validation failed";
+      case 429 -> "Too many requests";
+      default -> "Internal error";
+    };
   }
 
   private static String codeForStatus(int status) {
@@ -2728,6 +2964,13 @@ public final class ApiServlet {
     }
   }
 
+  private static final class EndpointMetric {
+    final LongAdder requests = new LongAdder();
+    final LongAdder errors = new LongAdder();
+    final LongAdder totalLatencyMs = new LongAdder();
+    final AtomicLong maxLatencyMs = new AtomicLong(0L);
+  }
+
   /**
    * Loads one or more signer public keys from a configured location on disk.
    *
@@ -2740,29 +2983,68 @@ public final class ApiServlet {
    * - or a single raw base64-encoded DER SubjectPublicKeyInfo.
    */
   private static java.util.List<PublicKey> loadConfiguredPublicKeysOrThrow() throws Exception {
-    String path = System.getProperty("trustsign.publicKey.path");
-    if (path == null || path.isBlank()) {
-      File f1 = new File("config/public-key.pem");
-      if (f1.exists()) {
-        path = f1.getPath();
-      } else {
-        File f2 = new File("../config/public-key.pem");
-        if (f2.exists()) {
-          path = f2.getPath();
-        } else {
+    File keyFile = resolveConfiguredPublicKeyFile();
+    String path = keyFile.getAbsolutePath();
+    long now = System.currentTimeMillis();
+    List<PublicKey> current = cachedPublicKeys;
+    if (current != null
+        && path.equals(cachedPublicKeyPath)
+        && (now - cachedPublicKeyCheckedAtMs) < PUBLIC_KEY_STAT_TTL_MS) {
+      return current;
+    }
 
-          throw new IOException(
-              "No configured public key file found (checked config/public-key.pem and ../config/public-key.pem)");
-        }
+    synchronized (ApiServlet.class) {
+      List<PublicKey> inside = cachedPublicKeys;
+      long nowInside = System.currentTimeMillis();
+      if (inside != null
+          && path.equals(cachedPublicKeyPath)
+          && (nowInside - cachedPublicKeyCheckedAtMs) < PUBLIC_KEY_STAT_TTL_MS) {
+        return inside;
       }
+
+      if (!keyFile.exists()) {
+        throw new IOException("Configured public key file not found: " + path);
+      }
+
+      long mtime = keyFile.lastModified();
+      if (inside != null
+          && path.equals(cachedPublicKeyPath)
+          && mtime == cachedPublicKeyMtime) {
+        cachedPublicKeyCheckedAtMs = nowInside;
+        return inside;
+      }
+
+      String pem = java.nio.file.Files.readString(
+          keyFile.toPath(), java.nio.charset.StandardCharsets.UTF_8);
+      java.util.List<PublicKey> keys = parsePublicKeys(pem);
+      if (keys.isEmpty()) {
+        throw new IOException("Configured public key file did not contain any usable public keys");
+      }
+      List<PublicKey> immutable = List.copyOf(keys);
+      cachedPublicKeys = immutable;
+      cachedPublicKeyPath = path;
+      cachedPublicKeyMtime = mtime;
+      cachedPublicKeyCheckedAtMs = nowInside;
+      LOG.info("Reloaded configured public keys from disk: ", path);
+      return immutable;
     }
-    String pem = java.nio.file.Files.readString(
-        java.nio.file.Paths.get(path), java.nio.charset.StandardCharsets.UTF_8);
-    java.util.List<PublicKey> keys = parsePublicKeys(pem);
-    if (keys.isEmpty()) {
-      throw new IOException("Configured public key file did not contain any usable public keys");
+  }
+
+  private static File resolveConfiguredPublicKeyFile() throws IOException {
+    String path = System.getProperty("trustsign.publicKey.path");
+    if (path != null && !path.isBlank()) {
+      return new File(path.trim());
     }
-    return keys;
+    File f1 = new File("config/public-key.pem");
+    if (f1.exists()) {
+      return f1;
+    }
+    File f2 = new File("../config/public-key.pem");
+    if (f2.exists()) {
+      return f2;
+    }
+    throw new IOException(
+        "No configured public key file found (checked config/public-key.pem and ../config/public-key.pem)");
   }
 
   /**
@@ -2912,13 +3194,13 @@ public final class ApiServlet {
   private record ValidationResponse(boolean ok, Map<String, Object> body) {
   }
 
-  private ValidationResponse validateTokenAndCertificate(AgentConfig cfg, String ctx) {
+  private ValidationResponse validateTokenAndCertificate(AgentConfig cfg) {
     Map<String, Object> body = new LinkedHashMap<>();
     Map<String, Object> steps = new LinkedHashMap<>();
     body.put("ts", Instant.now().toString());
     body.put("steps", steps);
 
-    LOG.info("{} /validate-token step=tokenPresence start", ctx);
+    LOG.info("/validate-token step=tokenPresence start");
     List<String> libs;
     try {
       libs = resolvePkcs11Libraries(cfg);
@@ -2941,12 +3223,13 @@ public final class ApiServlet {
       loaded = Pkcs11Token.load(pin, libs);
       body.put("libraryPath", loaded.libraryPath());
       stepOk(steps, "tokenPresence", Map.of("libraryPath", loaded.libraryPath()));
-      LOG.info("{} /validate-token step=tokenPresence ok library={}", ctx, loaded.libraryPath());
+      LOG.info("/validate-token step=tokenPresence ok library= ", loaded.libraryPath());
     } catch (RuntimeException e) {
-      return validationFailure(body, steps, "tokenPresence", "Token not found or not accessible", buildTokenErrorDetail(e));
+      return validationFailure(body, steps, "tokenPresence", "Token not found or not accessible",
+          buildTokenErrorDetail(e));
     }
 
-    LOG.info("{} /validate-token step=certificateExtraction start", ctx);
+    LOG.info("/validate-token step=certificateExtraction start");
     CertificateSelection selection;
     String selectionMode;
     try {
@@ -2962,36 +3245,37 @@ public final class ApiServlet {
           "Failed to extract signing certificate from token", safeMsg(e));
     }
     if (selection == null || selection.certificate == null) {
-      return validationFailure(body, steps, "certificateExtraction", "No usable signing certificate found on token", null);
+      return validationFailure(body, steps, "certificateExtraction", "No usable signing certificate found on token",
+          null);
     }
     body.put("alias", selection.alias);
     body.put("certificate", toCertificateJson(selection.certificate));
     stepOk(steps, "certificateExtraction", Map.of("alias", selection.alias, "mode", selectionMode));
-    LOG.info("{} /validate-token step=certificateExtraction ok alias={} mode={}", ctx, selection.alias, selectionMode);
+    LOG.info("/validate-token step=certificateExtraction ok alias={} mode={}", selection.alias, selectionMode);
 
-    LOG.info("{} /validate-token step=certificateValidity start alias={}", ctx, selection.alias);
+    LOG.info("/validate-token step=certificateValidity start alias={}", selection.alias);
     try {
       selection.certificate.checkValidity();
       stepOk(steps, "certificateValidity", Map.of(
           "notBefore", selection.certificate.getNotBefore().toInstant().toString(),
           "notAfter", selection.certificate.getNotAfter().toInstant().toString()));
-      LOG.info("{} /validate-token step=certificateValidity ok", ctx);
+      LOG.info("/validate-token step=certificateValidity ok");
     } catch (Exception e) {
       return validationFailure(body, steps, "certificateValidity", "Certificate is not currently valid", safeMsg(e));
     }
 
-    LOG.info("{} /validate-token step=certificateChainValidation start", ctx);
+    LOG.info("/validate-token step=certificateChainValidation start");
     X509Certificate[] x509Chain = toX509Chain(selection);
     try {
       validateChainAgainstTrustStore(selection.certificate, x509Chain);
       stepOk(steps, "certificateChainValidation", Map.of("chainLength", x509Chain.length));
-      LOG.info("{} /validate-token step=certificateChainValidation ok chainLength={}", ctx, x509Chain.length);
+      LOG.info("/validate-token step=certificateChainValidation ok chainLength= ", x509Chain.length);
     } catch (Exception e) {
       return validationFailure(body, steps, "certificateChainValidation",
           "Certificate chain validation failed", safeMsg(e));
     }
 
-    LOG.info("{} /validate-token step=revocationCheck start", ctx);
+    LOG.info("/validate-token step=revocationCheck start");
     X509Certificate issuer = resolveIssuerForRevocation(selection, x509Chain);
     if (issuer == null) {
       return validationFailure(body, steps, "revocationCheck",
@@ -3016,17 +3300,18 @@ public final class ApiServlet {
           "OCSP and CRL both failed for certificate", rev.toString());
     }
     stepOk(steps, "revocationCheck", rev);
-    LOG.info("{} /validate-token step=revocationCheck ok source={}", ctx, probe.source());
+    LOG.info("/validate-token step=revocationCheck ok source= ", probe.source());
 
-    LOG.info("{} /validate-token step=signatureCapability start", ctx);
+    LOG.info("/validate-token step=signatureCapability start");
     if (!supportsDigitalSignatureUsage(selection.certificate)) {
       return validationFailure(body, steps, "signatureCapability",
           "Certificate key usage does not permit digital signing", null);
     }
     stepOk(steps, "signatureCapability", Map.of("digitalSignatureCapable", true));
-    LOG.info("{} /validate-token step=signatureCapability ok", ctx);
+    LOG.info("/validate-token step=signatureCapability ok");
 
-    body.put("ok", true);
+    body.put("status", true);
+    body.put("message", "Token and certificate validation successful");
     return new ValidationResponse(true, body);
   }
 
@@ -3101,51 +3386,12 @@ public final class ApiServlet {
   }
 
   private static void validateChainAgainstTrustStore(X509Certificate leaf, X509Certificate[] chain) throws Exception {
-    X509Certificate[] toValidate = (chain != null && chain.length > 0) ? chain : new X509Certificate[] { leaf };
-    KeyStore trustStore = loadConfiguredTruststoreIfPresent();
-    TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-    if (trustStore != null) {
-      tmf.init(trustStore);
-    } else {
-      tmf.init((KeyStore) null);
+    boolean enablePathValidation = Boolean.parseBoolean(
+        System.getProperty("trustsign.enablePathValidation", "true"));
+    if (!enablePathValidation) {
+      return;
     }
-    X509TrustManager x509Tm = null;
-    for (TrustManager tm : tmf.getTrustManagers()) {
-      if (tm instanceof X509TrustManager xtm) {
-        x509Tm = xtm;
-        break;
-      }
-    }
-    if (x509Tm == null) {
-      throw new SecurityException("No X509TrustManager available");
-    }
-    try {
-      x509Tm.checkClientTrusted(toValidate, "RSA");
-    } catch (Exception e) {
-      String msg = e.getMessage();
-      if (msg != null
-          && (msg.contains("Extended key usage does not permit use for TLS client authentication")
-              || msg.contains("Extended key usage does not permit use for TLS server authentication"))) {
-        // Signing certificates often omit TLS EKU; keep chain validation pass for signing use-cases.
-        return;
-      }
-      throw e;
-    }
-  }
-
-  private static KeyStore loadConfiguredTruststoreIfPresent() throws Exception {
-    String path = System.getProperty("trustsign.truststore.path");
-    if (path == null || path.isBlank()) {
-      return null;
-    }
-    String type = System.getProperty("trustsign.truststore.type", KeyStore.getDefaultType());
-    String password = System.getProperty("trustsign.truststore.password", "");
-    KeyStore ks = KeyStore.getInstance(type);
-    try (java.io.FileInputStream fis = new java.io.FileInputStream(path)) {
-      char[] pwd = password.isEmpty() ? null : password.toCharArray();
-      ks.load(fis, pwd);
-    }
-    return ks;
+    CertificateValidator.validateStrictChainAgainstTrustStore(leaf, chain);
   }
 
   private static Map<String, Object> toCertificateJson(X509Certificate cert) {
@@ -3177,14 +3423,14 @@ public final class ApiServlet {
       String error,
       String details) {
     Map<String, Object> stepBody = new LinkedHashMap<>();
-    stepBody.put("ok", false);
-    stepBody.put("error", error);
+    stepBody.put("status", false);
+    stepBody.put("message", error);
     if (details != null && !details.isBlank()) {
       stepBody.put("details", details);
     }
     steps.put(step, stepBody);
-    body.put("ok", false);
-    body.put("error", error);
+    body.put("status", false);
+    body.put("message", error);
     if (details != null && !details.isBlank()) {
       body.put("details", details);
     }
@@ -3193,7 +3439,8 @@ public final class ApiServlet {
 
   private static void stepOk(Map<String, Object> steps, String step, Map<String, Object> details) {
     Map<String, Object> stepBody = new LinkedHashMap<>();
-    stepBody.put("ok", true);
+    stepBody.put("status", true);
+    stepBody.put("message", "Step successful");
     if (details != null && !details.isEmpty()) {
       stepBody.putAll(details);
     }

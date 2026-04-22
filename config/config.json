@@ -14,7 +14,7 @@
     "maxThreads": 400,
     "minSpareThreads": 32,
     "threadIdleTimeoutMs": 120000,
-    "enableDebugEndpoints": false,
+    "enableDebugEndpoints": true,
     "acceptQueueSize": 8192,
     "connectorIdleTimeoutMs": 120000,
     "maxTcpConnections": 50000,
@@ -31,8 +31,9 @@
   "signerVersion": "TrustSign_0.1.0",
   "signatureImagePath": "/Users/jainnibha/chandra-workspace/trustsign/assets/greentickrbg.png",
   "truststore": {
-    "path": "config/truststore.jks",
+    "path": "truststore.jks",
     "password": "trustsign",
+    "type": "PKCS12",
     "enablePathValidation": true
   },
   "certificateValidation": {
@@ -61,14 +62,15 @@
     "macCandidates": ["/usr/local/lib/libcastle_v2.1.0.0.dylib"],
     "linuxCandidates": []
   },
-  "ltv": {
-    "enabled": true,
-    "failOnMissingRevocationData": true,
-    "ocspConnectTimeoutMs": 10000,
-    "ocspReadTimeoutMs": 15000,
-    "crlConnectTimeoutMs": 10000,
-    "crlReadTimeoutMs": 15000
-  }
+"ltv": {
+  "enabled": true,
+  "failOnMissingRevocationData": false,
+  "strictPerCertEvidence": false,
+  "ocspConnectTimeoutMs": 10000,
+  "ocspReadTimeoutMs": 15000,
+  "crlConnectTimeoutMs": 10000,
+  "crlReadTimeoutMs": 15000
+}
 
 }
 

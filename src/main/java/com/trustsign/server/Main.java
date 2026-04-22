@@ -88,6 +88,11 @@ public final class Main {
    * so CertificateValidator uses them when validating signing certificates.
    */
   private static void applyTruststoreConfig(File configFile, AgentConfig cfg) {
+    boolean enablePathValidation = cfg.truststore() != null
+        && Boolean.TRUE.equals(cfg.truststore().enablePathValidation());
+    // Always set explicitly so config.json has manual on/off control.
+    System.setProperty("trustsign.enablePathValidation", Boolean.toString(enablePathValidation));
+
     if (cfg.truststore() == null || cfg.truststore().path() == null || cfg.truststore().path().isBlank()) {
       return;
     }
@@ -102,9 +107,6 @@ public final class Main {
     }
     if (cfg.truststore().type() != null && !cfg.truststore().type().isBlank()) {
       System.setProperty("trustsign.truststore.type", cfg.truststore().type());
-    }
-    if (cfg.truststore().enablePathValidation() != null && cfg.truststore().enablePathValidation()) {
-      System.setProperty("trustsign.enablePathValidation", "true");
     }
   }
 

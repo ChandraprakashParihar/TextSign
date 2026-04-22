@@ -174,3 +174,31 @@ Then:
 
   output (raw | file | both)
 outputFormat (base64 | hex | binary)
+
+scripts/load-test.sh
+It gives repeatable performance checks with concurrency and percentile stats.
+
+What it does
+Sends concurrent requests using curl
+Supports:
+--url
+--method (GET/POST)
+--requests
+--concurrency
+--headers (file with one header per line)
+--body (request body file)
+--connect-timeout
+--timeout
+--insecure
+--warmup
+Prints:
+throughput (req/s)
+status counts (2xx/3xx, 4xx, 5xx, 000)
+latency (min, p50, p95, p99, max, avg)
+Quick examples
+Basic performance check:
+./scripts/load-test.sh
+Stress your new metrics endpoint:
+./scripts/load-test.sh --url http://127.0.0.1:80/pki/health/performance --requests 500 --concurrency 50
+Test token validation endpoint:
+./scripts/load-test.sh --url http://127.0.0.1:80/pki/validate-token --method POST --requests 200 --concurrency 20

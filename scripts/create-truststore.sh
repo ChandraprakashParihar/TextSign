@@ -40,5 +40,5 @@ keytool -importcert -alias root-ca -file "$ROOT_CA" -keystore "$KEYSTORE" -store
 keytool -importcert -alias intermediate-ca -file "$INTERMEDIATE_CA" -keystore "$KEYSTORE" -storepass "$STORE_PASS" -storetype PKCS12 -noprompt
 keytool -importcert -alias sub-ca -file "$SUB_CA" -keystore "$KEYSTORE" -storepass "$STORE_PASS" -storetype PKCS12 -noprompt
 
-echo "Created $KEYSTORE (password: $STORE_PASS)"
-echo "Add to config.json: \"truststore\": { \"path\": \"config/truststore.jks\", \"password\": \"$STORE_PASS\", \"enablePathValidation\": true }"
+echo "Created $KEYSTORE (password: $STORE_PASS, type: PKCS12)"
+echo "Add to config.json: \"truststore\": { \"path\": \"truststore.jks\", \"password\": \"$STORE_PASS\", \"type\": \"PKCS12\", \"enablePathValidation\": true }"
