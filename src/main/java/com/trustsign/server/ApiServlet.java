@@ -346,6 +346,45 @@ public final class ApiServlet {
   }
 
   /**
+   * Resolves PDF bytes from multipart parameter {@code file}.
+   * Accepts either:
+   * - multipart file part (blob/binary)
+   * - multipart text field containing base64 PDF (plain base64 or data URI)
+   */
+  private static byte[] resolvePdfPayloadFromFileParam(Multipart.Data mp) {
+    byte[] filePart = mp.file("file");
+    if (filePart != null && filePart.length > 0) {
+      return filePart;
+    }
+
+    String fileField = readMultipartString(mp, "file", false);
+    if (fileField == null || fileField.isBlank()) {
+      return null;
+    }
+    String payload = fileField.trim();
+    if (payload.startsWith("data:")) {
+      int comma = payload.indexOf(',');
+      if (comma > 0 && comma + 1 < payload.length()) {
+        payload = payload.substring(comma + 1);
+      }
+    }
+    payload = payload.replaceAll("\\s+", "");
+    if (payload.isEmpty()) {
+      return null;
+    }
+
+    try {
+      return Base64.getDecoder().decode(payload);
+    } catch (IllegalArgumentException ignore) {
+      try {
+        return Base64.getUrlDecoder().decode(payload);
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException("Invalid file value. Provide PDF blob or base64 in parameter 'file'.");
+      }
+    }
+  }
+
+  /**
    * For auto-sign PDF routes: by default signs the uploaded bytes only
    * ({@code chainedFromExistingOutput}
    * stays false), so re-signing an already-signed PDF adds a new signature and
@@ -1416,6 +1455,256 @@ public final class ApiServlet {
           if (!isPdfUpload(data, mp.filename("file"))) {
             LOG.error("Uploaded PDF file is not a PDF");
             writeJson(resp, 400, Map.of("error", "Uploaded file is not a PDF"));
+            return;
+          }
+
+          java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
+          boolean finalVersion = parseFinalVersionMultipart(mp);
+          PdfSigningOptions pdfOpts;
+          try {
+            pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+          } catch (IllegalArgumentException e) {
+            LOG.error("Error parsing PDF signing options: ", e.getMessage());
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
+
+          File outDirFile = null;
+          if (outputPreference.includesFile()) {
+            String outputDir;
+            try {
+              outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+            } catch (IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              return;
+            }
+            Path outputBase = null;
+            if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+              outputBase = Paths.get(cfg.outputBaseDir());
+              if (!outputBase.isAbsolute()) {
+                outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+              }
+            }
+            try {
+              outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+            } catch (SecurityException | IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              return;
+            }
+          }
+
+          char[] pin = resolvePin(cfg);
+          List<String> libs = resolvePkcs11Libraries(cfg);
+          if (libs.isEmpty()) {
+            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            return;
+          }
+
+          Pkcs11Token.Loaded loaded;
+          try {
+            loaded = Pkcs11Token.load(pin, libs);
+          } catch (RuntimeException e) {
+            String detail = buildTokenErrorDetail(e);
+            LOG.error("Token load failed (auto-sign-pdf). tookMs={} details={}",
+                System.currentTimeMillis() - startMs, detail);
+            writeJson(resp, 400, Map.of(
+                "error", "Token load failed",
+                "details", detail));
+            return;
+          }
+
+          KeyStore ks = loaded.keyStore();
+
+          java.util.List<PublicKey> requestedPublicKeys;
+          try {
+            requestedPublicKeys = loadConfiguredPublicKeysOrThrow();
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to load configured public key(s)", "details", safeMsg(e)));
+            return;
+          }
+
+          CertificateSelection selection;
+          try {
+            selection = selectCertificateForPublicKeys(ks, requestedPublicKeys);
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
+            return;
+          }
+
+          if (selection == null || selection.chain == null || selection.chain.length == 0) {
+            writeJson(resp, 400, Map.of("error", "No certificate on token matches any configured public key"));
+            return;
+          }
+
+          String matchedAlias = selection.alias;
+          X509Certificate matchedCert = selection.certificate;
+          Certificate[] chain = selection.chain;
+
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          if (key == null) {
+            writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
+            return;
+          }
+
+          X509Certificate signingCert = matchedCert;
+          X509Certificate[] x509Chain = null;
+          if (chain[0] instanceof X509Certificate) {
+            x509Chain = java.util.Arrays.stream(chain)
+                .filter(c -> c instanceof X509Certificate)
+                .map(c -> (X509Certificate) c)
+                .toArray(X509Certificate[]::new);
+          }
+          CertificateValidator.validateForSigning(signingCert, x509Chain);
+
+          String inputFilename = mp.filename("file");
+          if (inputFilename == null || inputFilename.isBlank()) {
+            inputFilename = "document.pdf";
+          }
+
+          Path reservedOutPath = null;
+          if (outputPreference.includesFile()) {
+            try {
+              reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
+                  Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
+                  ApiServlet::sanitizeFilename);
+            } catch (IOException e) {
+              LOG.error("/auto-sign-pdf: failed to reserve output path: ", safeMsg(e));
+              writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+              return;
+            }
+          }
+
+          boolean outputWritten = false;
+          try {
+            File outFile = reservedOutPath != null ? reservedOutPath.toFile() : null;
+            byte[] pdfToSign = outFile != null ? resolveAutoSignIncrementalInput(data, outFile, mp) : data;
+
+            PdfSignerService.PdfSigningResult signResult;
+            try {
+              long signStartMs = System.currentTimeMillis();
+              signResult = PdfSignerService.signPdf(
+                  pdfToSign,
+                  key,
+                  chain,
+                  loaded.provider(),
+                  signingCert,
+                  reason,
+                  location,
+                  stampPages,
+                  pdfOpts);
+              LOG.info("PDF signed. alias={} pages={} timestamped={} tookMs={}",
+                  matchedAlias, stampPages != null ? stampPages.size() : 0, signResult.isTimestamped(),
+                  System.currentTimeMillis() - signStartMs);
+            } catch (DocMdpNoChangesLockException e) {
+              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+              return;
+            } catch (PdfSignerService.PdfSigningException e) {
+              LOG.error("PDF signing failed. alias={} tookMs={} err={}",
+                  matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
+              writeJson(resp, 500, Map.of("error", "PDF signing failed", "details", safeMsg(e)));
+              return;
+            } catch (IOException e) {
+              LOG.error("Invalid PDF structure. alias={} tookMs={} err={}",
+                  matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e));
+              writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
+              return;
+            }
+            byte[] signedPdf = signResult.signedPdf();
+            String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
+            if (ltvError != null) {
+              writeJson(resp, 422, ltvFailureBody(ltvError));
+              return;
+            }
+            String outputPath = null;
+            if (reservedOutPath != null) {
+              Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
+              outputWritten = true;
+              outputPath = Objects.requireNonNull(outFile, "outFile").getAbsolutePath();
+            }
+
+            Map<String, Object> autoPdfBody = new LinkedHashMap<>();
+            autoPdfBody.put("ok", true);
+            autoPdfBody.put("format", "pdf");
+            autoPdfBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+            autoPdfBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+            if (outputPreference.includesRaw()) {
+              autoPdfBody.put("signedData", encodeForRawOutput(signedPdf, outputPreference.rawFormat()));
+              autoPdfBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
+            }
+            if (outputPreference.includesFile()) {
+              autoPdfBody.put("outputPath", outputPath);
+            }
+            autoPdfBody.put("chainedFromExistingOutput", outFile != null && pdfToSign != data);
+            autoPdfBody.put("stampedPages", stampPages);
+            autoPdfBody.put("finalVersion", finalVersion);
+            autoPdfBody.put("timestamped", signResult.isTimestamped());
+            if (signResult.tsaWarning() != null) {
+              autoPdfBody.put("tsaWarning", signResult.tsaWarning().getMessage());
+            }
+            writeJson(resp, 200, autoPdfBody);
+            // resp.getOutputStream().write(signedPdf);
+          } finally {
+            if (reservedOutPath != null && !outputWritten) {
+              try {
+                Files.deleteIfExists(reservedOutPath);
+              } catch (IOException e) {
+                LOG.error("/auto-sign-pdf: failed to delete reserved output: ", safeMsg(e));
+              }
+            }
+          }
+          return;
+        }
+
+        case "/auto-sign-pdf-blob" -> {
+          LOG.info("Auto-signing PDF request received");
+          var mp = Multipart.read(req, multipartPdfMaxBytes);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) {
+            LOG.error("Auto-signing PDF request received but config is null");
+            return;
+          }
+          OutputPreference outputPreference;
+          try {
+            outputPreference = parseOutputPreference(mp, cfg);
+          } catch (IllegalArgumentException e) {
+            LOG.error("Error parsing output preference: ", e.getMessage());
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
+          byte[] data;
+          try {
+            data = resolvePdfPayloadFromFileParam(mp);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
+          String reason = mp.field("reason");
+          String location = mp.field("location");
+          // Some clients send text fields as "file" parts with filename present/empty.
+          // Fall back to interpreting them as text when mp.field(...) is null.
+          if (reason == null) {
+            LOG.info("Reason is null, falling back to interpreting them as text");
+            byte[] rb = mp.file("reason");
+            if (rb != null && rb.length > 0) {
+              reason = new String(rb, java.nio.charset.StandardCharsets.UTF_8).trim();
+            }
+          }
+          if (location == null) {
+            LOG.info("Location is null, falling back to interpreting them as text");
+            byte[] lb = mp.file("location");
+            if (lb != null && lb.length > 0) {
+              location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
+            }
+          }
+
+          if (data == null || data.length == 0) {
+            LOG.error("PDF file is null or empty");
+            writeJson(resp, 400, Map.of("error", "Missing file parameter: file"));
+            return;
+          }
+          if (!isPdfUpload(data, mp.filename("file"))) {
+            LOG.error("Uploaded PDF file is not a PDF");
+            writeJson(resp, 400, Map.of("error", "Provided file content is not a valid PDF"));
             return;
           }
 
