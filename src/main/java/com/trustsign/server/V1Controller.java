@@ -123,6 +123,11 @@ public class V1Controller {
     api.handlePost(req, resp, "/validate-token");
   }
 
+  @PostMapping("/map-certificate")
+  public void mapCertificate(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/map-certificate");
+  }
+
   @PostMapping("/debug-bytes")
   public void debugBytes(HttpServletRequest req, HttpServletResponse resp) throws IOException {
     api.handlePost(req, resp, "/debug-bytes");

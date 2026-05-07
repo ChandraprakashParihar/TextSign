@@ -104,7 +104,8 @@ public final class PdfSignerService {
   private static final float DEFAULT_COORDINATE_WIDTH = 150f;
   private static final float DEFAULT_COORDINATE_HEIGHT = 50f;
   private static final float DEFAULT_EDGE_MARGIN = 24f;
-  private static final float SIGNATURE_BACKGROUND_IMAGE_SCALE = 0.10f;
+  // private static final float SIGNATURE_BACKGROUND_IMAGE_SCALE = 0.10f;
+  private static final float SIGNATURE_BACKGROUND_IMAGE_SCALE = 0.05f;
 
   public enum CoordinateOverflowMode {
     ADJUST,

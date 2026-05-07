@@ -1,78 +1,59 @@
 {
-  "port": 80,
-  "allowedOrigins": ["*"],
-  "allowedClientIps": [
-    "0.0.0.0"
-  ],
-  "logFilePath": "/Users/jainnibha/output/logs/trustsign/application.log",
-  "logging": {
-    "directory": "logs",
-    "consoleEnabled": true,
-    "failOnError": true
+  "port" : 80,
+  "allowedOrigins" : [ "*" ],
+  "allowedClientIps" : [ "0.0.0.0" ],
+  "logFilePath" : "/Users/jainnibha/output/logs/trustsign/application.log",
+  "logging" : {
+    "directory" : "logs",
+    "consoleEnabled" : true,
+    "failOnError" : true
   },
-  "server": {
-    "maxThreads": 400,
-    "minSpareThreads": 32,
-    "threadIdleTimeoutMs": 120000,
-    "enableDebugEndpoints": true,
-    "acceptQueueSize": 8192,
-    "connectorIdleTimeoutMs": 120000,
-    "maxTcpConnections": 50000,
-    "maxConcurrentSigningOperations": 24,
-    "sessionIssueRateLimitPerMinute": 30,
-    "signingAcquireTimeoutMs": 300000,
-    "multipartPdfMaxFileMb": 25,
-    "multipartTextMaxFileMb": 4,
-    "gracefulStopTimeoutMs": 30000
+  "server" : {
+    "maxThreads" : 400,
+    "minSpareThreads" : 32,
+    "threadIdleTimeoutMs" : 120000,
+    "enableDebugEndpoints" : true,
+    "acceptQueueSize" : 8192,
+    "connectorIdleTimeoutMs" : 120000,
+    "maxTcpConnections" : 50000,
+    "maxConcurrentSigningOperations" : 24,
+    "sessionIssueRateLimitPerMinute" : 30,
+    "signingAcquireTimeoutMs" : 300000,
+    "multipartPdfMaxFileMb" : 25,
+    "multipartTextMaxFileMb" : 4,
+    "gracefulStopTimeoutMs" : 30000
   },
-  "autoSignOutputDir": "/Users/jainnibha/output",
-  "output": "file",
-  "outputFormat": "base64",
-  "signerVersion": "TrustSign_0.1.0",
-  "signatureImagePath": "/Users/jainnibha/chandra-workspace/trustsign/assets/greentickrbg.png",
-  "truststore": {
-    "path": "truststore.jks",
-    "password": "trustsign_new",
-    "type": "PKCS12",
-    "enablePathValidation": true
+  "autoSignOutputDir" : "/Users/jainnibha/output",
+  "output" : "file",
+  "outputFormat" : "base64",
+  "signerVersion" : "TrustSign_0.1.0",
+  "signatureImagePath" : "/Users/jainnibha/chandra-workspace/trustsign/assets/greentickrbg.png",
+  "truststore" : {
+    "path" : "truststore.jks",
+    "password" : "chandra_ts",
+    "type" : "PKCS12",
+    "enablePathValidation" : true
   },
-  "certificateValidation": {
-    "enableCcaRootSkiCheck": false,
-    "allowedRootSkis": "",
-    "enableClassValidation": false,
-    "allowedCertificatePolicyOids": ""
+  "certificateValidation" : {
+    "enableCcaRootSkiCheck" : false,
+    "allowedRootSkis" : "",
+    "enableClassValidation" : false,
+    "allowedCertificatePolicyOids" : ""
   },
-  "pkcs11": {
-    "preferredLibrary": null,
-    "pin": null,
-    "windowsCandidates": [
-      "%SystemRoot%\\System32\\eps2003csp11v2.dll",
-      "%SystemRoot%\\System32\\eps2003csp11v2_s.dll",
-      "%SystemRoot%\\SysWOW64\\eps2003csp11v2.dll",
-      "%SystemRoot%\\SysWOW64\\eps2003csp11v2_s.dll",
-      "%ProgramFiles%\\HyperPKI\\bin\\pkcs11.dll",
-      "%ProgramFiles%\\HyperPKI\\pkcs11.dll",
-      "%ProgramFiles(x86)%\\HyperPKI\\bin\\pkcs11.dll",
-      "%ProgramFiles(x86)%\\HyperPKI\\pkcs11.dll",
-      "%ProgramFiles%\\ePass2003\\bin\\pkcs11.dll",
-      "%ProgramFiles(x86)%\\ePass2003\\bin\\pkcs11.dll",
-      "%ProgramFiles%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll",
-      "%ProgramFiles(x86)%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll"
-    ],
-    "macCandidates": ["/usr/local/lib/libcastle_v2.1.0.0.dylib"],
-    "linuxCandidates": []
+  "pkcs11" : {
+    "preferredLibrary" : null,
+    "pin" : null,
+    "windowsCandidates" : [ "%SystemRoot%\\System32\\eps2003csp11v2.dll", "%SystemRoot%\\System32\\eps2003csp11v2_s.dll", "%SystemRoot%\\SysWOW64\\eps2003csp11v2.dll", "%SystemRoot%\\SysWOW64\\eps2003csp11v2_s.dll", "%ProgramFiles%\\HyperPKI\\bin\\pkcs11.dll", "%ProgramFiles%\\HyperPKI\\pkcs11.dll", "%ProgramFiles(x86)%\\HyperPKI\\bin\\pkcs11.dll", "%ProgramFiles(x86)%\\HyperPKI\\pkcs11.dll", "%ProgramFiles%\\ePass2003\\bin\\pkcs11.dll", "%ProgramFiles(x86)%\\ePass2003\\bin\\pkcs11.dll", "%ProgramFiles%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll", "%ProgramFiles(x86)%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll" ],
+    "macCandidates" : [ "/usr/local/lib/libcastle_v2.1.0.0.dylib" ],
+    "linuxCandidates" : [ ]
   },
-"ltv": {
-  "enabled": false,
-  "failOnMissingRevocationData": false,
-  "strictPerCertEvidence": false,
-  "ocspConnectTimeoutMs": 10000,
-  "ocspReadTimeoutMs": 15000,
-  "crlConnectTimeoutMs": 10000,
-  "crlReadTimeoutMs": 15000
+  "ltv" : {
+    "enabled" : false,
+    "failOnMissingRevocationData" : false,
+    "strictPerCertEvidence" : false,
+    "ocspConnectTimeoutMs" : 10000,
+    "ocspReadTimeoutMs" : 15000,
+    "crlConnectTimeoutMs" : 10000,
+    "crlReadTimeoutMs" : 15000
+  }
 }
-
-}
-
-
-

@@ -2,6 +2,7 @@ package com.trustsign.core;
 
 import org.bouncycastle.asn1.ASN1OctetString;
 import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.x509.AuthorityKeyIdentifier;
 import org.bouncycastle.asn1.x509.CRLDistPoint;
 import org.bouncycastle.asn1.x509.CertificatePolicies;
 import org.bouncycastle.asn1.x509.DistributionPoint;
@@ -23,9 +24,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.HexFormat;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -129,6 +132,7 @@ public final class CertificateValidator {
   }
 
   private static final String OID_SUBJECT_KEY_IDENTIFIER = "2.5.29.14";
+  private static final String OID_AUTHORITY_KEY_IDENTIFIER = "2.5.29.35";
   private static final String OID_CERTIFICATE_POLICIES = "2.5.29.32";
 
   /**
@@ -180,22 +184,65 @@ public final class CertificateValidator {
   }
 
   private static X509Certificate getRootCertificate(X509Certificate leaf, X509Certificate[] chain) {
-    if (chain != null && chain.length > 0) {
-      return chain[chain.length - 1];
+    try {
+      X509Certificate[] normalized = normalizeProvidedChain(leaf, chain);
+      if (normalized.length > 0) {
+        X509Certificate terminal = normalized[normalized.length - 1];
+        if (isSelfSigned(terminal)) {
+          return terminal;
+        }
+      }
+    } catch (Exception ignored) {
+    }
+    try {
+      KeyStore trustStore = loadTrustStoreIfConfigured();
+      if (trustStore == null) {
+        return null;
+      }
+      List<X509Certificate> expectedIssuers = buildExpectedIssuerPathFromTrustStore(leaf, trustStore);
+      if (!expectedIssuers.isEmpty()) {
+        return expectedIssuers.get(expectedIssuers.size() - 1);
+      }
+    } catch (Exception ignored) {
     }
     return null;
   }
 
   private static String getSubjectKeyIdentifierHex(X509Certificate cert) {
     byte[] extVal = cert.getExtensionValue(OID_SUBJECT_KEY_IDENTIFIER);
-    if (extVal == null) return null;
+    if (extVal == null) {
+      return null;
+    }
     try {
-      byte[] octets = ASN1OctetString.getInstance(extVal).getOctets();
+      byte[] octets = ASN1OctetString.getInstance(
+          ASN1Primitive.fromByteArray(extractExtensionOctets(extVal))).getOctets();
       if (octets == null || octets.length == 0) return null;
       return HexFormat.of().formatHex(octets);
     } catch (Exception e) {
       return null;
     }
+  }
+
+  private static String getAuthorityKeyIdentifierHex(X509Certificate cert) {
+    byte[] extVal = cert.getExtensionValue(OID_AUTHORITY_KEY_IDENTIFIER);
+    if (extVal == null) {
+      return null;
+    }
+    try {
+      AuthorityKeyIdentifier aki = AuthorityKeyIdentifier.getInstance(
+          ASN1Primitive.fromByteArray(extractExtensionOctets(extVal)));
+      byte[] keyId = aki == null ? null : aki.getKeyIdentifier();
+      if (keyId == null || keyId.length == 0) {
+        return null;
+      }
+      return HexFormat.of().formatHex(keyId);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private static byte[] extractExtensionOctets(byte[] extVal) throws Exception {
+    return ASN1OctetString.getInstance(ASN1Primitive.fromByteArray(extVal)).getOctets();
   }
 
   private static List<String> parseCommaSeparatedHex(String allowed) {
@@ -213,7 +260,7 @@ public final class CertificateValidator {
     byte[] extVal = cert.getExtensionValue(OID_CERTIFICATE_POLICIES);
     if (extVal == null) return oids;
     try {
-      ASN1Primitive derObj = ASN1Primitive.fromByteArray(ASN1OctetString.getInstance(extVal).getOctets());
+      ASN1Primitive derObj = ASN1Primitive.fromByteArray(extractExtensionOctets(extVal));
       CertificatePolicies policies = CertificatePolicies.getInstance(derObj);
       if (policies == null) return oids;
       for (PolicyInformation info : policies.getPolicyInformation()) {
@@ -243,7 +290,7 @@ public final class CertificateValidator {
       }
 
       ASN1Primitive derObj = ASN1Primitive.fromByteArray(
-          ASN1OctetString.getInstance(extVal).getOctets()
+          extractExtensionOctets(extVal)
       );
       CRLDistPoint distPoint = CRLDistPoint.getInstance(derObj);
       if (distPoint == null) return;
@@ -324,12 +371,20 @@ public final class CertificateValidator {
       X509Certificate[] provided = normalizeProvidedChain(leaf, chain);
       validateProvidedChainOrderSignaturesAndValidity(provided);
       List<X509Certificate> expectedIssuers = buildExpectedIssuerPathFromTrustStore(leaf, trustStore);
-      enforceExactChainMatch(provided, expectedIssuers);
+      X509Certificate[] resolved = mergeWithExpectedIssuers(provided, expectedIssuers);
+      validateProvidedChainOrderSignaturesAndValidity(resolved);
+      boolean strictExact = Boolean.parseBoolean(System.getProperty("trustsign.strictExactChainMatch", "false"));
+      if (strictExact) {
+        enforceExactChainMatch(provided, expectedIssuers);
+      }
 
-      X509Certificate root = provided[provided.length - 1];
+      X509Certificate root = resolved[resolved.length - 1];
+      if (!isSelfSigned(root)) {
+        throw new SecurityException("Resolved chain root is not self-signed");
+      }
       LOG.info("Strict certificate chain validation successful: subject='{}', chainLength={}, root='{}'",
           leaf.getSubjectX500Principal().getName(),
-          provided.length,
+          resolved.length,
           root.getSubjectX500Principal().getName());
     } catch (SecurityException se) {
       LOG.warn("Strict certificate chain validation failed: subject='{}', reason={}",
@@ -341,13 +396,39 @@ public final class CertificateValidator {
   }
 
   private static X509Certificate[] normalizeProvidedChain(X509Certificate leaf, X509Certificate[] chain) {
-    if (chain == null || chain.length == 0) {
-      throw new SecurityException("Strict chain validation requires full certificate chain");
+    List<X509Certificate> candidates = new ArrayList<>();
+    candidates.add(leaf);
+    if (chain != null) {
+      for (X509Certificate cert : chain) {
+        if (cert != null && !containsEquivalent(candidates, cert)) {
+          candidates.add(cert);
+        }
+      }
     }
-    if (!leaf.equals(chain[0])) {
-      throw new SecurityException("Chain order mismatch: first certificate is not the signing certificate");
+    List<X509Certificate> ordered = new ArrayList<>();
+    Set<String> seen = new HashSet<>();
+    X509Certificate current = leaf;
+    ordered.add(current);
+    seen.add(certificateFingerprint(current));
+    while (true) {
+      X509Certificate issuer = findIssuerInCollection(current, candidates);
+      if (issuer == null) {
+        break;
+      }
+      String fp = certificateFingerprint(issuer);
+      if (!seen.add(fp)) {
+        break;
+      }
+      ordered.add(issuer);
+      current = issuer;
+      if (isSelfSigned(current)) {
+        break;
+      }
+      if (ordered.size() > 32) {
+        throw new SecurityException("Unexpected certificate chain depth; possible loop");
+      }
     }
-    return chain;
+    return ordered.toArray(new X509Certificate[0]);
   }
 
   private static void validateProvidedChainOrderSignaturesAndValidity(X509Certificate[] chain) {
@@ -358,16 +439,7 @@ public final class CertificateValidator {
       } catch (Exception e) {
         throw new SecurityException("Certificate in chain is not currently valid at position " + i + ": " + e.getMessage(), e);
       }
-      if (i == chain.length - 1) {
-        if (!cert.getSubjectX500Principal().equals(cert.getIssuerX500Principal())) {
-          throw new SecurityException("Root certificate must be self-signed");
-        }
-        try {
-          cert.verify(cert.getPublicKey());
-        } catch (Exception e) {
-          throw new SecurityException("Root self-signature verification failed: " + e.getMessage(), e);
-        }
-      } else {
+      if (i < chain.length - 1) {
         X509Certificate issuer = chain[i + 1];
         if (!cert.getIssuerX500Principal().equals(issuer.getSubjectX500Principal())) {
           throw new SecurityException("Issuer mismatch between chain certificates at positions " + i + " and " + (i + 1));
@@ -390,7 +462,7 @@ public final class CertificateValidator {
         throw new SecurityException("Issuer certificate not present in truststore for subject: " + current.getSubjectX500Principal().getName());
       }
       path.add(issuer);
-      if (issuer.getSubjectX500Principal().equals(issuer.getIssuerX500Principal())) {
+      if (isSelfSigned(issuer)) {
         break;
       }
       current = issuer;
@@ -399,6 +471,27 @@ public final class CertificateValidator {
       }
     }
     return path;
+  }
+
+  private static X509Certificate[] mergeWithExpectedIssuers(X509Certificate[] provided, List<X509Certificate> expectedIssuers) {
+    List<X509Certificate> merged = new ArrayList<>();
+    merged.add(provided[0]); // leaf
+    for (int i = 0; i < expectedIssuers.size(); i++) {
+      X509Certificate expected = expectedIssuers.get(i);
+      int providedIndex = i + 1;
+      if (providedIndex < provided.length) {
+        X509Certificate actual = provided[providedIndex];
+        if (!expected.equals(actual)) {
+          throw new SecurityException("Provided chain certificate mismatch at position " + providedIndex +
+              ": expected subject='" + expected.getSubjectX500Principal().getName() +
+              "', actual subject='" + actual.getSubjectX500Principal().getName() + "'");
+        }
+        merged.add(actual);
+      } else {
+        merged.add(expected);
+      }
+    }
+    return merged.toArray(new X509Certificate[0]);
   }
 
   private static void enforceExactChainMatch(X509Certificate[] provided, List<X509Certificate> expectedIssuers) {
@@ -419,15 +512,99 @@ public final class CertificateValidator {
 
   private static X509Certificate findIssuerInTrustStore(X509Certificate cert, KeyStore trustStore) throws Exception {
     var issuerDn = cert.getIssuerX500Principal();
+    List<X509Certificate> candidates = new ArrayList<>();
     Enumeration<String> aliases = trustStore.aliases();
     while (aliases.hasMoreElements()) {
       String alias = aliases.nextElement();
       Certificate c = trustStore.getCertificate(alias);
       if (c instanceof X509Certificate x509 && x509.getSubjectX500Principal().equals(issuerDn)) {
-        return x509;
+        candidates.add(x509);
       }
     }
-    return null;
+    return selectBestIssuerCandidate(cert, candidates);
+  }
+
+  private static X509Certificate findIssuerInCollection(X509Certificate cert, List<X509Certificate> collection) {
+    if (cert == null || collection == null || collection.isEmpty()) {
+      return null;
+    }
+    var issuerDn = cert.getIssuerX500Principal();
+    List<X509Certificate> candidates = new ArrayList<>();
+    for (X509Certificate candidate : collection) {
+      if (candidate == null || cert.equals(candidate)) {
+        continue;
+      }
+      if (candidate.getSubjectX500Principal().equals(issuerDn)) {
+        candidates.add(candidate);
+      }
+    }
+    return selectBestIssuerCandidate(cert, candidates);
+  }
+
+  private static X509Certificate selectBestIssuerCandidate(X509Certificate cert, List<X509Certificate> candidates) {
+    if (candidates == null || candidates.isEmpty()) {
+      return null;
+    }
+    String authorityKeyId = getAuthorityKeyIdentifierHex(cert);
+    X509Certificate best = null;
+    int bestScore = Integer.MIN_VALUE;
+    for (X509Certificate candidate : candidates) {
+      try {
+        cert.verify(candidate.getPublicKey());
+      } catch (Exception e) {
+        continue;
+      }
+      int score = 0;
+      String subjectKeyId = getSubjectKeyIdentifierHex(candidate);
+      if (authorityKeyId != null && subjectKeyId != null
+          && authorityKeyId.equalsIgnoreCase(subjectKeyId)) {
+        score += 4;
+      }
+      boolean[] ku = candidate.getKeyUsage();
+      if (ku == null || safeIndex(ku, 5)) { // keyCertSign
+        score += 1;
+      }
+      if (isSelfSigned(candidate)) {
+        score += 1;
+      }
+      if (best == null || score > bestScore
+          || (score == bestScore && candidate.getNotAfter().after(best.getNotAfter()))) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  private static boolean isSelfSigned(X509Certificate cert) {
+    if (cert == null || !cert.getSubjectX500Principal().equals(cert.getIssuerX500Principal())) {
+      return false;
+    }
+    try {
+      cert.verify(cert.getPublicKey());
+      return true;
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  private static boolean containsEquivalent(List<X509Certificate> list, X509Certificate cert) {
+    String target = certificateFingerprint(cert);
+    for (X509Certificate x : list) {
+      if (target.equals(certificateFingerprint(x))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static String certificateFingerprint(X509Certificate cert) {
+    try {
+      byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(cert.getEncoded());
+      return HexFormat.of().formatHex(digest);
+    } catch (Exception e) {
+      return Integer.toHexString(System.identityHashCode(cert));
+    }
   }
 
   /**
@@ -442,16 +619,7 @@ public final class CertificateValidator {
     if (ks == null) {
       return null;
     }
-    var issuerDn = signer.getIssuerX500Principal();
-    Enumeration<String> aliases = ks.aliases();
-    while (aliases.hasMoreElements()) {
-      String alias = aliases.nextElement();
-      Certificate c = ks.getCertificate(alias);
-      if (c instanceof X509Certificate x509 && x509.getSubjectX500Principal().equals(issuerDn)) {
-        return x509;
-      }
-    }
-    return null;
+    return findIssuerInTrustStore(signer, ks);
   }
 
   /**

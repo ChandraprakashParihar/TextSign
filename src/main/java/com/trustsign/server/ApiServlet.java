@@ -29,6 +29,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.net.URLConnection;
 import java.security.KeyStore;
 import java.security.PrivateKey;
 import java.security.PublicKey;
@@ -59,6 +62,13 @@ import java.util.concurrent.atomic.LongAdder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.regex.Pattern;
+import org.bouncycastle.asn1.ASN1OctetString;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.DERIA5String;
+import org.bouncycastle.asn1.x509.AccessDescription;
+import org.bouncycastle.asn1.x509.AuthorityInformationAccess;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.GeneralName;
 
 public final class ApiServlet {
   private static final Logger LOG = LoggerFactory.getLogger(ApiServlet.class);
@@ -309,6 +319,14 @@ public final class ApiServlet {
       return b.trim();
     }
     return null;
+  }
+
+  private static String firstNonBlank(String a, String b, String c) {
+    String first = firstNonBlank(a, b);
+    if (first != null && !first.isBlank()) {
+      return first;
+    }
+    return (c == null || c.isBlank()) ? null : c.trim();
   }
 
   /**
@@ -1203,6 +1221,55 @@ public final class ApiServlet {
           ValidationResponse validation = validateTokenAndCertificate(cfg);
           int status = validation.ok ? 200 : 422;
           writeJson(resp, status, validation.body);
+          return;
+        }
+
+        case "/map-certificate" -> {
+          // requireSession(req);
+          var mp = Multipart.read(req, multipartMediumMaxBytes);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) {
+            return;
+          }
+          byte[] cerPayload = readMultipartCerPayload(mp);
+          if (cerPayload == null || cerPayload.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing certificate payload: cer"));
+            return;
+          }
+          String truststorePassword = readMultipartString(mp, "truststorePassword", true);
+          if (truststorePassword == null || truststorePassword.isBlank()) {
+            writeJson(resp, 400, Map.of("error", "Missing required field: truststorePassword"));
+            return;
+          }
+          String truststoreFile = firstNonBlank(
+              readMultipartString(mp, "truststoreFile", true),
+              cfg.truststore() != null ? cfg.truststore().path() : null,
+              "truststore.jks");
+          String truststoreType = firstNonBlank(
+              readMultipartString(mp, "truststoreType", true),
+              cfg.truststore() != null ? cfg.truststore().type() : null,
+              "PKCS12");
+          try {
+            MapCertificateResult mapping = mapCertificateArtifacts(
+                resolveConfigFile(),
+                cerPayload,
+                truststoreFile,
+                truststorePassword,
+                truststoreType);
+            writeJson(resp, 200, Map.of(
+                "ok", true,
+                "mappedCount", mapping.importedCertificates(),
+                "aliases", mapping.aliases(),
+                "publicKeyPath", mapping.publicKeyPath().toAbsolutePath().toString(),
+                "truststorePath", mapping.truststorePath().toAbsolutePath().toString(),
+                "truststoreType", mapping.truststoreType(),
+                "subjectDn", mapping.leafSubjectDn(),
+                "serialNumber", mapping.leafSerialHex()));
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Certificate mapping failed", "details", safeMsg(e)));
+          }
           return;
         }
 
@@ -3585,6 +3652,384 @@ public final class ApiServlet {
     final LongAdder errors = new LongAdder();
     final LongAdder totalLatencyMs = new LongAdder();
     final AtomicLong maxLatencyMs = new AtomicLong(0L);
+  }
+
+  private record MapCertificateResult(
+      Path publicKeyPath,
+      Path truststorePath,
+      String truststoreType,
+      int importedCertificates,
+      java.util.List<String> aliases,
+      String leafSubjectDn,
+      String leafSerialHex) {
+  }
+
+  private MapCertificateResult mapCertificateArtifacts(
+      File configFile,
+      byte[] cerPayload,
+      String truststoreFile,
+      String truststorePassword,
+      String truststoreType) throws Exception {
+    if (configFile == null) {
+      throw new IllegalArgumentException("Config file is required");
+    }
+    if (truststorePassword == null || truststorePassword.isBlank()) {
+      throw new IllegalArgumentException("truststorePassword is required");
+    }
+    List<X509Certificate> certificates = parseX509Certificates(cerPayload);
+    if (certificates.isEmpty()) {
+      throw new IllegalArgumentException("Could not parse X.509 certificate(s) from cer payload");
+    }
+    DerivedChainAliases aliasesFromCer = deriveChainAliases(certificates);
+    X509Certificate leaf = aliasesFromCer.signer();
+    Path configDir = configFile.getParentFile() != null
+        ? configFile.getParentFile().toPath().toAbsolutePath().normalize()
+        : Paths.get(".").toAbsolutePath().normalize();
+    Path publicKeyPath = configDir.resolve("public-key.pem").normalize();
+    Path truststorePath = resolveTruststorePath(configDir, truststoreFile);
+    String normalizedStoreType = truststoreType == null || truststoreType.isBlank()
+        ? "PKCS12"
+        : truststoreType.trim();
+    writePublicKeyPem(publicKeyPath, leaf.getPublicKey());
+    java.util.List<String> aliases = importCertificatesToTruststore(
+        truststorePath,
+        normalizedStoreType,
+        truststorePassword.toCharArray(),
+        aliasesFromCer.signer(),
+        aliasesFromCer.cca(),
+        aliasesFromCer.ca(),
+        aliasesFromCer.subca(),
+        certificates);
+    updateConfigTruststore(
+        configFile.toPath(),
+        configDir,
+        truststorePath,
+        truststorePassword,
+        normalizedStoreType);
+    resetCachesAfterCertificateMapping();
+    return new MapCertificateResult(
+        publicKeyPath,
+        truststorePath,
+        normalizedStoreType,
+        certificates.size(),
+        aliases,
+        leaf.getSubjectX500Principal().getName(),
+        leaf.getSerialNumber() != null ? leaf.getSerialNumber().toString(16) : null);
+  }
+
+  private static Path resolveTruststorePath(Path configDir, String truststoreFile) {
+    String name = truststoreFile == null || truststoreFile.isBlank() ? "truststore.jks" : truststoreFile.trim();
+    Path candidate = Paths.get(name);
+    Path resolved = candidate.isAbsolute() ? candidate.normalize().toAbsolutePath() : configDir.resolve(candidate).normalize();
+    if (!candidate.isAbsolute() && !resolved.startsWith(configDir)) {
+      throw new IllegalArgumentException("truststoreFile must not escape config directory");
+    }
+    return resolved;
+  }
+
+  private static List<X509Certificate> parseX509Certificates(byte[] payload) throws Exception {
+    String asText = new String(payload, StandardCharsets.UTF_8);
+    java.security.cert.CertificateFactory cf = java.security.cert.CertificateFactory.getInstance("X.509");
+    java.util.ArrayList<X509Certificate> out = new java.util.ArrayList<>();
+    if (asText.contains("-----BEGIN CERTIFICATE-----")) {
+      java.util.regex.Matcher m = Pattern.compile(
+          "-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----",
+          Pattern.DOTALL).matcher(asText);
+      while (m.find()) {
+        String b64 = m.group(1).replaceAll("\\s", "");
+        if (b64.isBlank()) {
+          continue;
+        }
+        byte[] der = Base64.getDecoder().decode(b64);
+        java.security.cert.Certificate cert = cf.generateCertificate(new java.io.ByteArrayInputStream(der));
+        if (cert instanceof X509Certificate x509) {
+          out.add(x509);
+        }
+      }
+      return out;
+    }
+    try (java.io.ByteArrayInputStream in = new java.io.ByteArrayInputStream(payload)) {
+      java.util.Collection<? extends java.security.cert.Certificate> parsed = cf.generateCertificates(in);
+      for (java.security.cert.Certificate c : parsed) {
+        if (c instanceof X509Certificate x509) {
+          out.add(x509);
+        }
+      }
+    }
+    if (!out.isEmpty()) {
+      return out;
+    }
+    String normalized = asText.replaceAll("\\s", "");
+    if (!normalized.isBlank()) {
+      byte[] der = Base64.getDecoder().decode(normalized);
+      java.security.cert.Certificate cert = cf.generateCertificate(new java.io.ByteArrayInputStream(der));
+      if (cert instanceof X509Certificate x509) {
+        out.add(x509);
+      }
+    }
+    return out;
+  }
+
+  private record DerivedChainAliases(
+      X509Certificate signer,
+      X509Certificate subca,
+      X509Certificate ca,
+      X509Certificate cca) {
+  }
+
+  private static DerivedChainAliases deriveChainAliases(List<X509Certificate> certificates) {
+    if (certificates == null || certificates.isEmpty()) {
+      throw new IllegalArgumentException("cer must contain at least one certificate");
+    }
+    java.util.ArrayList<X509Certificate> available = new java.util.ArrayList<>(certificates);
+    X509Certificate signer = available.stream()
+        .filter(c -> c != null && c.getBasicConstraints() < 0)
+        .findFirst()
+        .orElse(available.get(0));
+    ensureIssuerChainFromAia(available, signer, 3);
+    X509Certificate subca = findIssuerInList(available, signer);
+    X509Certificate ca = findIssuerInList(available, subca);
+    X509Certificate cca = findIssuerInList(available, ca);
+    if (subca == null || ca == null || cca == null) {
+      throw new IllegalArgumentException(
+          "Could not build full chain from provided cer. Upload a cer containing chain (signer+issuers) or ensure issuer URLs are reachable.");
+    }
+    return new DerivedChainAliases(signer, subca, ca, cca);
+  }
+
+  private static void ensureIssuerChainFromAia(List<X509Certificate> available, X509Certificate start, int maxDepth) {
+    X509Certificate current = start;
+    for (int depth = 0; depth < maxDepth && current != null; depth++) {
+      X509Certificate existingIssuer = findIssuerInList(available, current);
+      if (existingIssuer != null) {
+        current = existingIssuer;
+        continue;
+      }
+      X509Certificate fetched = fetchIssuerFromAia(current);
+      if (fetched == null) {
+        return;
+      }
+      boolean alreadyPresent = available.stream().anyMatch(c -> sameCertificate(c, fetched));
+      if (!alreadyPresent) {
+        available.add(fetched);
+      }
+      current = fetched;
+    }
+  }
+
+  private static X509Certificate fetchIssuerFromAia(X509Certificate cert) {
+    try {
+      String issuerDn = cert.getIssuerX500Principal() == null ? null : cert.getIssuerX500Principal().getName();
+      if (issuerDn == null || issuerDn.isBlank()) {
+        return null;
+      }
+      byte[] extVal = cert.getExtensionValue(Extension.authorityInfoAccess.getId());
+      if (extVal == null || extVal.length == 0) {
+        return null;
+      }
+      ASN1OctetString octet = ASN1OctetString.getInstance(ASN1Primitive.fromByteArray(extVal));
+      AuthorityInformationAccess aia = AuthorityInformationAccess.getInstance(ASN1Primitive.fromByteArray(octet.getOctets()));
+      for (AccessDescription ad : aia.getAccessDescriptions()) {
+        if (!AccessDescription.id_ad_caIssuers.equals(ad.getAccessMethod())) {
+          continue;
+        }
+        GeneralName location = ad.getAccessLocation();
+        if (location == null || location.getTagNo() != GeneralName.uniformResourceIdentifier) {
+          continue;
+        }
+        String uri = DERIA5String.getInstance(location.getName()).getString();
+        if (uri == null || uri.isBlank()) {
+          continue;
+        }
+        List<X509Certificate> downloaded = downloadCertificates(uri);
+        for (X509Certificate candidate : downloaded) {
+          String subject = candidate.getSubjectX500Principal() == null ? null : candidate.getSubjectX500Principal().getName();
+          if (issuerDn.equals(subject)) {
+            return candidate;
+          }
+        }
+      }
+    } catch (Exception ignored) {
+    }
+    return null;
+  }
+
+  private static List<X509Certificate> downloadCertificates(String uri) {
+    try {
+      URLConnection conn = new URL(uri).openConnection();
+      conn.setConnectTimeout(8_000);
+      conn.setReadTimeout(12_000);
+      try (InputStream in = conn.getInputStream()) {
+        return parseX509Certificates(in.readAllBytes());
+      }
+    } catch (Exception ignored) {
+      return List.of();
+    }
+  }
+
+  private static X509Certificate findIssuerInList(List<X509Certificate> certificates, X509Certificate child) {
+    if (child == null || certificates == null || certificates.isEmpty()) {
+      return null;
+    }
+    String issuerDn = child.getIssuerX500Principal() != null
+        ? child.getIssuerX500Principal().getName()
+        : null;
+    if (issuerDn == null || issuerDn.isBlank()) {
+      return null;
+    }
+    for (X509Certificate candidate : certificates) {
+      if (candidate == null || sameCertificate(candidate, child)) {
+        continue;
+      }
+      String subjectDn = candidate.getSubjectX500Principal() != null
+          ? candidate.getSubjectX500Principal().getName()
+          : null;
+      if (issuerDn.equals(subjectDn)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  private static void writePublicKeyPem(Path outputPath, PublicKey publicKey) throws IOException {
+    if (publicKey == null) {
+      throw new IllegalArgumentException("Leaf certificate does not contain public key");
+    }
+    Path parent = outputPath.getParent();
+    if (parent != null) {
+      Files.createDirectories(parent);
+    }
+    String body = Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII))
+        .encodeToString(publicKey.getEncoded());
+    String pem = "-----BEGIN PUBLIC KEY-----\n" + body + "\n-----END PUBLIC KEY-----\n";
+    Files.writeString(
+        outputPath,
+        pem,
+        StandardCharsets.US_ASCII,
+        StandardOpenOption.CREATE,
+        StandardOpenOption.TRUNCATE_EXISTING,
+        StandardOpenOption.WRITE);
+  }
+
+  private static java.util.List<String> importCertificatesToTruststore(
+      Path truststorePath,
+      String truststoreType,
+      char[] storePassword,
+      X509Certificate signerCert,
+      X509Certificate ccaCert,
+      X509Certificate caCert,
+      X509Certificate subcaCert,
+      List<X509Certificate> chain) throws Exception {
+    Path parent = truststorePath.getParent();
+    if (parent != null) {
+      Files.createDirectories(parent);
+    }
+    KeyStore ks = KeyStore.getInstance(truststoreType);
+    if (Files.exists(truststorePath)) {
+      try (java.io.InputStream in = Files.newInputStream(truststorePath)) {
+        ks.load(in, storePassword);
+      }
+    } else {
+      ks.load(null, storePassword);
+    }
+    java.util.ArrayList<String> aliases = new java.util.ArrayList<>();
+    ks.setCertificateEntry("signer", signerCert);
+    aliases.add("signer");
+    ks.setCertificateEntry("cca", ccaCert);
+    aliases.add("cca");
+    ks.setCertificateEntry("ca", caCert);
+    aliases.add("ca");
+    ks.setCertificateEntry("subca", subcaCert);
+    aliases.add("subca");
+    int extraIndex = 1;
+    for (X509Certificate cert : chain) {
+      boolean alreadyIncluded = sameCertificate(cert, signerCert)
+          || sameCertificate(cert, ccaCert)
+          || sameCertificate(cert, caCert)
+          || sameCertificate(cert, subcaCert);
+      if (alreadyIncluded) {
+        continue;
+      }
+      String fp = sha256Fingerprint(cert);
+      String alias = "mapped-extra-" + extraIndex++;
+      if (fp != null && !fp.isBlank()) {
+        alias = "mapped-" + fp.substring(0, Math.min(fp.length(), 24));
+      }
+      ks.setCertificateEntry(alias, cert);
+      aliases.add(alias);
+    }
+    try (java.io.OutputStream out = Files.newOutputStream(
+        truststorePath,
+        StandardOpenOption.CREATE,
+        StandardOpenOption.TRUNCATE_EXISTING,
+        StandardOpenOption.WRITE)) {
+      ks.store(out, storePassword);
+    }
+    return aliases;
+  }
+
+  private static boolean sameCertificate(X509Certificate a, X509Certificate b) {
+    if (a == null || b == null) {
+      return false;
+    }
+    try {
+      return java.util.Arrays.equals(a.getEncoded(), b.getEncoded());
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  private static void updateConfigTruststore(
+      Path configPath,
+      Path configDir,
+      Path truststorePath,
+      String truststorePassword,
+      String truststoreType) throws IOException {
+    com.fasterxml.jackson.databind.JsonNode node = Json.MAPPER.readTree(Files.readString(configPath, StandardCharsets.UTF_8));
+    if (!(node instanceof com.fasterxml.jackson.databind.node.ObjectNode root)) {
+      throw new IOException("Config file root must be a JSON object");
+    }
+    com.fasterxml.jackson.databind.JsonNode existingTruststore = root.get("truststore");
+    com.fasterxml.jackson.databind.node.ObjectNode truststore;
+    if (existingTruststore instanceof com.fasterxml.jackson.databind.node.ObjectNode objectNode) {
+      truststore = objectNode;
+    } else {
+      truststore = Json.MAPPER.createObjectNode();
+      root.set("truststore", truststore);
+    }
+    Path normalizedConfigDir = configDir.toAbsolutePath().normalize();
+    Path normalizedStore = truststorePath.toAbsolutePath().normalize();
+    String pathForConfig = normalizedStore.startsWith(normalizedConfigDir)
+        ? normalizedConfigDir.relativize(normalizedStore).toString()
+        : normalizedStore.toString();
+    truststore.put("path", pathForConfig.replace('\\', '/'));
+    truststore.put("password", truststorePassword);
+    truststore.put("type", truststoreType);
+    if (!truststore.has("enablePathValidation")) {
+      truststore.put("enablePathValidation", true);
+    }
+    String updated = Json.MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+    Files.writeString(
+        configPath,
+        updated + "\n",
+        StandardCharsets.UTF_8,
+        StandardOpenOption.TRUNCATE_EXISTING,
+        StandardOpenOption.WRITE);
+  }
+
+  private void resetCachesAfterCertificateMapping() {
+    synchronized (this) {
+      cachedConfig = null;
+      cachedConfigPath = null;
+      cachedConfigMtime = -1L;
+      cachedConfigCheckedAtMs = 0L;
+    }
+    synchronized (ApiServlet.class) {
+      cachedPublicKeys = null;
+      cachedPublicKeyPath = null;
+      cachedPublicKeyMtime = -1L;
+      cachedPublicKeyCheckedAtMs = 0L;
+    }
   }
 
   /**
