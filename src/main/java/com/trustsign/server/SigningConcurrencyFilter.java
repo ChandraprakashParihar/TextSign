@@ -18,6 +18,7 @@ public final class SigningConcurrencyFilter extends HttpFilter {
   private static final Set<String> POST_SIGNING_PATHS = Set.of(
       "/sign-pdf",
       "/auto-sign-pdf",
+      "/auto-sign-pdf-at-field",
       "/auto-sign-text",
       "/auto-sign-text-cms",
       "/hsm/sign-pdf",

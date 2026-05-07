@@ -73,6 +73,11 @@ public class V1Controller {
     api.handlePost(req, resp, "/auto-sign-pdf-blob");
   }
 
+  @PostMapping("/auto-sign-pdf-at-field")
+  public void autoSignPdfAtField(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/auto-sign-pdf-at-field");
+  }
+
   @PostMapping("/auto-sign-text-cms")
   public void autoSignTextCms(HttpServletRequest req, HttpServletResponse resp) throws IOException {
     api.handlePost(req, resp, "/auto-sign-text-cms");

@@ -1,8 +1,13 @@
 package com.trustsign.core;
 
+import com.itextpdf.forms.PdfAcroForm;
+import com.itextpdf.forms.fields.PdfFormField;
+import com.itextpdf.forms.fields.PdfSignatureFormField;
 import com.itextpdf.kernel.geom.Rectangle;
+import com.itextpdf.kernel.pdf.PdfDocument;
 import com.itextpdf.kernel.pdf.PdfReader;
 import com.itextpdf.kernel.pdf.StampingProperties;
+import com.itextpdf.kernel.pdf.annot.PdfWidgetAnnotation;
 import com.itextpdf.io.image.ImageData;
 import com.itextpdf.io.image.ImageDataFactory;
 import com.itextpdf.signatures.BouncyCastleDigest;
@@ -293,6 +298,13 @@ public final class PdfSignerService {
     }
   }
 
+  public record SignatureFieldInfo(
+      String fieldName,
+      int widgetCount,
+      List<Integer> widgetPages1Based,
+      List<Rectangle> widgetRects) {
+  }
+
   public record PdfSigningMaterial(
       PrivateKey privateKey,
       Certificate[] certificateChain,
@@ -366,6 +378,102 @@ public final class PdfSignerService {
     } catch (IllegalArgumentException e) {
       throw new InvalidPdfException("Invalid signing input: " + safeMessage(e), e);
     }
+  }
+
+  public static List<SignatureFieldInfo> detectSignatureFields(byte[] pdfBytes) throws InvalidPdfException, IOException {
+    try {
+      requireNonEmptyPdf(pdfBytes);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidPdfException("Invalid PDF input: " + safeMessage(e), e);
+    }
+    try (PdfReader reader = new PdfReader(new ByteArrayInputStream(pdfBytes));
+        PdfDocument pdfDoc = new PdfDocument(reader)) {
+      PdfAcroForm acroForm = PdfAcroForm.getAcroForm(pdfDoc, false);
+      if (acroForm == null) {
+        return List.of();
+      }
+      List<SignatureFieldInfo> fields = new ArrayList<>();
+      for (var entry : acroForm.getFormFields().entrySet()) {
+        PdfFormField field = entry.getValue();
+        if (!(field instanceof PdfSignatureFormField)) {
+          continue;
+        }
+        List<PdfWidgetAnnotation> widgets = field.getWidgets();
+        List<Integer> pages = new ArrayList<>(widgets.size());
+        List<Rectangle> rects = new ArrayList<>(widgets.size());
+        for (PdfWidgetAnnotation widget : widgets) {
+          pages.add(pdfDoc.getPageNumber(widget.getPage()));
+          rects.add(widget.getRectangle().toRectangle());
+        }
+        fields.add(new SignatureFieldInfo(
+            entry.getKey(),
+            widgets.size(),
+            List.copyOf(pages),
+            List.copyOf(rects)));
+      }
+      return List.copyOf(fields);
+    } catch (IOException e) {
+      throw new InvalidPdfException("Invalid or corrupted PDF input: " + safeMessage(e), e);
+    }
+  }
+
+  public static PdfSigningResult signPdfAtSignatureFieldIndex(
+      byte[] pdfBytes,
+      PrivateKey privateKey,
+      Certificate[] chain,
+      Provider p11Provider,
+      X509Certificate signingCert,
+      String reason,
+      String location,
+      int signIndex1Based,
+      PdfSigningOptions options) throws PdfSigningException, IOException {
+    return signPdfAtSignatureFieldIndex(
+        pdfBytes,
+        new PdfSigningMaterial(privateKey, chain, p11Provider, signingCert),
+        reason,
+        location,
+        signIndex1Based,
+        options);
+  }
+
+  public static PdfSigningResult signPdfAtSignatureFieldIndex(
+      byte[] pdfBytes,
+      PdfSigningMaterial material,
+      String reason,
+      String location,
+      int signIndex1Based,
+      PdfSigningOptions options) throws PdfSigningException, IOException {
+    try {
+      requireNonEmptyPdf(pdfBytes);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidPdfException("Invalid PDF input: " + safeMessage(e), e);
+    }
+    if (signIndex1Based <= 0) {
+      throw new InvalidPdfException("signIndex must be a positive 1-based integer");
+    }
+    PdfSigningOptions opts = options == null ? PdfSigningOptions.DEFAULT : options;
+    byte[] bytesToSign = opts.finalVersion() ? applyFinalVersionDocumentMetadata(pdfBytes) : pdfBytes;
+
+    List<SignatureFieldInfo> fields = detectSignatureFields(bytesToSign);
+    if (fields.isEmpty()) {
+      throw new InvalidPdfException("No existing signature fields found in PDF");
+    }
+    if (signIndex1Based > fields.size()) {
+      throw new InvalidPdfException(
+          "signIndex out of range. Found " + fields.size() + " signature field(s); requested " + signIndex1Based);
+    }
+    SignatureFieldInfo selected = fields.get(signIndex1Based - 1);
+    boolean hadPriorSignatures;
+    try (PDDocument doc = PDDocument.load(bytesToSign)) {
+      if (documentHasDocMdpP1LockFromCompletedSignature(doc) && !opts.allowResignFinalVersion()) {
+        throw new DocMdpNoChangesLockException();
+      }
+      hadPriorSignatures = documentHasCompletedPriorSignatures(doc);
+    } catch (IOException e) {
+      throw new InvalidPdfException("Invalid or corrupted PDF input: " + safeMessage(e), e);
+    }
+    return signDetachedAtExistingFieldWithIText(
+        bytesToSign, material, reason, location, selected.fieldName(), hadPriorSignatures, opts);
   }
 
   /**
@@ -510,6 +618,77 @@ public final class PdfSignerService {
       }
       if (c instanceof InvalidPdfException ipe) {
         throw ipe;
+      }
+      throw new CryptoSigningException("PKCS#11 signing failed: " + safeMessage(c), c);
+    }
+  }
+
+  private static PdfSigningResult signDetachedAtExistingFieldWithIText(
+      byte[] pdfBytes,
+      PdfSigningMaterial material,
+      String reason,
+      String location,
+      String fieldName,
+      boolean hadPriorSignatures,
+      PdfSigningOptions opts) throws PdfSigningException, IOException {
+    validateChainForSigning(material);
+    IExternalDigest digest = new BouncyCastleDigest();
+    IExternalSignature signature = new ProviderBoundPrivateKeySignature(
+        material.privateKey(), SIGNATURE_DIGEST_ALGORITHM, material.cryptoProvider());
+    TSAClientBouncyCastle tsa = buildTsaClient(opts.tsaConfig());
+    try {
+      byte[] signed = withRetry(() -> {
+        try {
+          return runDetachedSignAtExistingField(
+              pdfBytes, material, reason, location, fieldName, hadPriorSignatures, opts, digest, signature, tsa);
+        } catch (IOException | GeneralSecurityException ex) {
+          throw new RuntimeException(ex);
+        }
+      });
+      return new PdfSigningResult(signed, tsa != null, null);
+    } catch (RuntimeException re) {
+      Throwable c = re.getCause() != null ? re.getCause() : re;
+      if (c instanceof GeneralSecurityException e) {
+        if (tsa != null && opts.tsaConfig() != null && !opts.tsaConfig().failOnError()) {
+          String tsaUrl = opts.tsaConfig().url() == null ? "<unknown>" : opts.tsaConfig().url().trim();
+          try {
+            byte[] fallbackSigned = withRetry(() -> {
+              try {
+                return runDetachedSignAtExistingField(
+                    pdfBytes, material, reason, location, fieldName, hadPriorSignatures, opts, digest, signature,
+                    null);
+              } catch (IOException | GeneralSecurityException ex) {
+                throw new RuntimeException(ex);
+              }
+            });
+            TsaUnavailableException warning = new TsaUnavailableException(
+                "TSA unavailable for " + tsaUrl + "; signed without timestamp",
+                true,
+                e);
+            return new PdfSigningResult(fallbackSigned, false, warning);
+          } catch (RuntimeException retryException) {
+            Throwable retryCause = retryException.getCause() != null ? retryException.getCause() : retryException;
+            if (retryCause instanceof GeneralSecurityException gse) {
+              throw asCryptoSigningException(gse);
+            }
+            if (retryCause instanceof IOException io) {
+              throw io;
+            }
+            throw new CryptoSigningException("PKCS#11 signing failed: " + safeMessage(retryCause), retryCause);
+          }
+        }
+        if (tsa != null && opts.tsaConfig() != null && opts.tsaConfig().failOnError()) {
+          String tsaUrl = opts.tsaConfig().url() == null ? "<unknown>" : opts.tsaConfig().url().trim();
+          throw new TimestampException("TSA timestamp failed for URL " + tsaUrl + ": " + safeMessage(e), e);
+        }
+        throw asCryptoSigningException(e);
+      }
+      if (c instanceof IOException io) {
+        if (tsa != null && opts.tsaConfig() != null && opts.tsaConfig().failOnError()) {
+          String tsaUrl = opts.tsaConfig().url() == null ? "<unknown>" : opts.tsaConfig().url().trim();
+          throw new TimestampException("TSA timestamp I/O failed for URL " + tsaUrl + ": " + safeMessage(io), io);
+        }
+        throw io;
       }
       throw new CryptoSigningException("PKCS#11 signing failed: " + safeMessage(c), c);
     }
@@ -807,6 +986,35 @@ public final class PdfSignerService {
     }
   }
 
+  private static byte[] runDetachedSignAtExistingField(
+      byte[] pdfBytes,
+      PdfSigningMaterial material,
+      String reason,
+      String location,
+      String fieldName,
+      boolean hadPriorSignatures,
+      PdfSigningOptions opts,
+      IExternalDigest digest,
+      IExternalSignature signature,
+      TSAClientBouncyCastle tsaClient) throws IOException, GeneralSecurityException {
+    try (ByteArrayOutputStream out = new ByteArrayOutputStream();
+        PdfReader reader = new PdfReader(new ByteArrayInputStream(pdfBytes))) {
+      PdfSigner signer = new PdfSigner(reader, out, new StampingProperties().useAppendMode());
+      applyCertificationAndExistingField(signer, fieldName, hadPriorSignatures, opts);
+      configureSignatureAppearanceForExistingField(signer, material, reason, location, opts);
+      signer.signDetached(
+          digest,
+          signature,
+          material.certificateChain(),
+          null,
+          null,
+          tsaClient,
+          ESTIMATED_SIGNATURE_SIZE_BYTES,
+          PdfSigner.CryptoStandard.CMS);
+      return out.toByteArray();
+    }
+  }
+
   private static void applyCertificationAndField(PdfSigner signer, PreSignState pre, PdfSigningOptions opts) {
     if (opts.finalVersion() && !pre.hadPriorSignatures()) {
       signer.setCertificationLevel(PdfSigner.CERTIFIED_NO_CHANGES_ALLOWED);
@@ -814,6 +1022,20 @@ public final class PdfSignerService {
       LOG.info("Final version requested but PDF already had signatures; DocMDP P=1 omitted.");
     }
     signer.setFieldName(newSignatureFieldName());
+    signer.setSignDate(Calendar.getInstance());
+  }
+
+  private static void applyCertificationAndExistingField(
+      PdfSigner signer,
+      String fieldName,
+      boolean hadPriorSignatures,
+      PdfSigningOptions opts) {
+    if (opts.finalVersion() && !hadPriorSignatures) {
+      signer.setCertificationLevel(PdfSigner.CERTIFIED_NO_CHANGES_ALLOWED);
+    } else if (opts.finalVersion() && Boolean.getBoolean("trustsign.logFinalVersion")) {
+      LOG.info("Final version requested but PDF already had signatures; DocMDP P=1 omitted.");
+    }
+    signer.setFieldName(fieldName);
     signer.setSignDate(Calendar.getInstance());
   }
 
@@ -857,6 +1079,33 @@ public final class PdfSignerService {
       multi.useFullBleedDescriptionAppearance();
     }
 
+  }
+
+  private static void configureSignatureAppearanceForExistingField(
+      PdfSigner signer,
+      PdfSigningMaterial material,
+      String reason,
+      String location,
+      PdfSigningOptions opts) {
+    PdfSignatureAppearance appearance = signer.getSignatureAppearance();
+    if (reason != null && !reason.isBlank()) {
+      appearance.setReason(reason.trim());
+    }
+    if (location != null && !location.isBlank()) {
+      appearance.setLocation(location);
+    }
+    appearance.setCertificate(material.signingCertificate());
+    appearance.setLayer2Text(
+        buildAppearanceText(material.signingCertificate(), reason, location, opts.finalVersion()));
+    appearance.setLayer2FontSize(10f);
+    ImageData signatureGraphic = loadSignatureGraphic(opts.signatureImagePath());
+    if (signatureGraphic != null) {
+      appearance.setImage(signatureGraphic);
+      // Fit image to field bounds for better visibility on existing signature boxes.
+      appearance.setImageScale(-1f);
+    }
+    appearance.setRenderingMode(PdfSignatureAppearance.RenderingMode.DESCRIPTION);
+    appearance.setReuseAppearance(false);
   }
 
   private static ImageData loadSignatureGraphic(String signatureImagePath) {

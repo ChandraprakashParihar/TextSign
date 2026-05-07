@@ -9,6 +9,7 @@ class SigningConcurrencyFilterTest {
   @Test
   void requiresSlot_matchesSigningPosts() {
     assertTrue(SigningConcurrencyFilter.requiresSlot("POST", "/sign-pdf"));
+    assertTrue(SigningConcurrencyFilter.requiresSlot("POST", "/auto-sign-pdf-at-field"));
     assertTrue(SigningConcurrencyFilter.requiresSlot("POST", "/hsm/sign-pdf"));
     assertTrue(SigningConcurrencyFilter.requiresSlot("GET", "/certificates"));
     assertFalse(SigningConcurrencyFilter.requiresSlot("GET", "/health"));

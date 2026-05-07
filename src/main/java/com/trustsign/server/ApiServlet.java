@@ -1905,6 +1905,279 @@ public final class ApiServlet {
           return;
         }
 
+        case "/auto-sign-pdf-at-field" -> {
+          LOG.info("Auto-signing PDF at existing signature field request received");
+          var mp = Multipart.read(req, multipartPdfMaxBytes);
+          AgentConfig cfg = loadConfig(resp);
+          if (cfg == null) {
+            return;
+          }
+          OutputPreference outputPreference;
+          try {
+            outputPreference = parseOutputPreference(mp, cfg);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
+          byte[] data;
+          try {
+            data = resolvePdfPayloadFromFileParam(mp);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
+          String reason = mp.field("reason");
+          String location = mp.field("location");
+          if (reason == null) {
+            byte[] rb = mp.file("reason");
+            if (rb != null && rb.length > 0) {
+              reason = new String(rb, java.nio.charset.StandardCharsets.UTF_8).trim();
+            }
+          }
+          if (location == null) {
+            byte[] lb = mp.file("location");
+            if (lb != null && lb.length > 0) {
+              location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
+            }
+          }
+          Integer signIndex = parsePositiveInt(readMultipartString(mp, "signIndex", true));
+          if (signIndex == null) {
+            writeJson(resp, 400, Map.of("error", "Missing or invalid signIndex (must be a positive integer)"));
+            return;
+          }
+          if (data == null || data.length == 0) {
+            writeJson(resp, 400, Map.of("error", "Missing file parameter: file"));
+            return;
+          }
+          if (!isPdfUpload(data, mp.filename("file"))) {
+            writeJson(resp, 400, Map.of("error", "Provided file content is not a valid PDF"));
+            return;
+          }
+          boolean finalVersion = parseFinalVersionMultipart(mp);
+          PdfSigningOptions pdfOpts;
+          try {
+            pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+          } catch (IllegalArgumentException e) {
+            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            return;
+          }
+          File outDirFile = null;
+          if (outputPreference.includesFile()) {
+            String outputDir;
+            try {
+              outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+            } catch (IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              return;
+            }
+            Path outputBase = null;
+            if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+              outputBase = Paths.get(cfg.outputBaseDir());
+              if (!outputBase.isAbsolute()) {
+                outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+              }
+            }
+            try {
+              outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+            } catch (SecurityException | IllegalArgumentException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              return;
+            }
+          }
+
+          List<PdfSignerService.SignatureFieldInfo> detectedFields;
+          try {
+            detectedFields = PdfSignerService.detectSignatureFields(data);
+          } catch (PdfSignerService.InvalidPdfException e) {
+            writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
+            return;
+          } catch (IOException e) {
+            writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
+            return;
+          }
+          if (detectedFields.isEmpty()) {
+            writeJson(resp, 422, Map.of("error", "No existing signature fields found in PDF"));
+            return;
+          }
+          if (signIndex > detectedFields.size()) {
+            writeJson(resp, 400, Map.of(
+                "error", "signIndex out of range",
+                "details", "Found " + detectedFields.size() + " signature field(s), requested " + signIndex));
+            return;
+          }
+          PdfSignerService.SignatureFieldInfo selectedFieldInfo = detectedFields.get(signIndex - 1);
+          char[] pin = resolvePin(cfg);
+          List<String> libs = resolvePkcs11Libraries(cfg);
+          if (libs.isEmpty()) {
+            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            return;
+          }
+          Pkcs11Token.Loaded loaded;
+          try {
+            loaded = Pkcs11Token.load(pin, libs);
+          } catch (RuntimeException e) {
+            String detail = buildTokenErrorDetail(e);
+            writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
+            return;
+          }
+          KeyStore ks = loaded.keyStore();
+          java.util.List<PublicKey> requestedPublicKeys;
+          try {
+            requestedPublicKeys = loadConfiguredPublicKeysOrThrow();
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to load configured public key(s)", "details", safeMsg(e)));
+            return;
+          }
+          CertificateSelection selection;
+          try {
+            selection = selectCertificateForPublicKeys(ks, requestedPublicKeys);
+          } catch (Exception e) {
+            writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
+            return;
+          }
+          if (selection == null || selection.chain == null || selection.chain.length == 0) {
+            writeJson(resp, 400, Map.of("error", "No certificate on token matches any configured public key"));
+            return;
+          }
+          String matchedAlias = selection.alias;
+          X509Certificate matchedCert = selection.certificate;
+          Certificate[] chain = selection.chain;
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          if (key == null) {
+            writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
+            return;
+          }
+          X509Certificate signingCert = matchedCert;
+          X509Certificate[] x509Chain = null;
+          if (chain[0] instanceof X509Certificate) {
+            x509Chain = java.util.Arrays.stream(chain)
+                .filter(c -> c instanceof X509Certificate)
+                .map(c -> (X509Certificate) c)
+                .toArray(X509Certificate[]::new);
+          }
+          CertificateValidator.validateForSigning(signingCert, x509Chain);
+
+          String inputFilename = mp.filename("file");
+          if (inputFilename == null || inputFilename.isBlank()) {
+            inputFilename = "document.pdf";
+          }
+          Path reservedOutPath = null;
+          if (outputPreference.includesFile()) {
+            try {
+              reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
+                  Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
+                  ApiServlet::sanitizeFilename);
+            } catch (IOException e) {
+              writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+              return;
+            }
+          }
+          boolean outputWritten = false;
+          try {
+            File outFile = reservedOutPath != null ? reservedOutPath.toFile() : null;
+            byte[] pdfToSign = outFile != null ? resolveAutoSignIncrementalInput(data, outFile, mp) : data;
+            PdfSignerService.PdfSigningResult signResult;
+            try {
+              if (selectedFieldInfo.widgetRects() == null || selectedFieldInfo.widgetRects().isEmpty()
+                  || selectedFieldInfo.widgetPages1Based() == null || selectedFieldInfo.widgetPages1Based().isEmpty()) {
+                writeJson(resp, 422, Map.of("error", "Selected signature field has no visible widget rectangle"));
+                return;
+              }
+              com.itextpdf.kernel.geom.Rectangle anchor = selectedFieldInfo.widgetRects().get(0);
+              int page1 = selectedFieldInfo.widgetPages1Based().get(0);
+              float overlayWidth = Math.max(anchor.getWidth() * 1.8f, 240f);
+              float overlayHeight = Math.max(anchor.getHeight() * 2.4f, 40f);
+              float overlayX = anchor.getX() + ((anchor.getWidth()));
+              float overlayY = anchor.getY() + ((anchor.getHeight() - overlayHeight) / 1.4f);
+              // PdfSignerService.SignaturePlacement anchoredPlacement = new PdfSignerService.SignaturePlacement(
+              //     overlayX,
+              //     overlayY,
+              //     overlayWidth,
+              //     overlayHeight,
+              //     PdfSignerService.CoordinateOverflowMode.ADJUST,
+              //     PdfSignerService.CoordinateOrigin.BOTTOM_LEFT);
+              PdfSignerService.SignaturePlacement anchoredPlacement = new PdfSignerService.SignaturePlacement(
+                anchor.getX(),
+                anchor.getY(),
+                anchor.getWidth(),
+                anchor.getHeight(),
+                PdfSignerService.CoordinateOverflowMode.ADJUST,
+                PdfSignerService.CoordinateOrigin.BOTTOM_LEFT);
+              PdfSigningOptions anchoredOptions = new PdfSigningOptions(
+                  pdfOpts.finalVersion(),
+                  pdfOpts.allowResignFinalVersion(),
+                  pdfOpts.tsaConfig(),
+                  pdfOpts.ltvConfig(),
+                  anchoredPlacement,
+                  pdfOpts.signatureImagePath());
+              signResult = PdfSignerService.signPdf(
+                  pdfToSign,
+                  key,
+                  chain,
+                  loaded.provider(),
+                  signingCert,
+                  reason,
+                  location,
+                  List.of(page1 - 1),
+                  anchoredOptions);
+            } catch (DocMdpNoChangesLockException e) {
+              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+              return;
+            } catch (PdfSignerService.PdfSigningException e) {
+              LOG.error("PDF signing at field failed. alias={} tookMs={} err={}",
+                  matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
+              writeJson(resp, 500, Map.of("error", "PDF signing failed", "details", safeMsg(e)));
+              return;
+            } catch (IOException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
+              return;
+            }
+            byte[] signedPdf = signResult.signedPdf();
+            String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
+            if (ltvError != null) {
+              writeJson(resp, 422, ltvFailureBody(ltvError));
+              return;
+            }
+            String outputPath = null;
+            if (reservedOutPath != null) {
+              Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
+              outputWritten = true;
+              outputPath = Objects.requireNonNull(outFile, "outFile").getAbsolutePath();
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("ok", true);
+            body.put("format", "pdf");
+            body.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+            body.put("serialNumber", signingCert.getSerialNumber().toString(16));
+            body.put("selectedSignIndex", signIndex);
+            body.put("selectedSignatureFieldName", selectedFieldInfo.fieldName());
+            body.put("signatureFieldsCount", detectedFields.size());
+            body.put("fieldPlacement", "overlay-centered-on-box");
+            body.put("finalVersion", finalVersion);
+            body.put("timestamped", signResult.isTimestamped());
+            if (signResult.tsaWarning() != null) {
+              body.put("tsaWarning", signResult.tsaWarning().getMessage());
+            }
+            if (outputPreference.includesRaw()) {
+              body.put("signedData", encodeForRawOutput(signedPdf, outputPreference.rawFormat()));
+              body.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
+            }
+            if (outputPreference.includesFile()) {
+              body.put("outputPath", outputPath);
+            }
+            writeJson(resp, 200, body);
+          } finally {
+            if (reservedOutPath != null && !outputWritten) {
+              try {
+                Files.deleteIfExists(reservedOutPath);
+              } catch (IOException e) {
+                LOG.error("/auto-sign-pdf-at-field: failed to delete reserved output: {}", safeMsg(e));
+              }
+            }
+          }
+          return;
+        }
+
         case "/auto-sign-text-cms" -> {
           requireSession(req);
           var mp = Multipart.read(req, multipartTextMaxBytes);

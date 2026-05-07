@@ -32,7 +32,7 @@
   "signatureImagePath": "/Users/jainnibha/chandra-workspace/trustsign/assets/greentickrbg.png",
   "truststore": {
     "path": "truststore.jks",
-    "password": "trustsign",
+    "password": "trustsign_new",
     "type": "PKCS12",
     "enablePathValidation": true
   },
@@ -63,7 +63,7 @@
     "linuxCandidates": []
   },
 "ltv": {
-  "enabled": true,
+  "enabled": false,
   "failOnMissingRevocationData": false,
   "strictPerCertEvidence": false,
   "ocspConnectTimeoutMs": 10000,
