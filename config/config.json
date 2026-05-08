@@ -48,7 +48,7 @@
     "linuxCandidates" : [ ]
   },
   "ltv" : {
-    "enabled" : false,
+    "enabled" : true,
     "failOnMissingRevocationData" : false,
     "strictPerCertEvidence" : false,
     "ocspConnectTimeoutMs" : 10000,

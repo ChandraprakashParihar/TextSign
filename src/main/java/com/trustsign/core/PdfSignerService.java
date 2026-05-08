@@ -4,7 +4,11 @@ import com.itextpdf.forms.PdfAcroForm;
 import com.itextpdf.forms.fields.PdfFormField;
 import com.itextpdf.forms.fields.PdfSignatureFormField;
 import com.itextpdf.kernel.geom.Rectangle;
+import com.itextpdf.kernel.pdf.PdfArray;
 import com.itextpdf.kernel.pdf.PdfDocument;
+import com.itextpdf.kernel.pdf.PdfDictionary;
+import com.itextpdf.kernel.pdf.PdfName;
+import com.itextpdf.kernel.pdf.PdfNumber;
 import com.itextpdf.kernel.pdf.PdfReader;
 import com.itextpdf.kernel.pdf.StampingProperties;
 import com.itextpdf.kernel.pdf.annot.PdfWidgetAnnotation;
@@ -418,6 +422,28 @@ public final class PdfSignerService {
     }
   }
 
+  public static int countCompletedSignatures(byte[] pdfBytes) throws InvalidPdfException, IOException {
+    try {
+      requireNonEmptyPdf(pdfBytes);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidPdfException("Invalid PDF input: " + safeMessage(e), e);
+    }
+    try (PDDocument doc = PDDocument.load(pdfBytes)) {
+      int count = 0;
+      for (PDSignature existing : doc.getSignatureDictionaries()) {
+        if (existing == null) {
+          continue;
+        }
+        if (signatureContentsLookSigned(existing.getContents())) {
+          count++;
+        }
+      }
+      return count;
+    } catch (IOException e) {
+      throw new InvalidPdfException("Invalid or corrupted PDF input: " + safeMessage(e), e);
+    }
+  }
+
   public static PdfSigningResult signPdfAtSignatureFieldIndex(
       byte[] pdfBytes,
       PrivateKey privateKey,
@@ -473,8 +499,18 @@ public final class PdfSignerService {
     } catch (IOException e) {
       throw new InvalidPdfException("Invalid or corrupted PDF input: " + safeMessage(e), e);
     }
-    return signDetachedAtExistingFieldWithIText(
+    PdfSigningResult result = signDetachedAtExistingFieldWithIText(
         bytesToSign, material, reason, location, selected.fieldName(), hadPriorSignatures, opts);
+
+    if (opts.ltvConfig() != null && opts.ltvConfig().enabled()) {
+      try {
+        byte[] ltvSigned = appendLtvRevision(result.signedPdf(), opts.ltvConfig());
+        return new PdfSigningResult(ltvSigned, result.isTimestamped(), result.tsaWarning());
+      } catch (Exception e) {
+        throw new LtvException("LTV embedding failed after signature: " + safeMessage(e), e);
+      }
+    }
+    return result;
   }
 
   /**
@@ -1038,6 +1074,57 @@ public final class PdfSignerService {
     }
     signer.setFieldName(fieldName);
     signer.setSignDate(Calendar.getInstance());
+    suppressSignatureWidgetBorder(signer, fieldName);
+  }
+
+  private static void suppressSignatureWidgetBorder(PdfSigner signer, String fieldName) {
+    try {
+      if (signer == null || fieldName == null || fieldName.isBlank()) {
+        return;
+      }
+      PdfDocument doc = signer.getDocument();
+      if (doc == null) {
+        return;
+      }
+      PdfAcroForm acroForm = PdfAcroForm.getAcroForm(doc, false);
+      if (acroForm == null) {
+        return;
+      }
+      PdfFormField field = acroForm.getField(fieldName);
+      if (field == null) {
+        return;
+      }
+      // Prefer removing border at the widget level (what Acrobat renders as the field "box").
+      List<PdfWidgetAnnotation> widgets = field.getWidgets();
+      if (widgets != null) {
+        for (PdfWidgetAnnotation w : widgets) {
+          if (w == null) {
+            continue;
+          }
+          // Equivalent to "no border" for widget annotations.
+          w.put(PdfName.Border, new PdfArray(new float[] {0f, 0f, 0f}));
+          PdfDictionary bs = new PdfDictionary();
+          bs.put(PdfName.W, new PdfNumber(0));
+          bs.put(PdfName.S, PdfName.S);
+          w.put(PdfName.BS, bs);
+
+          // Some templates use appearance characteristics; keep border colors neutral.
+          PdfDictionary mk = w.getAppearanceCharacteristics();
+          if (mk != null) {
+            mk.put(PdfName.BC, new PdfArray(new float[] {1f, 1f, 1f}));
+            mk.put(PdfName.BG, new PdfArray(new float[] {1f, 1f, 1f}));
+          }
+        }
+      }
+      // Some PDFs store border on the field dict as well.
+      try {
+        field.setBorderWidth(0);
+      } catch (Exception ignored) {
+        // Not all field types expose border setters; widget border removal is sufficient.
+      }
+    } catch (Exception e) {
+      LOG.warn("Failed to suppress signature field border for '{}': {}", fieldName, safeMessage(e));
+    }
   }
 
   private static String newSignatureFieldName() {
@@ -1089,6 +1176,7 @@ public final class PdfSignerService {
       String location,
       PdfSigningOptions opts) {
     PdfSignatureAppearance appearance = signer.getSignatureAppearance();
+    Rectangle fieldRect = appearance.getPageRect();
     if (reason != null && !reason.isBlank()) {
       appearance.setReason(reason.trim());
     }
@@ -1098,15 +1186,57 @@ public final class PdfSignerService {
     appearance.setCertificate(material.signingCertificate());
     appearance.setLayer2Text(
         buildAppearanceText(material.signingCertificate(), reason, location, opts.finalVersion()));
-    appearance.setLayer2FontSize(10f);
+    // Auto-size so full details remain legible across varying field sizes.
+    appearance.setLayer2FontSize(0f);
     ImageData signatureGraphic = loadSignatureGraphic(opts.signatureImagePath());
     if (signatureGraphic != null) {
       appearance.setImage(signatureGraphic);
-      // Fit image to field bounds for better visibility on existing signature boxes.
-      appearance.setImageScale(-1f);
+      // Adapt stamp size to available field area and text density.
+      appearance.setImageScale(computeAdaptiveImageScale(fieldRect, reason, location, opts.finalVersion()));
     }
     appearance.setRenderingMode(PdfSignatureAppearance.RenderingMode.DESCRIPTION);
     appearance.setReuseAppearance(false);
+  }
+
+  private static float computeAdaptiveImageScale(
+      Rectangle fieldRect,
+      String reason,
+      String location,
+      boolean finalVersion) {
+    // Fallback to legacy baseline if rect is unavailable.
+    if (fieldRect == null) {
+      return SIGNATURE_BACKGROUND_IMAGE_SCALE;
+    }
+    float width = Math.max(1f, fieldRect.getWidth());
+    float height = Math.max(1f, fieldRect.getHeight());
+    float area = width * height;
+
+    int textLines = 2; // "Digitally signed by" + "Date"
+    if (finalVersion) {
+      textLines += 1;
+    }
+    if (reason != null && !reason.isBlank()) {
+      textLines += 1;
+    }
+    if (location != null && !location.isBlank()) {
+      textLines += 1;
+    }
+
+    // Base from area: bigger fields can tolerate bigger mark.
+    float areaFactor = (float) Math.sqrt(area / (220f * 70f));
+    float scale = 0.07f * areaFactor;
+
+    // Reduce image size as text gets denser to keep details readable.
+    scale *= (float) Math.max(0.45, 1.0 - ((textLines - 2) * 0.12));
+
+    // Clamp to practical limits for consistent appearance.
+    if (scale < 0.03f) {
+      return 0.03f;
+    }
+    if (scale > 0.14f) {
+      return 0.14f;
+    }
+    return scale;
   }
 
   private static ImageData loadSignatureGraphic(String signatureImagePath) {

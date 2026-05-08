@@ -560,6 +560,27 @@ public final class ApiServlet {
     return cfg != null && cfg.ltv() != null && Boolean.TRUE.equals(cfg.ltv().enabled());
   }
 
+  private static boolean isTsaConfigured(AgentConfig cfg) {
+    return cfg != null && cfg.tsa() != null && cfg.tsa().url() != null && !cfg.tsa().url().isBlank();
+  }
+
+  private static String validateTsaArtifactsIfConfigured(PdfSignerService.PdfSigningResult signResult, AgentConfig cfg) {
+    if (!isTsaConfigured(cfg)) {
+      return null;
+    }
+    if (signResult == null) {
+      return "TSA validation failed: signing result unavailable";
+    }
+    if (signResult.isTimestamped()) {
+      return null;
+    }
+    String warning = signResult.tsaWarning() != null ? signResult.tsaWarning().getMessage() : null;
+    if (warning == null || warning.isBlank()) {
+      return "TSA is configured but signature does not contain RFC3161 timestamp token";
+    }
+    return "TSA is configured but signature is not timestamped: " + warning;
+  }
+
   private static String validateLtvArtifactsIfRequired(byte[] signedPdf, AgentConfig cfg) {
     if (!isLtvRequired(cfg)) {
       return null;
@@ -654,6 +675,55 @@ public final class ApiServlet {
     return Map.of(
         "error", "LTV not enabled in signed PDF: " + reason,
         "details", reason);
+  }
+
+  private static Map<String, Object> tsaFailureBody(String tsaError) {
+    String reason = (tsaError == null || tsaError.isBlank()) ? "unknown reason" : tsaError;
+    return Map.of(
+        "error", "TSA timestamp missing",
+        "details", reason);
+  }
+
+  private static Map<String, Object> tsaStatusBody(AgentConfig cfg, PdfSignerService.PdfSigningResult signResult) {
+    Map<String, Object> tsa = new LinkedHashMap<>();
+    boolean configured = isTsaConfigured(cfg);
+    tsa.put("configured", configured);
+    tsa.put("url", configured ? cfg.tsa().url().trim() : null);
+    if (signResult != null) {
+      tsa.put("timestamped", signResult.isTimestamped());
+      if (signResult.tsaWarning() != null && signResult.tsaWarning().getMessage() != null
+          && !signResult.tsaWarning().getMessage().isBlank()) {
+        tsa.put("warning", signResult.tsaWarning().getMessage());
+      }
+    } else {
+      tsa.put("timestamped", false);
+    }
+    return tsa;
+  }
+
+  /**
+   * Backward compatibility for clients that still parse top-level `tsaWarning`.
+   * Canonical TSA fields now live under `tsa.*`.
+   *
+   * Set JVM flag `-Dtrustsign.api.includeLegacyTsaWarning=false` to suppress the
+   * deprecated top-level key.
+   */
+  private static boolean includeLegacyTsaWarning() {
+    return Boolean.parseBoolean(System.getProperty("trustsign.api.includeLegacyTsaWarning", "true"));
+  }
+
+  private static void putTsaResponseFields(
+      Map<String, Object> body,
+      AgentConfig cfg,
+      PdfSignerService.PdfSigningResult signResult) {
+    if (body == null) {
+      return;
+    }
+    body.put("tsa", tsaStatusBody(cfg, signResult));
+    if (!includeLegacyTsaWarning() || signResult == null || signResult.tsaWarning() == null) {
+      return;
+    }
+    body.put("tsaWarning", signResult.tsaWarning().getMessage());
   }
 
   private Map<String, Object> probeTsaHealth(AgentConfig cfg) {
@@ -1676,6 +1746,11 @@ public final class ApiServlet {
               writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
               return;
             }
+            String tsaError = validateTsaArtifactsIfConfigured(signResult, cfg);
+            if (tsaError != null) {
+              writeJson(resp, 422, tsaFailureBody(tsaError));
+              return;
+            }
             byte[] signedPdf = signResult.signedPdf();
             String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
             if (ltvError != null) {
@@ -1705,9 +1780,7 @@ public final class ApiServlet {
             autoPdfBody.put("stampedPages", stampPages);
             autoPdfBody.put("finalVersion", finalVersion);
             autoPdfBody.put("timestamped", signResult.isTimestamped());
-            if (signResult.tsaWarning() != null) {
-              autoPdfBody.put("tsaWarning", signResult.tsaWarning().getMessage());
-            }
+            putTsaResponseFields(autoPdfBody, cfg, signResult);
             writeJson(resp, 200, autoPdfBody);
             // resp.getOutputStream().write(signedPdf);
           } finally {
@@ -1926,6 +1999,11 @@ public final class ApiServlet {
               writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
               return;
             }
+            String tsaError = validateTsaArtifactsIfConfigured(signResult, cfg);
+            if (tsaError != null) {
+              writeJson(resp, 422, tsaFailureBody(tsaError));
+              return;
+            }
             byte[] signedPdf = signResult.signedPdf();
             String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
             if (ltvError != null) {
@@ -1955,9 +2033,7 @@ public final class ApiServlet {
             autoPdfBody.put("stampedPages", stampPages);
             autoPdfBody.put("finalVersion", finalVersion);
             autoPdfBody.put("timestamped", signResult.isTimestamped());
-            if (signResult.tsaWarning() != null) {
-              autoPdfBody.put("tsaWarning", signResult.tsaWarning().getMessage());
-            }
+            putTsaResponseFields(autoPdfBody, cfg, signResult);
             writeJson(resp, 200, autoPdfBody);
             // resp.getOutputStream().write(signedPdf);
           } finally {
@@ -2143,6 +2219,13 @@ public final class ApiServlet {
           try {
             File outFile = reservedOutPath != null ? reservedOutPath.toFile() : null;
             byte[] pdfToSign = outFile != null ? resolveAutoSignIncrementalInput(data, outFile, mp) : data;
+            final int beforeCompletedSignatures;
+            try {
+              beforeCompletedSignatures = PdfSignerService.countCompletedSignatures(pdfToSign);
+            } catch (PdfSignerService.InvalidPdfException | IOException e) {
+              writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
+              return;
+            }
             PdfSignerService.PdfSigningResult signResult;
             try {
               if (selectedFieldInfo.widgetRects() == null || selectedFieldInfo.widgetRects().isEmpty()
@@ -2150,34 +2233,9 @@ public final class ApiServlet {
                 writeJson(resp, 422, Map.of("error", "Selected signature field has no visible widget rectangle"));
                 return;
               }
-              com.itextpdf.kernel.geom.Rectangle anchor = selectedFieldInfo.widgetRects().get(0);
-              int page1 = selectedFieldInfo.widgetPages1Based().get(0);
-              float overlayWidth = Math.max(anchor.getWidth() * 1.8f, 240f);
-              float overlayHeight = Math.max(anchor.getHeight() * 2.4f, 40f);
-              float overlayX = anchor.getX() + ((anchor.getWidth()));
-              float overlayY = anchor.getY() + ((anchor.getHeight() - overlayHeight) / 1.4f);
-              // PdfSignerService.SignaturePlacement anchoredPlacement = new PdfSignerService.SignaturePlacement(
-              //     overlayX,
-              //     overlayY,
-              //     overlayWidth,
-              //     overlayHeight,
-              //     PdfSignerService.CoordinateOverflowMode.ADJUST,
-              //     PdfSignerService.CoordinateOrigin.BOTTOM_LEFT);
-              PdfSignerService.SignaturePlacement anchoredPlacement = new PdfSignerService.SignaturePlacement(
-                anchor.getX(),
-                anchor.getY(),
-                anchor.getWidth(),
-                anchor.getHeight(),
-                PdfSignerService.CoordinateOverflowMode.ADJUST,
-                PdfSignerService.CoordinateOrigin.BOTTOM_LEFT);
-              PdfSigningOptions anchoredOptions = new PdfSigningOptions(
-                  pdfOpts.finalVersion(),
-                  pdfOpts.allowResignFinalVersion(),
-                  pdfOpts.tsaConfig(),
-                  pdfOpts.ltvConfig(),
-                  anchoredPlacement,
-                  pdfOpts.signatureImagePath());
-              signResult = PdfSignerService.signPdf(
+              // Sign the *existing* signature field (by name) instead of overlaying a new widget.
+              // This prevents the original signature box/container from remaining visible.
+              signResult = PdfSignerService.signPdfAtSignatureFieldIndex(
                   pdfToSign,
                   key,
                   chain,
@@ -2185,8 +2243,8 @@ public final class ApiServlet {
                   signingCert,
                   reason,
                   location,
-                  List.of(page1 - 1),
-                  anchoredOptions);
+                  signIndex,
+                  pdfOpts);
             } catch (DocMdpNoChangesLockException e) {
               writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
               return;
@@ -2199,7 +2257,27 @@ public final class ApiServlet {
               writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
               return;
             }
+            String tsaError = validateTsaArtifactsIfConfigured(signResult, cfg);
+            if (tsaError != null) {
+              writeJson(resp, 422, tsaFailureBody(tsaError));
+              return;
+            }
             byte[] signedPdf = signResult.signedPdf();
+            final int afterCompletedSignatures;
+            try {
+              afterCompletedSignatures = PdfSignerService.countCompletedSignatures(signedPdf);
+            } catch (PdfSignerService.InvalidPdfException | IOException e) {
+              writeJson(resp, 500, Map.of(
+                  "error", "Post-sign validation failed",
+                  "details", "Unable to verify signed PDF: " + safeMsg(e)));
+              return;
+            }
+            if (afterCompletedSignatures <= beforeCompletedSignatures) {
+              writeJson(resp, 500, Map.of(
+                  "error", "PDF signing failed",
+                  "details", "No completed signature found in signed output"));
+              return;
+            }
             String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
             if (ltvError != null) {
               writeJson(resp, 422, ltvFailureBody(ltvError));
@@ -2219,12 +2297,12 @@ public final class ApiServlet {
             body.put("selectedSignIndex", signIndex);
             body.put("selectedSignatureFieldName", selectedFieldInfo.fieldName());
             body.put("signatureFieldsCount", detectedFields.size());
-            body.put("fieldPlacement", "overlay-centered-on-box");
+            body.put("fieldPlacement", "existing-field");
+            body.put("completedSignaturesBefore", beforeCompletedSignatures);
+            body.put("completedSignaturesAfter", afterCompletedSignatures);
             body.put("finalVersion", finalVersion);
             body.put("timestamped", signResult.isTimestamped());
-            if (signResult.tsaWarning() != null) {
-              body.put("tsaWarning", signResult.tsaWarning().getMessage());
-            }
+            putTsaResponseFields(body, cfg, signResult);
             if (outputPreference.includesRaw()) {
               body.put("signedData", encodeForRawOutput(signedPdf, outputPreference.rawFormat()));
               body.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
@@ -2534,6 +2612,11 @@ public final class ApiServlet {
             writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
             return;
           }
+          String tsaError = validateTsaArtifactsIfConfigured(signResult, cfg);
+          if (tsaError != null) {
+            writeJson(resp, 422, tsaFailureBody(tsaError));
+            return;
+          }
           byte[] signedPdf = signResult.signedPdf();
           String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
           if (ltvError != null) {
@@ -2599,9 +2682,7 @@ public final class ApiServlet {
           signPdfBody.put("stampedPages", stampPages);
           signPdfBody.put("finalVersion", finalVersion);
           signPdfBody.put("timestamped", signResult.isTimestamped());
-          if (signResult.tsaWarning() != null) {
-            signPdfBody.put("tsaWarning", signResult.tsaWarning().getMessage());
-          }
+          putTsaResponseFields(signPdfBody, cfg, signResult);
           if (outputPreference.includesRaw()) {
             signPdfBody.put("signedData", encodeForRawOutput(signedPdf, outputPreference.rawFormat()));
             signPdfBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
