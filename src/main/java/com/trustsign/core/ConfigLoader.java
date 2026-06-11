@@ -2,12 +2,16 @@ package com.trustsign.core;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.util.regex.Pattern;
 
 public final class ConfigLoader {
   private static final ObjectMapper MAPPER = new ObjectMapper();
+  /** Matches a config value like {@code ${MY_ENV_VAR}} and captures the var name. */
+  private static final Pattern ENV_PLACEHOLDER = Pattern.compile("^\\$\\{([^}]+)}$");
   private static final int MIN_PORT = 1;
   private static final int MAX_PORT = 65535;
 
@@ -27,9 +31,11 @@ public final class ConfigLoader {
         throw new IllegalStateException("Config file is empty: " + file.getAbsolutePath());
       }
 
-      // Validate optional pkcs11.pin shape before mapping into records so users
-      // get a clear error when they do provide it.
+      // Resolve ${ENV_VAR} placeholders in all string values, then validate pin.
       JsonNode root = MAPPER.readTree(json);
+      if (root instanceof ObjectNode rootObj) {
+        resolveEnvPlaceholders(rootObj);
+      }
       JsonNode pinNode = root.path("pkcs11").path("pin");
       if (!pinNode.isMissingNode() && !pinNode.isNull() && !pinNode.isTextual()) {
         throw new IllegalStateException(
@@ -43,7 +49,7 @@ public final class ConfigLoader {
         }
       }
 
-      AgentConfig cfg = MAPPER.readValue(json, AgentConfig.class);
+      AgentConfig cfg = MAPPER.treeToValue(root, AgentConfig.class);
 
       if (cfg.allowedOrigins() == null || cfg.allowedOrigins().isEmpty()) {
         throw new IllegalStateException("allowedOrigins is required and must be non-empty");
@@ -67,6 +73,36 @@ public final class ConfigLoader {
     } catch (Exception e) {
       throw new RuntimeException("Failed to load config: " + file.getAbsolutePath() + " — " + e.getMessage(), e);
     }
+  }
+
+  /**
+   * Recursively replaces {@code "${ENV_VAR_NAME}"} string values with the
+   * corresponding environment variable.  Throws if the variable is not set so
+   * the operator gets a clear startup error instead of a cryptic wrong-password
+   * failure later.  Plain literal passwords are left untouched.
+   */
+  private static void resolveEnvPlaceholders(ObjectNode node) {
+    node.fields().forEachRemaining(entry -> {
+      JsonNode value = entry.getValue();
+      if (value.isTextual()) {
+        java.util.regex.Matcher m = ENV_PLACEHOLDER.matcher(value.asText());
+        if (m.matches()) {
+          String varName = m.group(1).trim();
+          String resolved = System.getenv(varName);
+          if (resolved == null) {
+            resolved = System.getProperty(varName);
+          }
+          if (resolved == null) {
+            throw new IllegalStateException(
+                "Config references environment variable '" + varName + "' which is not set. "
+                    + "Export the variable or replace the placeholder with a literal value.");
+          }
+          node.put(entry.getKey(), resolved);
+        }
+      } else if (value.isObject()) {
+        resolveEnvPlaceholders((ObjectNode) value);
+      }
+    });
   }
 
   private ConfigLoader() {}

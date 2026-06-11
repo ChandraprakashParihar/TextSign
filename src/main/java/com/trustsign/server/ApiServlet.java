@@ -1207,7 +1207,7 @@ public final class ApiServlet {
           return;
         }
         case "/logs" -> {
-          // requireSession(req);
+          requireSession(req);
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null) {
             return;
@@ -1283,7 +1283,7 @@ public final class ApiServlet {
         }
 
         case "/validate-token" -> {
-          // requireSession(req);
+          requireSession(req);
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null) {
             return;
@@ -1295,7 +1295,7 @@ public final class ApiServlet {
         }
 
         case "/map-certificate" -> {
-          // requireSession(req);
+          requireSession(req);
           var mp = Multipart.read(req, multipartMediumMaxBytes);
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null) {
@@ -1326,18 +1326,21 @@ public final class ApiServlet {
                 truststoreFile,
                 truststorePassword,
                 truststoreType);
-            writeJson(resp, 200, Map.of(
-                "ok", true,
-                "mappedCount", mapping.importedCertificates(),
-                "aliases", mapping.aliases(),
-                "publicKeyPath", mapping.publicKeyPath().toAbsolutePath().toString(),
-                "truststorePath", mapping.truststorePath().toAbsolutePath().toString(),
-                "truststoreType", mapping.truststoreType(),
-                "subjectDn", mapping.leafSubjectDn(),
-                "serialNumber", mapping.leafSerialHex()));
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("ok", true);
+            body.put("mappedCount", mapping.importedCertificates());
+            body.put("chainDepth", mapping.aliases().size());
+            body.put("aliases", mapping.aliases());
+            body.put("publicKeyPath", mapping.publicKeyPath().toAbsolutePath().toString());
+            body.put("truststorePath", mapping.truststorePath().toAbsolutePath().toString());
+            body.put("truststoreType", mapping.truststoreType());
+            body.put("subjectDn", mapping.leafSubjectDn());
+            body.put("serialNumber", mapping.leafSerialHex());
+            writeJson(resp, 200, body);
           } catch (IllegalArgumentException e) {
             writeJson(resp, 400, Map.of("error", e.getMessage()));
           } catch (Exception e) {
+            LOG.error("/map-certificate failed: {}", safeMsg(e), e);
             writeJson(resp, 500, Map.of("error", "Certificate mapping failed", "details", safeMsg(e)));
           }
           return;
@@ -1510,7 +1513,7 @@ public final class ApiServlet {
                   Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
                   ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.error("/auto-sign-text: failed to reserve output path: ", safeMsg(e));
+              LOG.error("/auto-sign-text: failed to reserve output path: {}", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -1528,7 +1531,7 @@ public final class ApiServlet {
                 try {
                   Files.deleteIfExists(reservedOutPath);
                 } catch (IOException e) {
-                  LOG.error("/auto-sign-text: failed to delete reserved output: ", safeMsg(e));
+                  LOG.error("/auto-sign-text: failed to delete reserved output: {}", safeMsg(e));
                 }
               }
             }
@@ -1560,7 +1563,7 @@ public final class ApiServlet {
           try {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
-            LOG.error("Error parsing output preference: ", e.getMessage());
+            LOG.error("Error parsing output preference: {}", e.getMessage());
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
           }
@@ -1601,7 +1604,7 @@ public final class ApiServlet {
           try {
             pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
           } catch (IllegalArgumentException e) {
-            LOG.error("Error parsing PDF signing options: ", e.getMessage());
+            LOG.error("Error parsing PDF signing options: {}", e.getMessage());
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
           }
@@ -1705,7 +1708,7 @@ public final class ApiServlet {
                   Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
                   ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.error("/auto-sign-pdf: failed to reserve output path: ", safeMsg(e));
+              LOG.error("/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -1788,7 +1791,7 @@ public final class ApiServlet {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
-                LOG.error("/auto-sign-pdf: failed to delete reserved output: ", safeMsg(e));
+                LOG.error("/auto-sign-pdf: failed to delete reserved output: {}", safeMsg(e));
               }
             }
           }
@@ -1807,7 +1810,7 @@ public final class ApiServlet {
           try {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
-            LOG.error("Error parsing output preference: ", e.getMessage());
+            LOG.error("Error parsing output preference: {}", e.getMessage());
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
           }
@@ -1854,7 +1857,7 @@ public final class ApiServlet {
           try {
             pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
           } catch (IllegalArgumentException e) {
-            LOG.error("Error parsing PDF signing options: ", e.getMessage());
+            LOG.error("Error parsing PDF signing options: {}", e.getMessage());
             writeJson(resp, 400, Map.of("error", e.getMessage()));
             return;
           }
@@ -1958,7 +1961,7 @@ public final class ApiServlet {
                   Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
                   ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.error("/auto-sign-pdf: failed to reserve output path: ", safeMsg(e));
+              LOG.error("/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -2041,7 +2044,7 @@ public final class ApiServlet {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
-                LOG.error("/auto-sign-pdf: failed to delete reserved output: ", safeMsg(e));
+                LOG.error("/auto-sign-pdf: failed to delete reserved output: {}", safeMsg(e));
               }
             }
           }
@@ -2448,7 +2451,7 @@ public final class ApiServlet {
                   Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
                   ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.error("/auto-sign-text-cms: failed to reserve output path: ", safeMsg(e));
+              LOG.error("/auto-sign-text-cms: failed to reserve output path: {}", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -2463,7 +2466,7 @@ public final class ApiServlet {
                 try {
                   Files.deleteIfExists(reservedOutPath);
                 } catch (IOException e) {
-                  LOG.error("/auto-sign-text-cms: failed to delete reserved output: ", safeMsg(e));
+                  LOG.error("/auto-sign-text-cms: failed to delete reserved output: {}", safeMsg(e));
                 }
               }
             }
@@ -2655,7 +2658,7 @@ public final class ApiServlet {
               reservedOutPath = SignedPdfOutputPaths.reserveNextSignedPdfPath(
                   outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.error("/sign-pdf: failed to reserve output path: ", safeMsg(e));
+              LOG.error("/sign-pdf: failed to reserve output path: {}", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -2669,7 +2672,7 @@ public final class ApiServlet {
                 try {
                   Files.deleteIfExists(reservedOutPath);
                 } catch (IOException e) {
-                  LOG.error("/sign-pdf: failed to delete reserved output: ", safeMsg(e));
+                  LOG.error("/sign-pdf: failed to delete reserved output: {}", safeMsg(e));
                 }
               }
             }
@@ -2920,7 +2923,7 @@ public final class ApiServlet {
                   Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename,
                   ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.error("/hsm/auto-sign-pdf: failed to reserve output path: ", safeMsg(e));
+              LOG.error("/hsm/auto-sign-pdf: failed to reserve output path: {}", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -3006,7 +3009,7 @@ public final class ApiServlet {
               try {
                 Files.deleteIfExists(reservedOutPath);
               } catch (IOException e) {
-                LOG.error("/hsm/auto-sign-pdf: failed to delete reserved output: ", safeMsg(e));
+                LOG.error("/hsm/auto-sign-pdf: failed to delete reserved output: {}", safeMsg(e));
               }
             }
           }
@@ -3198,7 +3201,7 @@ public final class ApiServlet {
               reservedOutPath = SignedPdfOutputPaths.reserveNextSignedTextPath(
                   outDirFile.toPath(), inputFilename, ApiServlet::sanitizeFilename);
             } catch (IOException e) {
-              LOG.error("/sign-text: failed to reserve output path: ", safeMsg(e));
+              LOG.error("/sign-text: failed to reserve output path: {}", safeMsg(e));
               writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
               return;
             }
@@ -3216,7 +3219,7 @@ public final class ApiServlet {
                 try {
                   Files.deleteIfExists(reservedOutPath);
                 } catch (IOException e) {
-                  LOG.error("/sign-text: failed to delete reserved output: ", safeMsg(e));
+                  LOG.error("/sign-text: failed to delete reserved output: {}", safeMsg(e));
                 }
               }
             }
@@ -3715,6 +3718,11 @@ public final class ApiServlet {
       }
       return new SessionIssueWindow(curr.minute, curr.count + 1);
     });
+    // Prune entries from previous minutes to prevent unbounded map growth.
+    // Done probabilistically (every ~500 requests) to avoid lock contention.
+    if (sessionIssueWindows.size() > 500) {
+      sessionIssueWindows.values().removeIf(w -> w.minute < nowMinute);
+    }
     return window != null && window.count <= sessionIssueRateLimitPerMinute;
   }
 
@@ -3757,12 +3765,35 @@ public final class ApiServlet {
     if (truststorePassword == null || truststorePassword.isBlank()) {
       throw new IllegalArgumentException("truststorePassword is required");
     }
+    if (cerPayload == null || cerPayload.length == 0) {
+      throw new IllegalArgumentException("Certificate payload is empty");
+    }
+    if (cerPayload.length > 5 * 1024 * 1024) {
+      throw new IllegalArgumentException("Certificate payload exceeds 5 MB limit");
+    }
+
     List<X509Certificate> certificates = parseX509Certificates(cerPayload);
     if (certificates.isEmpty()) {
       throw new IllegalArgumentException("Could not parse X.509 certificate(s) from cer payload");
     }
+    if (certificates.size() > 50) {
+      throw new IllegalArgumentException("Certificate payload contains more than 50 certificates");
+    }
+
     DerivedChainAliases aliasesFromCer = deriveChainAliases(certificates);
     X509Certificate leaf = aliasesFromCer.signer();
+
+    // Validate the signer certificate before touching any files.
+    try {
+      leaf.checkValidity();
+    } catch (java.security.cert.CertificateExpiredException | java.security.cert.CertificateNotYetValidException e) {
+      throw new IllegalArgumentException("Signer certificate is not currently valid: " + e.getMessage());
+    }
+    if (!supportsDigitalSignatureUsage(leaf)) {
+      throw new IllegalArgumentException(
+          "Signer certificate key usage does not permit digital signature or non-repudiation");
+    }
+
     Path configDir = configFile.getParentFile() != null
         ? configFile.getParentFile().toPath().toAbsolutePath().normalize()
         : Paths.get(".").toAbsolutePath().normalize();
@@ -3771,6 +3802,15 @@ public final class ApiServlet {
     String normalizedStoreType = truststoreType == null || truststoreType.isBlank()
         ? "PKCS12"
         : truststoreType.trim();
+
+    // Back up the existing truststore before any writes so the operator can
+    // recover if something goes wrong.
+    if (Files.exists(truststorePath)) {
+      Path backup = truststorePath.resolveSibling(truststorePath.getFileName() + ".bak");
+      Files.copy(truststorePath, backup, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+      LOG.info("/map-certificate: backed up existing truststore to {}", backup);
+    }
+
     writePublicKeyPem(publicKeyPath, leaf.getPublicKey());
     java.util.List<String> aliases = importCertificatesToTruststore(
         truststorePath,
@@ -3788,6 +3828,10 @@ public final class ApiServlet {
         truststorePassword,
         normalizedStoreType);
     resetCachesAfterCertificateMapping();
+    LOG.info("/map-certificate: mapped {} cert(s), leaf={}, serial={}",
+        certificates.size(),
+        leaf.getSubjectX500Principal().getName(),
+        leaf.getSerialNumber() != null ? leaf.getSerialNumber().toString(16) : "null");
     return new MapCertificateResult(
         publicKeyPath,
         truststorePath,
@@ -3863,19 +3907,47 @@ public final class ApiServlet {
       throw new IllegalArgumentException("cer must contain at least one certificate");
     }
     java.util.ArrayList<X509Certificate> available = new java.util.ArrayList<>(certificates);
+
+    // Identify the end-entity signer: the only non-CA cert, or first cert if all are CAs.
     X509Certificate signer = available.stream()
         .filter(c -> c != null && c.getBasicConstraints() < 0)
         .findFirst()
         .orElse(available.get(0));
-    ensureIssuerChainFromAia(available, signer, 3);
-    X509Certificate subca = findIssuerInList(available, signer);
-    X509Certificate ca = findIssuerInList(available, subca);
-    X509Certificate cca = findIssuerInList(available, ca);
-    if (subca == null || ca == null || cca == null) {
-      throw new IllegalArgumentException(
-          "Could not build full chain from provided cer. Upload a cer containing chain (signer+issuers) or ensure issuer URLs are reachable.");
+
+    // Fetch any missing issuers via AIA up to a generous depth limit.
+    ensureIssuerChainFromAia(available, signer, 8);
+
+    // Build an ordered chain: [signer, issuer1, issuer2, ..., root]
+    java.util.List<X509Certificate> chain = new java.util.ArrayList<>();
+    chain.add(signer);
+    X509Certificate current = signer;
+    for (int depth = 0; depth < 16; depth++) {
+      X509Certificate issuer = findIssuerInList(available, current);
+      if (issuer == null) {
+        break;
+      }
+      chain.add(issuer);
+      // Stop at self-signed (root CA)
+      if (issuer.getSubjectX500Principal().equals(issuer.getIssuerX500Principal())) {
+        break;
+      }
+      current = issuer;
     }
-    return new DerivedChainAliases(signer, subca, ca, cca);
+
+    if (chain.size() < 2) {
+      throw new IllegalArgumentException(
+          "Could not build chain from provided cer — at least the signer and one issuer are required. "
+              + "Upload a cer containing the full chain or ensure issuer AIA URLs are reachable.");
+    }
+
+    // Map positional chain entries to the four named alias roles used by the
+    // truststore import.  For chains shorter than 4, the root cert is reused for
+    // the missing intermediate roles so the truststore is always populated.
+    int last = chain.size() - 1;
+    X509Certificate root  = chain.get(last);
+    X509Certificate subca = chain.size() > 1 ? chain.get(1)                    : root;
+    X509Certificate ca    = chain.size() > 2 ? chain.get(chain.size() - 2)     : root;
+    return new DerivedChainAliases(signer, subca, ca, root);
   }
 
   private static void ensureIssuerChainFromAia(List<X509Certificate> available, X509Certificate start, int maxDepth) {
@@ -3925,8 +3997,16 @@ public final class ApiServlet {
         List<X509Certificate> downloaded = downloadCertificates(uri);
         for (X509Certificate candidate : downloaded) {
           String subject = candidate.getSubjectX500Principal() == null ? null : candidate.getSubjectX500Principal().getName();
-          if (issuerDn.equals(subject)) {
+          if (!issuerDn.equals(subject)) {
+            continue;
+          }
+          // Verify the candidate actually signed the child cert — a matching DN
+          // alone is not enough and can be spoofed via a MITM on the AIA URL.
+          try {
+            cert.verify(candidate.getPublicKey());
             return candidate;
+          } catch (Exception ignored) {
+            // Signature check failed; try next candidate
           }
         }
       }
@@ -4039,12 +4119,20 @@ public final class ApiServlet {
       ks.setCertificateEntry(alias, cert);
       aliases.add(alias);
     }
-    try (java.io.OutputStream out = Files.newOutputStream(
-        truststorePath,
-        StandardOpenOption.CREATE,
-        StandardOpenOption.TRUNCATE_EXISTING,
-        StandardOpenOption.WRITE)) {
-      ks.store(out, storePassword);
+    // Write to a sibling temp file and atomically rename so a crash mid-write
+    // never leaves a partially-written (corrupt) truststore on disk.
+    Path tmpDir = parent != null ? parent : Paths.get(".");
+    Path tmp = Files.createTempFile(tmpDir, ".truststore-tmp-", ".tmp");
+    try {
+      try (java.io.OutputStream out = Files.newOutputStream(tmp, StandardOpenOption.WRITE)) {
+        ks.store(out, storePassword);
+      }
+      Files.move(tmp, truststorePath,
+          java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+          java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+    } catch (Exception e) {
+      Files.deleteIfExists(tmp);
+      throw e;
     }
     return aliases;
   }
@@ -4167,7 +4255,7 @@ public final class ApiServlet {
       cachedPublicKeyPath = path;
       cachedPublicKeyMtime = mtime;
       cachedPublicKeyCheckedAtMs = nowInside;
-      LOG.info("Reloaded configured public keys from disk: ", path);
+      LOG.info("Reloaded configured public keys from disk: {}", path);
       return immutable;
     }
   }
@@ -4216,10 +4304,30 @@ public final class ApiServlet {
         .replaceAll("\\s", "");
     byte[] der = java.util.Base64.getDecoder().decode(normalized);
     X509EncodedKeySpec spec = new X509EncodedKeySpec(der);
-    // RSA is the typical algorithm for signing tokens here; if needed this
-    // can be extended to detect EC, etc.
-    KeyFactory kf = KeyFactory.getInstance("RSA");
-    return kf.generatePublic(spec);
+    // Detect the algorithm from the SubjectPublicKeyInfo AlgorithmIdentifier OID
+    // so both RSA and EC (and any future algorithm) work without hardcoding.
+    String algorithm = detectSpkiAlgorithm(der);
+    return KeyFactory.getInstance(algorithm).generatePublic(spec);
+  }
+
+  /**
+   * Detects the JCA algorithm name from a SubjectPublicKeyInfo DER byte array
+   * by reading the AlgorithmIdentifier OID.  Falls back to "RSA" on any error.
+   */
+  private static String detectSpkiAlgorithm(byte[] spkiDer) {
+    try {
+      org.bouncycastle.asn1.x509.SubjectPublicKeyInfo spki =
+          org.bouncycastle.asn1.x509.SubjectPublicKeyInfo.getInstance(spkiDer);
+      String oid = spki.getAlgorithm().getAlgorithm().getId();
+      return switch (oid) {
+        case "1.2.840.113549.1.1.1" -> "RSA";
+        case "1.2.840.10045.2.1"    -> "EC";
+        case "1.2.840.10040.4.1"    -> "DSA";
+        default                      -> "RSA";
+      };
+    } catch (Exception ignored) {
+      return "RSA";
+    }
   }
 
   /**
@@ -4365,7 +4473,7 @@ public final class ApiServlet {
       loaded = Pkcs11Token.load(pin, libs);
       body.put("libraryPath", loaded.libraryPath());
       stepOk(steps, "tokenPresence", Map.of("libraryPath", loaded.libraryPath()));
-      LOG.info("/validate-token step=tokenPresence ok library= ", loaded.libraryPath());
+      LOG.info("/validate-token step=tokenPresence ok library={}", loaded.libraryPath());
     } catch (RuntimeException e) {
       return validationFailure(body, steps, "tokenPresence", "Token not found or not accessible",
           buildTokenErrorDetail(e));
@@ -4411,7 +4519,7 @@ public final class ApiServlet {
     try {
       validateChainAgainstTrustStore(selection.certificate, x509Chain);
       stepOk(steps, "certificateChainValidation", Map.of("chainLength", x509Chain.length));
-      LOG.info("/validate-token step=certificateChainValidation ok chainLength= ", x509Chain.length);
+      LOG.info("/validate-token step=certificateChainValidation ok chainLength={}", x509Chain.length);
     } catch (Exception e) {
       return validationFailure(body, steps, "certificateChainValidation",
           "Certificate chain validation failed", safeMsg(e));
@@ -4442,7 +4550,7 @@ public final class ApiServlet {
           "OCSP and CRL both failed for certificate", rev.toString());
     }
     stepOk(steps, "revocationCheck", rev);
-    LOG.info("/validate-token step=revocationCheck ok source= ", probe.source());
+    LOG.info("/validate-token step=revocationCheck ok source={}", probe.source());
 
     LOG.info("/validate-token step=signatureCapability start");
     if (!supportsDigitalSignatureUsage(selection.certificate)) {

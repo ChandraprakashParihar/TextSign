@@ -1,7 +1,7 @@
 {
   "port" : 80,
-  "allowedOrigins" : [ "*" ],
-  "allowedClientIps" : [ "0.0.0.0" ],
+  "allowedOrigins" : [ "http://localhost", "http://localhost:3000", "http://localhost:8080" ],
+  "allowedClientIps" : [ "127.0.0.1", "::1" ],
   "logFilePath" : "/Users/jainnibha/output/logs/trustsign/application.log",
   "logging" : {
     "directory" : "logs",
@@ -12,7 +12,7 @@
     "maxThreads" : 400,
     "minSpareThreads" : 32,
     "threadIdleTimeoutMs" : 120000,
-    "enableDebugEndpoints" : true,
+    "enableDebugEndpoints" : false,
     "acceptQueueSize" : 8192,
     "connectorIdleTimeoutMs" : 120000,
     "maxTcpConnections" : 50000,
@@ -30,7 +30,7 @@
   "signatureImagePath" : "/Users/jainnibha/chandra-workspace/trustsign/assets/greentickrbg.png",
   "truststore" : {
     "path" : "truststore.jks",
-    "password" : "chandra_ts",
+    "password" : "${TRUSTSIGN_TRUSTSTORE_PASSWORD}",
     "type" : "PKCS12",
     "enablePathValidation" : true
   },

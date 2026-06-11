@@ -23,7 +23,8 @@ public final class SigningConcurrencyFilter extends HttpFilter {
       "/auto-sign-text-cms",
       "/hsm/sign-pdf",
       "/hsm/auto-sign-pdf",
-      "/sign-text");
+      "/sign-text",
+      "/validate-token");   // also opens PKCS#11 — must be throttled like signing ops
 
   private static final Set<String> GET_TOKEN_PATHS = Set.of(
       "/certificates",

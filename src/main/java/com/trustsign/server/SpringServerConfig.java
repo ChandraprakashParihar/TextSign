@@ -66,7 +66,10 @@ public class SpringServerConfig {
     FilterRegistrationBean<RequestTracingFilter> bean =
         new FilterRegistrationBean<>(new RequestTracingFilter());
     bean.addUrlPatterns("/pki/*");
-    bean.setOrder(Ordered.HIGHEST_PRECEDENCE - 10);
+    // Must run BEFORE the concurrency filter so every request (including 503s)
+    // has a txnId in the MDC.  Using +10 instead of -10 avoids int overflow
+    // (HIGHEST_PRECEDENCE is Integer.MIN_VALUE; subtracting wraps to MAX_VALUE).
+    bean.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
     return bean;
   }
 
@@ -77,7 +80,7 @@ public class SpringServerConfig {
     FilterRegistrationBean<SigningConcurrencyFilter> bean =
         new FilterRegistrationBean<>(new SigningConcurrencyFilter(signingGate, cfg.server()));
     bean.addUrlPatterns("/pki/*");
-    bean.setOrder(Ordered.HIGHEST_PRECEDENCE);
+    bean.setOrder(Ordered.HIGHEST_PRECEDENCE + 20);
     return bean;
   }
 
