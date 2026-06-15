@@ -2,6 +2,7 @@ package com.trustsign.server;
 
 import com.trustsign.core.AgentConfig;
 import com.trustsign.core.ConfigLoader;
+import com.trustsign.core.LicenceActivator;
 import com.trustsign.core.LicenceEnforcer;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
@@ -34,6 +35,12 @@ public final class Main {
     log.info("Using config: {}", configFile.getAbsolutePath());
     applyTruststoreConfig(configFile, cfg);
     applyCertificateValidationConfig(cfg);
+
+    // First-run only: contact licensing server, save encrypted .licence.dat.
+    // On all subsequent runs this returns immediately (file already exists).
+    Path configDir = configFile.getParentFile() != null
+        ? configFile.getParentFile().toPath() : Path.of(".");
+    LicenceActivator.activateIfNeeded(configDir);
 
     LicenceEnforcer licenceEnforcer = createLicenceEnforcer(configFile);
     LicenceEnforcer.Result licenceResult = licenceEnforcer.check();
@@ -134,22 +141,16 @@ public final class Main {
   }
 
   static LicenceEnforcer createLicenceEnforcer(File configFile) throws Exception {
-    Path configDir = configFile.getParentFile() != null ? configFile.getParentFile().toPath() : Path.of(".");
-    Path licencePath = configDir.resolve("licence.json");
-    Path statePath = configDir.resolve(".licence-state");
-
-    if (!licencePath.toFile().exists()) {
-      throw new IllegalStateException(
-          "Licence file not found: " + licencePath.toAbsolutePath() +
-              ". The vendor must provide a signed licence.json in the config directory.");
-    }
+    Path configDir = configFile.getParentFile() != null
+        ? configFile.getParentFile().toPath() : Path.of(".");
+    // Encrypted token written by LicenceActivator on first run.
+    Path licenceDat = configDir.resolve(LicenceActivator.LICENCE_DAT_FILE);
 
     long buildTimestampMs = 0;
     try (InputStream in = Main.class.getResourceAsStream(BUILD_TIME_RESOURCE)) {
       if (in != null) {
         String s = new String(in.readAllBytes()).trim();
         if (!s.isEmpty()) {
-          // Accept integer seconds or decimal (e.g. 1773463432 or 1773463432.051)
           int dot = s.indexOf('.');
           String secs = dot >= 0 ? s.substring(0, dot) : s;
           if (!secs.isEmpty()) {
@@ -162,12 +163,13 @@ public final class Main {
     PublicKey publicKey;
     try (InputStream in = Main.class.getResourceAsStream(LICENCE_PUBLIC_KEY_RESOURCE)) {
       if (in == null) {
-        throw new IllegalStateException("Licence public key resource not found. Rebuild with licence-public-key.pem in resources.");
+        throw new IllegalStateException(
+            "Licence public key resource not found. Rebuild with licence-public-key.pem in resources.");
       }
       publicKey = LicenceEnforcer.loadPublicKeyFromPem(in);
     }
 
-    return new LicenceEnforcer(licencePath, statePath, buildTimestampMs, publicKey);
+    return new LicenceEnforcer(licenceDat, buildTimestampMs, publicKey);
   }
 }
 

@@ -6,7 +6,7 @@ The client package includes a **bundled JRE** (Windows), so **the client does no
 
 ## Build the client folder (recommended)
 
-**Before building**, put the signer’s **public key** in **`config/public-key.pem`** (PEM format: either `-----BEGIN PUBLIC KEY-----` or a certificate `-----BEGIN CERTIFICATE-----`). Signing uses only the certificate on the token that matches this public key.
+**Before building**, put the signer's **public key** in **`config/public-key.pem`** (PEM format: either `-----BEGIN PUBLIC KEY-----` or a certificate `-----BEGIN CERTIFICATE-----`). Signing uses only the certificate on the token that matches this public key.
 
 From the project root run:
 
@@ -23,27 +23,29 @@ build/client/
   jre/                   ← bundled Java (Windows); client does not install Java
   config/
     config.json
-    licence.json
     public-key.pem       ← the public key you provided
   README.txt
 ```
 
-**Give the client the whole `build/client` folder** (e.g. zip it and send as `TrustSign-0.1.0-client.zip`).
+**Give the client the whole `build/client` folder** (e.g. zip it) plus a separate **`activation-key.txt`** file.
+
+> The client places `activation-key.txt` in the `config/` folder before first launch. On first run the app contacts the licensing server, activates, and saves an encrypted licence locally. All subsequent runs are fully offline.
 
 ---
 
-## What’s inside the client folder
+## What's inside the client folder
 
 1. **trustsign-0.1.0-all.jar** – fat JAR (app + dependencies).
-2. **run-trustsign.bat** – double‑click to start the service.
+2. **run-trustsign.bat** – double-click to start the service.
 3. **config/config.json** – default config (port, PKCS#11 paths). Client can edit if needed.
-4. **config/licence.json** – licence (included by the vendor; do not delete).
-5. **config/public-key.pem** – signer’s public key (used to select which certificate on the token is used for signing). **Required for signing.**
-6. **config/truststore.jks** – (if present) trust store for certificate chain validation.
-7. **README.txt** – copy of these instructions for the client.
+4. **config/public-key.pem** – signer's public key (used to select which certificate on the token is used for signing). **Required for signing.**
+5. **config/truststore.jks** – (if present) trust store for certificate chain validation.
+6. **README.txt** – copy of these instructions for the client.
+
+**First-run only:** Place **`activation-key.txt`** (provided separately by the vendor) in the `config/` folder. The app activates automatically on launch and writes `config/.licence.dat`.
 
 **Token PIN:** The client must set the token PIN so the service can use the key. Either:
-- Edit **config/config.json** and set **`pkcs11.pin`** to the token PIN (e.g. `"pin": "12345678"`), or  
+- Edit **config/config.json** and set **`pkcs11.pin`** to the token PIN (e.g. `"pin": "12345678"`), or
 - Set the environment variable **`TRUSTSIGN_TOKEN_PIN`** to the token PIN (no need to store in the file).
 
 ---
@@ -52,12 +54,13 @@ build/client/
 
 1. **Windows:** No need to install Java — the package includes a bundled JRE. **Mac/Linux:** Install Java 17 or later if not already present.
 2. Put the folder contents in one place (e.g. `TrustSign`). Do not remove the `jre` folder (Windows).
-3. **Double‑click `run-trustsign.bat`**  
-   - Or open Command Prompt in that folder and run:  
+3. Place **`activation-key.txt`** in the `config/` folder (first run only).
+4. **Double-click `run-trustsign.bat`**
+   - Or open Command Prompt in that folder and run:
      `java -jar trustsign-0.1.0-all.jar`
-4. When it’s running, the service will show something like:  
+5. When it's running, the service will show something like:
    `TrustSign text server listening on http://127.0.0.1:31927/v1`
-5. To stop: close the window or press Ctrl+C in the command window.
+6. To stop: close the window or press Ctrl+C in the command window.
 
 ---
 

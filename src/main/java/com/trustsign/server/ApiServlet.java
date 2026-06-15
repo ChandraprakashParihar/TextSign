@@ -3376,40 +3376,36 @@ public final class ApiServlet {
     try {
       File cfgFile = resolveConfigFile();
       Path configDir = cfgFile.getParentFile() != null ? cfgFile.getParentFile().toPath() : Path.of(".");
-      Path licencePath = configDir.resolve("licence.json");
-      Path statePath = configDir.resolve(".licence-state");
-      out.put("licencePath", licencePath.toAbsolutePath().toString());
-      out.put("statePath", statePath.toAbsolutePath().toString());
+      Path licenceDat = configDir.resolve(com.trustsign.core.LicenceActivator.LICENCE_DAT_FILE);
+      out.put("licenceDat", licenceDat.toAbsolutePath().toString());
+      out.put("licenceDatExists", Files.isRegularFile(licenceDat));
 
-      if (Files.isRegularFile(licencePath)) {
-        com.fasterxml.jackson.databind.JsonNode lic = Json.MAPPER.readTree(Files.readString(licencePath));
-        int durationDays = lic != null && lic.has("durationDays") ? lic.get("durationDays").asInt(-1) : -1;
-        out.put("durationDays", durationDays);
-        if (Files.isRegularFile(statePath)) {
-          List<String> lines = Files.readAllLines(statePath, StandardCharsets.UTF_8);
-          if (lines.size() >= 2) {
-            long firstUseMs = Long.parseLong(lines.get(0).trim());
-            long lastSeenMs = Long.parseLong(lines.get(1).trim());
-            out.put("firstUseMs", firstUseMs);
-            out.put("firstUse", Instant.ofEpochMilli(firstUseMs).toString());
-            out.put("lastSeenMs", lastSeenMs);
-            out.put("lastSeen", Instant.ofEpochMilli(lastSeenMs).toString());
-            if (durationDays > 0) {
-              long expiryMs = firstUseMs + durationDays * 24L * 60L * 60L * 1000L;
-              long remainingMs = expiryMs - System.currentTimeMillis();
-              out.put("expiryMs", expiryMs);
-              out.put("expiry", Instant.ofEpochMilli(expiryMs).toString());
-              out.put("remainingMs", remainingMs);
+      if (Files.isRegularFile(licenceDat)) {
+        // Decrypt and parse the token to surface expiry info without re-running
+        // the full check (which re-checks the debugger flag, etc.).
+        String tokenString = com.trustsign.core.LicenceActivator.readAndDecryptToken(licenceDat);
+        int dot = tokenString.lastIndexOf('.');
+        if (dot > 0) {
+          byte[] payloadBytes = java.util.Base64.getUrlDecoder()
+              .decode(tokenString.substring(0, dot));
+          com.fasterxml.jackson.databind.JsonNode payload =
+              Json.MAPPER.readTree(payloadBytes);
+          if (payload != null) {
+            if (payload.has("sub"))  out.put("customerId",   payload.get("sub").asText());
+            if (payload.has("jti"))  out.put("activationId", payload.get("jti").asText());
+            if (payload.has("exp")) {
+              long expMs = payload.get("exp").asLong() * 1000L;
+              long remainingMs = expMs - System.currentTimeMillis();
+              out.put("expiry",        Instant.ofEpochMilli(expMs).toString());
+              out.put("remainingMs",   remainingMs);
               out.put("remainingDays", remainingMs / 86_400_000.0);
             }
-          } else {
-            out.put("stateWarning", "State file present but incomplete");
+            if (payload.has("iat")) {
+              out.put("issuedAt",
+                  Instant.ofEpochSecond(payload.get("iat").asLong()).toString());
+            }
           }
-        } else {
-          out.put("stateWarning", "State file not found yet (first use may not be initialized)");
         }
-      } else {
-        out.put("licenceWarning", "Licence file not found");
       }
     } catch (Exception e) {
       out.put("healthError", safeMsg(e));

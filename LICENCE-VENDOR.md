@@ -1,16 +1,17 @@
 # Licence (vendor only)
 
-You control how long each client can use TrustSign. The period starts when the client **first uses** the service and cannot be extended by changing the system date or editing files.
+You control how long each client can use TrustSign and which machine it runs on. The licence is cryptographically bound to the client's machine — it cannot be copied to another machine or modified without detection.
 
 ## How it works
 
-- **Licence file** (`licence.json`): Contains a **duration in days** and a **signature**. Only you can create or change it (you sign it with your private key). The client cannot change the duration.
-- **First use**: The first time the client runs the service, that date is stored in a protected state file. The client cannot backdate it (it is checked against the build date) or edit it without breaking the signature.
-- **Clock rollback**: If the client sets the system date back to get more time, the service rejects requests until the date is restored.
+- **Activation key** (`activation-key.txt`): A one-time key you give the client. On first launch the client contacts your activation server, which validates the key, signs a machine-bound token, and marks the key as used.
+- **Machine binding**: The signed token embeds the client machine's hardware fingerprint (MAC addresses, hostname, OS, CPU count). The encrypted licence file can only be decrypted on the same machine.
+- **Local encrypted storage** (`.licence.dat`): After activation the signed token is stored on the client machine in an AES-256-GCM encrypted file. All subsequent runs validate locally — no network call is needed.
+- **Tamper protection**: The file is HMAC-protected and AES-GCM authenticated. Editing the file or copying it to another machine causes immediate rejection before decryption is attempted.
 
 ## One-time setup: generate your key pair
 
-Run (from the project root, after building the JAR):
+Run once from the project root (after building the JAR):
 
 ```bash
 java -cp build/libs/trustsign-0.1.0-all.jar com.trustsign.tools.LicenceGenerator genkey .
@@ -18,25 +19,44 @@ java -cp build/libs/trustsign-0.1.0-all.jar com.trustsign.tools.LicenceGenerator
 
 This creates:
 
-- `licence-private-key.pem` — **Keep this secret.** Use it only to sign licence files. Do not give it to clients or commit it to version control.
-- `licence-public-key.pem` — Put this in `src/main/resources/com/trustsign/licence-public-key.pem` (replace the existing file), then **rebuild** the application. The built app will only accept licences signed with the matching private key.
+- `licence-private-key.pem` — **Keep this secret on the activation server only.** Never ship it to clients or commit it to version control.
+- `licence-public-key.pem` — Put this in `src/main/resources/com/trustsign/licence-public-key.pem` (replace the existing file), then **rebuild** the application. The built JAR only accepts tokens signed with the matching private key.
+
+## Running the activation server
+
+The activation server (`com.trustsign.tools.licenceserver.ActivationServerApp`) is a Spring Boot app you deploy on your own infrastructure.
+
+1. Place `licence-private-key.pem` next to the server JAR (or configure `trustsign.licence.private-key`).
+2. Create a `keys.json` file listing your activation keys (see below).
+3. Start the server: `java -jar activation-server.jar`
+
+### keys.json format
+
+```json
+[
+  {
+    "key":          "ABCDE-FGHIJ-KLMNO-PQRST",
+    "customerId":   "acme-corp",
+    "durationDays": 365,
+    "used":         false,
+    "activationId": null,
+    "activatedAt":  0
+  }
+]
+```
+
+Each key can only be used once. After activation, `used` becomes `true` and `activationId` / `activatedAt` are recorded.
 
 ## Creating a licence for a client
 
-1. Decide the **duration in days** (e.g. 90 for 3 months, 365 for 1 year). The period starts when the client first uses the service.
-2. Sign a licence file:
+1. Add a new entry to `keys.json` on your activation server with a unique key, the customer's ID, and the desired duration in days.
+2. Give the client **only** the `activation-key.txt` file containing the key string.
+3. On their first launch, the app contacts your server automatically, receives the signed token, and saves it locally.
 
-   ```bash
-   java -cp build/libs/trustsign-0.1.0-all.jar com.trustsign.tools.LicenceGenerator sign <durationDays> licence-private-key.pem config/licence.json
-   ```
+## Inspecting a machine's fingerprints
 
-   Example for 90 days:
+To see what fingerprints a machine would send during activation:
 
-   ```bash
-   java -cp build/libs/trustsign-0.1.0-all.jar com.trustsign.tools.LicenceGenerator sign 90 licence-private-key.pem config/licence.json
-   ```
-
-3. **For the Windows installer**: Copy the signed `config/licence.json` to `installer/licence.json` before running `./gradlew buildInstaller`. The installer will put it in the client’s config folder.
-4. **For a manual client package**: Include the signed `licence.json` in the client’s config directory (e.g. next to `config.json`).
-
-Only you can change the duration, because only you have the private key. The client cannot modify the licence or the internal state to extend use.
+```bash
+java -cp build/libs/trustsign-0.1.0-all.jar com.trustsign.tools.LicenceGenerator print-fp
+```

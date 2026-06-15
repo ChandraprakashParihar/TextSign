@@ -1,16 +1,16 @@
 # TrustSign Windows Installer
 
-This folder contains the Inno Setup script to build a Windows installer for TrustSign. The installer packages **the same files as the client folder** (`build/client`): JAR, `run-trustsign.bat`, `config/` (config.json, licence.json, public-key.pem, truststore.jks, SET-PIN.txt), README.txt, and bundled JRE.
+This folder contains the Inno Setup script to build a Windows installer for TrustSign. The installer packages **the same files as the client folder** (`build/client`): JAR, `run-trustsign.bat`, `config/` (config.json, public-key.pem, truststore.jks, SET-PIN.txt), README.txt, and bundled JRE.
 
 - **Bundled JRE**: Eclipse Temurin 17 JRE for Windows x64 — the client does **not** need to install Java.
 - **Same as zip client**: `./gradlew buildInstaller` first runs `clientFolderWindows`, then packages `build/client` into the .exe. So the installed app matches what you get from zipping `build/client`.
 - **Run at startup**: Optional task "Run TrustSign when Windows starts" creates a shortcut in the Startup folder.
 - **Shortcuts**: Start menu and optional desktop shortcut to run TrustSign.
 
-## What’s in this folder
+## What's in this folder
 
 - **TrustSign.iss** – Inno Setup script (packages `build/client`).
-- **config.json**, **licence.json** – Optional overrides; the client package prefers `config/config.json` and `config/licence.json` (see build.gradle). Put a signed licence in `config/licence.json` (or here) before running `clientFolder` / `buildInstaller`.
+- **config.json** – Optional config override; the client package prefers `config/config.json` (see build.gradle).
 
 ## Prerequisites (for building the installer)
 
@@ -19,8 +19,7 @@ This folder contains the Inno Setup script to build a Windows installer for Trus
 
 ## Build the installer
 
-1. **Sign a licence** and ensure **config/licence.json** (or installer/licence.json) exists (see **GIVE-TO-CLIENT.md**).
-2. From the project root:
+1. From the project root:
 
 ```bash
 ./gradlew buildInstaller
@@ -30,7 +29,13 @@ The installer is created at:
 
 **`build/installer/TrustSign-0.1.0-Setup.exe`**
 
-If you don’t have Inno Setup, you can still give clients the same content as a zip:
+2. Give the client:
+   - **`TrustSign-0.1.0-Setup.exe`**
+   - **`activation-key.txt`** (the one-time activation key — deliver this separately)
+
+The client runs the installer, places `activation-key.txt` in the `config/` folder, and starts TrustSign. The app activates on first launch by contacting the licensing server, then runs fully offline.
+
+If you don't have Inno Setup, you can still give clients the same content as a zip:
 
 - Cross-platform package (requires Java on client): `./gradlew clientFolderCrossPlatform`
 - Windows package with bundled JRE: `./gradlew clientFolderWindows`
@@ -39,8 +44,9 @@ If you don’t have Inno Setup, you can still give clients the same content as a
 
 1. **TrustSign-0.1.0-Setup.exe** – the installer (same content as `build/client`, including bundled JRE).
 2. Or zip **build/client** and give that instead; they run `run-trustsign.bat`.
+3. **activation-key.txt** – always delivered separately from the installer.
 
-Config is in `{InstallDir}\config\` (config.json, licence.json, public-key.pem, etc.).
+Config is in `{InstallDir}\config\` (config.json, public-key.pem, etc.).
 
 ## Production Config Recommendation
 
@@ -54,8 +60,6 @@ For production deployments, start from `config/config.production.json` (project 
   - `server.maxConcurrentSigningOperations`
 - Keep `server.enableDebugEndpoints` as `false`.
 - Keep `pkcs11.pin` as `null` and provide PIN through `TRUSTSIGN_TOKEN_PIN`.
-
-
 
 Use either Gradle property (-P...) or environment variable before running the task.
 

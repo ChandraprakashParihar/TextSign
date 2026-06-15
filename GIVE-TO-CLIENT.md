@@ -4,17 +4,25 @@ Use this checklist when you want to deliver the service to a client.
 
 ---
 
-## 1. Create a licence for the client
+## 1. Create an activation key for the client
 
-Only you can set how long the client can use the service. The period starts when they **first run** the app.
+Add a new entry to `keys.json` on your activation server:
 
-```bash
-# Example: 90 days from first use (use your private key path)
-java -cp build/libs/trustsign-0.1.0-all.jar com.trustsign.tools.LicenceGenerator sign 90 build/tools-keys/licence-private-key.pem config/licence.json
+```json
+{
+  "key":          "ABCDE-FGHIJ-KLMNO-PQRST",
+  "customerId":   "acme-corp",
+  "durationDays": 365,
+  "used":         false,
+  "activationId": null,
+  "activatedAt":  0
+}
 ```
 
-- Put the signed **`config/licence.json`** where the client package will get it (see step 2).
-- Keep **`licence-private-key.pem`** secret; never give it to the client.
+- Use a strong random key (e.g. `UUID.randomUUID()` or a password manager).
+- Set `durationDays` to the licence period (e.g. `365` for 1 year).
+- Each key can only be used once — one key per customer machine.
+- Keep `licence-private-key.pem` secret on the activation server. Never give it to clients.
 
 ---
 
@@ -27,48 +35,47 @@ java -cp build/libs/trustsign-0.1.0-all.jar com.trustsign.tools.LicenceGenerator
 
 **Steps:**
 
-1. Copy the signed licence into the installer folder:
-   ```bash
-   cp config/licence.json installer/licence.json
-   ```
-2. On a **Windows** machine with **Inno Setup 6** installed, run:
+1. Build the installer on a Windows machine:
    ```bash
    ./gradlew buildInstaller
    ```
-3. Give the client: **`build/installer/TrustSign-0.1.0-Setup.exe`**.
+2. Give the client:
+   - **`build/installer/TrustSign-0.1.0-Setup.exe`**
+   - **`activation-key.txt`** (the one-time activation key — keep this separate from the installer)
 
-They run the installer, set their token PIN (in config or env), and start TrustSign from the Start menu or desktop shortcut.
+They run the installer, place `activation-key.txt` in the `config/` folder, and start TrustSign. On first launch the app activates automatically.
 
 ---
 
-### Option B: Client folder (any OS, or when you can’t build the installer)
+### Option B: Client folder (any OS, or when you can't build the installer)
 
-- Client gets a folder with the JAR, **bundled Windows JRE**, run script, and config. **Windows clients do not need to install Java.** Mac/Linux clients need Java 17+ to run the JAR.
+- Client gets a folder with the JAR, **bundled Windows JRE**, run script, and config.
 
 **Steps:**
 
-1. Ensure **`config/public-key.pem`** exists (signer’s public key for selecting the cert on the token).
-2. Ensure **`config/licence.json`** is the signed licence for this client (from step 1).
-3. Build the client package:
+1. Ensure **`config/public-key.pem`** exists (signer's public key for selecting the cert on the token).
+2. Build the client package:
    ```bash
    ./gradlew clientFolder
    ```
-4. Zip the folder and give it to the client:
+3. Zip and give to the client:
    ```bash
    cd build && zip -r TrustSign-0.1.0-client.zip client/
    ```
-   Give them **`TrustSign-0.1.0-client.zip`**.
+   Give them **`TrustSign-0.1.0-client.zip`** and **`activation-key.txt`** separately.
 
-The client unzips, sets their token PIN (see README.txt inside the folder), and runs **`run-trustsign.bat`** (Windows) or `java -jar trustsign-0.1.0-all.jar` (Mac/Linux).
+The client unzips, places `activation-key.txt` in the `config/` folder, sets their token PIN, and runs `run-trustsign.bat` (Windows) or `java -jar trustsign-0.1.0-all.jar` (Mac/Linux).
 
 ---
 
 ## 3. What the client must do
 
+- **Place `activation-key.txt`** in the `config/` folder before first launch.
 - **Set the token PIN** so TrustSign can use the key:
-  - Edit **`config/config.json`** and set **`pkcs11.pin`**, or  
+  - Edit **`config/config.json`** and set **`pkcs11.pin`**, or
   - Set environment variable **`TRUSTSIGN_TOKEN_PIN`**.
-- **Run the service** (double‑click the batch file, or run the JAR).
+- **Run the service** (double-click the batch file, or run the JAR).
+- On **first launch**, the app contacts your activation server, validates the key, and saves an encrypted licence locally. Subsequent launches are fully offline.
 - Optionally change **port** or **allowedOrigins** in `config/config.json` if needed.
 
 ---
@@ -78,6 +85,6 @@ The client unzips, sets their token PIN (see README.txt inside the folder), and 
 If you want the client to use **certificate chain validation** (your XT CA certs):
 
 - Include **`config/truststore.jks`** in the package (the **clientFolder** task copies it automatically if it exists).
-- Your **`config/config.json`** already has a **`truststore`** section; the same config is copied into the client folder. Ensure the **path** in that section is **`config/truststore.jks`** (relative) so it works in the client’s folder.
+- Your **`config/config.json`** already has a **`truststore`** section; the same config is copied into the client folder. Ensure the **path** in that section is **`config/truststore.jks`** (relative) so it works in the client's folder.
 
-If the client does not need chain validation, remove the **`truststore`** block from **`config/config.json`** (or from **`installer/config.json`** for the installer) before building the client package or installer.
+If the client does not need chain validation, remove the **`truststore`** block from **`config/config.json`** before building the client package or installer.

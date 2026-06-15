@@ -30,7 +30,7 @@
   "signatureImagePath" : "/Users/jainnibha/chandra-workspace/trustsign/assets/greentickrbg.png",
   "truststore" : {
     "path" : "truststore.jks",
-    "password" : "${TRUSTSIGN_TRUSTSTORE_PASSWORD}",
+    "password" : "chandra_ts",
     "type" : "PKCS12",
     "enablePathValidation" : true
   },

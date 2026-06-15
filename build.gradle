@@ -40,6 +40,15 @@ application {
   mainClass.set("com.trustsign.server.Main")
 }
 
+// Dev convenience: point the activation check at a local licence server.
+// Override by setting TRUSTSIGN_LICENCE_SERVER env var, or edit this URL.
+tasks.named("run") {
+  def licenceServer = System.getenv("TRUSTSIGN_LICENCE_SERVER") ?: "http://localhost:3030/api/v1/activate"
+  jvmArgs "-Dtrustsign.licence.server=${licenceServer}"
+  // Forward the terminal's stdin so activation key prompts are interactive.
+  standardInput = System.in
+}
+
 tasks.shadowJar {
   archiveBaseName.set("trustsign")
   archiveClassifier.set("shadow")
@@ -293,16 +302,14 @@ tasks.register("clientFolder") {
   dependsOn("bootJar", "installDist")
   def clientDir = file("$buildDir/client")
   outputs.dir(clientDir)
-  // Re-run when any of these source files change so licence.json, config.json, etc. are always updated.
+  // Re-run when any of these source files change so config.json, public-key.pem, truststore.jks, etc. are always updated.
   inputs.files(
     tasks.bootJar.archiveFile,
     file("config/config.json"),
-    file("config/licence.json"),
     file("config/public-key.pem"),
     file("config/truststore.jks"),
     file("CLIENT-RUN.md"),
-    file("installer/config.json"),
-    file("installer/licence.json")
+    file("installer/config.json")
   )
   doLast {
     clientDir.mkdirs()
@@ -409,16 +416,9 @@ read -r -p "Press Enter to close..."
         rename { "config.json" }
       }
     }
-    // Prefer config/licence.json (what you sign) so client package gets the current licence; fallback to installer/licence.json
-    def licenceSource = file("config/licence.json").exists() ? file("config/licence.json") : file("installer/licence.json")
-    if (!licenceSource.exists()) {
-      throw new GradleException("Licence required for client package. Sign a licence (see GIVE-TO-CLIENT.md) and ensure config/licence.json or installer/licence.json exists.")
-    }
-    copy {
-      from(licenceSource)
-      into(configDir)
-      rename { "licence.json" }
-    }
+    // Licence is now activated at first run: the client reads activation-key.txt,
+    // contacts the licensing server, and writes config/.licence.dat locally.
+    // No licence file needs to be bundled into the client package.
     if (file("config/truststore.jks").exists()) {
       copy {
         from("config/truststore.jks")
