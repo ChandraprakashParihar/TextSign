@@ -1,3 +1,8 @@
+buildscript {
+  repositories { mavenCentral() }
+  dependencies { classpath 'com.guardsquare:proguard-gradle:7.9.1' }
+}
+
 plugins {
   id("java")
   id("application")
@@ -63,6 +68,56 @@ tasks.bootJar {
   archiveBaseName.set("trustsign")
   archiveClassifier.set("all")
   mainClass.set("com.trustsign.server.Main")
+  // Obfuscated classes are injected in the proguardClasses wiring below.
+}
+
+// ── ProGuard obfuscation ──────────────────────────────────────────────────────
+// Runs ONLY during distribution builds (bootJar / clientFolder).
+// `./gradlew run` compiles and launches classes directly — ProGuard is never
+// triggered for that task, so there is zero overhead in the dev loop.
+
+def obfuscatedJar     = file("$buildDir/obfuscated/trustsign-obfuscated.jar")
+def obfuscatedExploded = file("$buildDir/obfuscated/exploded")
+
+tasks.register('proguardClasses', proguard.gradle.ProGuardTask) {
+  dependsOn 'compileJava', 'processResources'
+
+  // ---- input: our compiled application classes only ----
+  injars  sourceSets.main.output.classesDirs
+  outjars obfuscatedJar
+
+  // ---- libraries: JDK modules + dependency JARs ----
+  // ProGuard 7.9+ handles Java 25 class files (version 69) produced by GraalVM 25.
+  libraryjars fileTree("${System.getProperty('java.home')}/jmods").include("**/*.jmod"),
+              filter: "!**.jar;!module-info.class"
+  libraryjars configurations.runtimeClasspath.filter { it.isFile() }
+
+  configuration file('proguard.pro')
+}
+
+// Unpack the obfuscated JAR into a directory.
+// bootJar treats file-system directories as BOOT-INF/classes input; JARs would
+// go into BOOT-INF/lib instead, which is wrong for our own application classes.
+tasks.register('extractObfuscatedJar') {
+  dependsOn 'proguardClasses'
+  inputs.file  obfuscatedJar
+  outputs.dir  obfuscatedExploded
+  doLast {
+    delete obfuscatedExploded
+    copy {
+      from zipTree(obfuscatedJar)
+      into obfuscatedExploded
+    }
+  }
+}
+
+// Replace original compiled classes with obfuscated output inside the fat JAR.
+// Done in doFirst so the swap happens at execution time after all configuration
+// has been resolved.
+tasks.bootJar.dependsOn 'extractObfuscatedJar'
+tasks.bootJar.doFirst {
+  def origDirs = sourceSets.main.output.classesDirs.files
+  classpath = classpath.filter { !origDirs.contains(it) } + files(obfuscatedExploded)
 }
 
 tasks.test {
@@ -318,6 +373,9 @@ tasks.register("clientFolder") {
     file("installer/config.json")
   )
   doLast {
+    // Always start clean so test artefacts (e.g. .licence.dat created by running
+    // the JAR from build/client/ during development) never end up in the package.
+    delete clientDir
     clientDir.mkdirs()
     def configDir = new File(clientDir, "config")
     configDir.mkdirs()

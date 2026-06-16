@@ -5,6 +5,7 @@
 
 # Build outputs and IDE compile artifacts
 build/
+proguard-mapping.txt
 .gradle/
 bin/
 com/
