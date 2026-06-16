@@ -963,17 +963,9 @@ public final class ApiServlet {
     RawOutputFormat safeFormat = format == null ? RawOutputFormat.BASE64 : format;
     return switch (safeFormat) {
       case BASE64 -> Base64.getEncoder().encodeToString(content);
-      case HEX -> toHex(content);
+      case HEX -> HexFormat.of().formatHex(content);
       case BINARY -> toBinary(content);
     };
-  }
-
-  private static String toHex(byte[] content) {
-    StringBuilder out = new StringBuilder(content.length * 2);
-    for (byte b : content) {
-      out.append(String.format("%02x", b));
-    }
-    return out.toString();
   }
 
   private static String toBinary(byte[] content) {
@@ -1283,7 +1275,7 @@ public final class ApiServlet {
         }
 
         case "/validate-token" -> {
-          requireSession(req);
+          // requireSession(req);
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null) {
             return;
@@ -1443,6 +1435,7 @@ public final class ApiServlet {
           Certificate[] chain = selection.chain;
 
           PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          java.util.Arrays.fill(pin, '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -1552,6 +1545,7 @@ public final class ApiServlet {
         }
 
         case "/auto-sign-pdf" -> {
+          requireSession(req);
           LOG.info("Auto-signing PDF request received");
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           AgentConfig cfg = loadConfig(resp);
@@ -1573,19 +1567,20 @@ public final class ApiServlet {
           // Some clients send text fields as "file" parts with filename present/empty.
           // Fall back to interpreting them as text when mp.field(...) is null.
           if (reason == null) {
-            LOG.info("Reason is null, falling back to interpreting them as text");
+            LOG.debug("Reason is null, falling back to interpreting them as text");
             byte[] rb = mp.file("reason");
             if (rb != null && rb.length > 0) {
               reason = new String(rb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
           if (location == null) {
-            LOG.info("Location is null, falling back to interpreting them as text");
+            LOG.debug("Location is null, falling back to interpreting them as text");
             byte[] lb = mp.file("location");
             if (lb != null && lb.length > 0) {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
+          if (!validateReasonLocation(resp, reason, location)) return;
 
           if (data == null || data.length == 0) {
             LOG.error("PDF file is null or empty");
@@ -1681,6 +1676,7 @@ public final class ApiServlet {
           Certificate[] chain = selection.chain;
 
           PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          java.util.Arrays.fill(pin, '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -1799,6 +1795,7 @@ public final class ApiServlet {
         }
 
         case "/auto-sign-pdf-blob" -> {
+          requireSession(req);
           LOG.info("Auto-signing PDF request received");
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           AgentConfig cfg = loadConfig(resp);
@@ -1826,19 +1823,20 @@ public final class ApiServlet {
           // Some clients send text fields as "file" parts with filename present/empty.
           // Fall back to interpreting them as text when mp.field(...) is null.
           if (reason == null) {
-            LOG.info("Reason is null, falling back to interpreting them as text");
+            LOG.debug("Reason is null, falling back to interpreting them as text");
             byte[] rb = mp.file("reason");
             if (rb != null && rb.length > 0) {
               reason = new String(rb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
           if (location == null) {
-            LOG.info("Location is null, falling back to interpreting them as text");
+            LOG.debug("Location is null, falling back to interpreting them as text");
             byte[] lb = mp.file("location");
             if (lb != null && lb.length > 0) {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
+          if (!validateReasonLocation(resp, reason, location)) return;
 
           if (data == null || data.length == 0) {
             LOG.error("PDF file is null or empty");
@@ -1934,6 +1932,7 @@ public final class ApiServlet {
           Certificate[] chain = selection.chain;
 
           PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          java.util.Arrays.fill(pin, '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -2052,6 +2051,7 @@ public final class ApiServlet {
         }
 
         case "/auto-sign-pdf-at-field" -> {
+          requireSession(req);
           LOG.info("Auto-signing PDF at existing signature field request received");
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           AgentConfig cfg = loadConfig(resp);
@@ -2086,6 +2086,7 @@ public final class ApiServlet {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
+          if (!validateReasonLocation(resp, reason, location)) return;
           Integer signIndex = parsePositiveInt(readMultipartString(mp, "signIndex", true));
           if (signIndex == null) {
             writeJson(resp, 400, Map.of("error", "Missing or invalid signIndex (must be a positive integer)"));
@@ -2189,6 +2190,7 @@ public final class ApiServlet {
           X509Certificate matchedCert = selection.certificate;
           Certificate[] chain = selection.chain;
           PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          java.util.Arrays.fill(pin, '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -2411,6 +2413,7 @@ public final class ApiServlet {
           X509Certificate matchedCert = selection.certificate;
           Certificate[] chain = selection.chain;
           PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          java.util.Arrays.fill(pin, '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -2514,6 +2517,7 @@ public final class ApiServlet {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
+          if (!validateReasonLocation(resp, reason, location)) return;
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -2574,6 +2578,7 @@ public final class ApiServlet {
           X509Certificate matchedCert = selection.certificate;
           Certificate[] chain = selection.chain;
           PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          java.util.Arrays.fill(pin, '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -2698,6 +2703,7 @@ public final class ApiServlet {
         }
 
         case "/hsm/sign-pdf" -> {
+          requireSession(req);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           byte[] data = mp.file("file");
           byte[] cerBytes = readMultipartCerPayload(mp);
@@ -2716,6 +2722,7 @@ public final class ApiServlet {
               location = new String(lb, StandardCharsets.UTF_8).trim();
             }
           }
+          if (!validateReasonLocation(resp, reason, location)) return;
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -2821,6 +2828,7 @@ public final class ApiServlet {
         }
 
         case "/hsm/auto-sign-pdf" -> {
+          requireSession(req);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null)
@@ -2849,6 +2857,7 @@ public final class ApiServlet {
               location = new String(lb, StandardCharsets.UTF_8).trim();
             }
           }
+          if (!validateReasonLocation(resp, reason, location)) return;
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -3123,6 +3132,7 @@ public final class ApiServlet {
           Certificate[] chain = selection.chain;
 
           PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+          java.util.Arrays.fill(pin, '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -4761,6 +4771,10 @@ public final class ApiServlet {
   }
 
   private File resolveConfigFile() {
+    String configPath = System.getProperty("trustsign.config.path");
+    if (configPath != null && !configPath.isBlank()) {
+      return new File(configPath.trim());
+    }
     File f1 = new File("config/config.json");
     if (f1.exists())
       return f1;
@@ -4783,6 +4797,19 @@ public final class ApiServlet {
     if (msg.length() > 300)
       return msg.substring(0, 300);
     return msg;
+  }
+
+  private boolean validateReasonLocation(HttpServletResponse resp, String reason, String location)
+      throws IOException {
+    if (reason != null && reason.length() > 500) {
+      writeJson(resp, 400, Map.of("error", "Field 'reason' exceeds maximum length of 500 characters"));
+      return false;
+    }
+    if (location != null && location.length() > 200) {
+      writeJson(resp, 400, Map.of("error", "Field 'location' exceeds maximum length of 200 characters"));
+      return false;
+    }
+    return true;
   }
 
   private static String buildTokenErrorDetail(RuntimeException e) {

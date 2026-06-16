@@ -70,16 +70,22 @@ tasks.test {
 }
 
 // Embed build timestamp so licence first-use cannot be backdated beyond release.
-// Only write once (when file missing) so "Licence state invalid" doesn't happen on every dev run.
-def buildTimeDir = file("$buildDir/generated/licence-resources")
-def buildTimeFile = file("$buildTimeDir/build-time.txt")
+// The canonical timestamp lives in .gradle/ (outside build/) so it survives
+// `./gradlew clean`.  The first ever run on a machine writes it; after that it
+// is stable regardless of how many times the build is cleaned.
+def buildTimeSrcFile = file("$projectDir/.gradle/trustsign-build-time.txt")
+def buildTimeDir     = file("$buildDir/generated/licence-resources")
 tasks.register("writeBuildTime") {
   group = "build"
   doLast {
-    buildTimeDir.mkdirs()
-    if (!buildTimeFile.exists()) {
-      buildTimeFile.text = String.valueOf((long) (System.currentTimeMillis() / 1000))
+    // Write the canonical file once per machine (persists across cleans).
+    if (!buildTimeSrcFile.exists()) {
+      buildTimeSrcFile.parentFile.mkdirs()
+      buildTimeSrcFile.text = String.valueOf((long) (System.currentTimeMillis() / 1000))
     }
+    // Always copy into build/ so processResources can pick it up.
+    buildTimeDir.mkdirs()
+    file("$buildTimeDir/build-time.txt").text = buildTimeSrcFile.text
   }
 }
 tasks.processResources {

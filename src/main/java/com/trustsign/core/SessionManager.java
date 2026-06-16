@@ -5,10 +5,22 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public final class SessionManager {
   private static final SecureRandom RNG = new SecureRandom();
   private final Map<String, Instant> sessions = new ConcurrentHashMap<>();
+  private final ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor(r -> {
+    Thread t = new Thread(r, "session-cleanup");
+    t.setDaemon(true);
+    return t;
+  });
+
+  public SessionManager() {
+    cleaner.scheduleAtFixedRate(this::purgeExpired, 5, 5, TimeUnit.MINUTES);
+  }
 
   public record Session(String token, Instant expiresAt) {}
 

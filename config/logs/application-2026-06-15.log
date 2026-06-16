@@ -1,0 +1,105 @@
+2026-06-15 11:52:06.748 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-06-15 11:52:06.749 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 11:55:24.108 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-06-15 11:55:24.109 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 11:56:30.312 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-06-15 11:56:30.313 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 11:56:30.620 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 46186 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-06-15 11:56:30.620 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-06-15 11:56:30.963 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 80 (http)
+2026-06-15 11:56:30.998 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 357 ms
+2026-06-15 11:56:31.212 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 80 (http) with context path '/'
+2026-06-15 11:56:31.216 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.707 seconds (process running for 1.163)
+2026-06-15 11:56:31.218 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:80/pki — Spring Boot MVC
+2026-06-15 12:01:55.839 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-06-15 12:01:55.840 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 12:01:56.181 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 48499 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-06-15 12:01:56.182 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-06-15 12:01:56.516 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 80 (http)
+2026-06-15 12:01:56.547 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 346 ms
+2026-06-15 12:01:56.747 [main] WARN  [txnId=na] [ip=na] o.s.b.w.s.c.AnnotationConfigServletWebServerApplicationContext - Exception encountered during context initialization - cancelling refresh attempt: org.springframework.context.ApplicationContextException: Failed to start bean 'webServerStartStop'
+2026-06-15 12:01:56.755 [main] INFO  [txnId=na] [ip=na] o.s.b.a.l.ConditionEvaluationReportLogger - 
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2026-06-15 12:01:56.761 [main] ERROR [txnId=na] [ip=na] o.s.b.d.LoggingFailureAnalysisReporter - 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Web server failed to start. Port 80 was already in use.
+
+Action:
+
+Identify and stop the process that's listening on port 80 or configure this application to listen on another port.
+
+2026-06-15 12:03:17.268 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-06-15 12:03:17.269 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 12:03:17.571 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 49172 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-06-15 12:03:17.571 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-06-15 12:03:17.916 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-06-15 12:03:17.944 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 354 ms
+2026-06-15 12:03:18.150 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-06-15 12:03:18.154 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.689 seconds (process running for 1.154)
+2026-06-15 12:03:18.155 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-06-15 12:03:27.792 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-06-15 12:03:27.800 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete
+2026-06-15 12:04:05.818 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-06-15 12:04:05.820 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 12:18:53.725 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-06-15 12:18:53.726 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 12:20:23.608 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-06-15 12:20:23.608 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 12:21:13.144 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 59001 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-06-15 12:21:13.145 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-06-15 12:21:13.545 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-06-15 12:21:13.579 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 411 ms
+2026-06-15 12:21:13.782 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-06-15 12:21:13.787 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.756 seconds (process running for 50.463)
+2026-06-15 12:21:13.788 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-06-15 12:24:50.751 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-06-15 12:24:50.759 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete
+2026-06-15 12:24:55.272 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-06-15 12:24:55.273 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 12:26:12.398 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 61428 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-06-15 12:26:12.398 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-06-15 12:26:12.771 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-06-15 12:26:12.807 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 389 ms
+2026-06-15 12:26:13.041 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-06-15 12:26:13.046 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.768 seconds (process running for 78.086)
+2026-06-15 12:26:13.049 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-06-15 12:36:41.833 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-06-15 12:36:41.842 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete
+2026-06-15 12:37:51.521 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-06-15 12:37:51.522 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 12:37:51.923 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 67514 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-06-15 12:37:51.924 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-06-15 12:37:52.312 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-06-15 12:37:52.346 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 400 ms
+2026-06-15 12:37:52.571 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-06-15 12:37:52.575 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.822 seconds (process running for 1.362)
+2026-06-15 12:37:52.576 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-06-15 12:38:46.114 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-06-15 12:38:46.117 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Completed initialization in 2 ms
+2026-06-15 12:38:46.144 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Reloaded config from disk: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-06-15 12:38:46.161 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=tokenPresence start
+2026-06-15 12:38:49.467 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=tokenPresence ok library=/usr/local/lib/libcastle_v2.1.0.0.dylib
+2026-06-15 12:38:49.468 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateExtraction start
+2026-06-15 12:38:49.477 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Reloaded configured public keys from disk: /Users/jainnibha/chandra-workspace/trustsign/config/public-key.pem
+2026-06-15 12:38:49.477 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateExtraction ok alias=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4's XtraTrust Sub CA 2022 ID mode=public-key-match
+2026-06-15 12:38:49.477 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateValidity start alias=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4's XtraTrust Sub CA 2022 ID
+2026-06-15 12:38:49.477 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateValidity ok
+2026-06-15 12:38:49.477 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateChainValidation start
+2026-06-15 12:38:49.514 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] c.t.core.CertificateValidator - Reloaded truststore from disk: /Users/jainnibha/chandra-workspace/trustsign/config/truststore.jks
+2026-06-15 12:38:49.519 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] c.t.core.CertificateValidator - Strict certificate chain validation successful: subject='CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN', chainLength=4, root='CN=CCA India 2022,O=India PKI,C=IN'
+2026-06-15 12:38:49.520 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateChainValidation ok chainLength=4
+2026-06-15 12:38:49.520 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=revocationCheck start
+2026-06-15 12:38:50.638 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=revocationCheck ok source=ocsp
+2026-06-15 12:38:50.638 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=signatureCapability start
+2026-06-15 12:38:50.638 [http-nio-8080-exec-1] INFO  [txnId=ea90fdb111db422d9a97258fe3954472] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=signatureCapability ok
+2026-06-15 12:45:54.201 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-06-15 12:45:54.206 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete
+2026-06-15 12:45:55.080 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-06-15 12:45:55.125 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete

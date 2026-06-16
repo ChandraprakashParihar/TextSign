@@ -10,8 +10,12 @@ import java.util.regex.Pattern;
 
 public final class ConfigLoader {
   private static final ObjectMapper MAPPER = new ObjectMapper();
-  /** Matches a config value like {@code ${MY_ENV_VAR}} and captures the var name. */
-  private static final Pattern ENV_PLACEHOLDER = Pattern.compile("^\\$\\{([^}]+)}$");
+  /**
+   * Matches {@code ${VAR_NAME}} or {@code ${VAR_NAME:-default}}.
+   * Group 1 = variable name, group 2 = default value (null when absent).
+   */
+  private static final Pattern ENV_PLACEHOLDER =
+      Pattern.compile("^\\$\\{([^:}]+)(?::-([^}]*))?}$");
   private static final int MIN_PORT = 1;
   private static final int MAX_PORT = 65535;
 
@@ -88,14 +92,18 @@ public final class ConfigLoader {
         java.util.regex.Matcher m = ENV_PLACEHOLDER.matcher(value.asText());
         if (m.matches()) {
           String varName = m.group(1).trim();
+          String defaultValue = m.group(2); // null when no :- present
           String resolved = System.getenv(varName);
           if (resolved == null) {
             resolved = System.getProperty(varName);
           }
           if (resolved == null) {
+            resolved = defaultValue;
+          }
+          if (resolved == null) {
             throw new IllegalStateException(
                 "Config references environment variable '" + varName + "' which is not set. "
-                    + "Export the variable or replace the placeholder with a literal value.");
+                    + "Export the variable or use the '${" + varName + ":-default}' syntax for a fallback value.");
           }
           node.put(entry.getKey(), resolved);
         }

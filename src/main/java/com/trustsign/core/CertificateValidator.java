@@ -15,6 +15,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.net.URL;
+import java.net.URLConnection;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
@@ -326,8 +327,10 @@ public final class CertificateValidator {
   }
 
   private static boolean isRevokedByCrl(X509Certificate cert, String crlUrl) throws Exception {
-    URL url = new URL(crlUrl);
-    try (InputStream in = url.openStream()) {
+    URLConnection conn = new URL(crlUrl).openConnection();
+    conn.setConnectTimeout(10_000);
+    conn.setReadTimeout(15_000);
+    try (InputStream in = conn.getInputStream()) {
       CertificateFactory cf = CertificateFactory.getInstance("X.509");
       X509CRL crl = (X509CRL) cf.generateCRL(in);
       return crl.isRevoked(cert);

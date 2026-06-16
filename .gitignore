@@ -9,3 +9,21 @@ build/
 bin/
 com/
 *.class
+
+# Secrets and machine-specific runtime files – never commit
+.env
+config/.licence.dat
+.gradle/trustsign-build-time.txt
+
+# JVM heap and thread dumps
+*.hprof
+hs_err_pid*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# IDE project files
+.idea/
+*.iml
+.vscode/

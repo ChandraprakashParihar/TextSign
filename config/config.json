@@ -1,8 +1,7 @@
 {
-  "port" : 80,
+  "port" : 8080,
   "allowedOrigins" : [ "http://localhost", "http://localhost:3000", "http://localhost:8080" ],
   "allowedClientIps" : [ "127.0.0.1", "::1" ],
-  "logFilePath" : "/Users/jainnibha/output/logs/trustsign/application.log",
   "logging" : {
     "directory" : "logs",
     "consoleEnabled" : true,
@@ -23,14 +22,14 @@
     "multipartTextMaxFileMb" : 4,
     "gracefulStopTimeoutMs" : 30000
   },
-  "autoSignOutputDir" : "/Users/jainnibha/output",
+  "autoSignOutputDir" : "output",
   "output" : "file",
   "outputFormat" : "base64",
   "signerVersion" : "TrustSign_0.1.0",
-  "signatureImagePath" : "/Users/jainnibha/chandra-workspace/trustsign/assets/greentickrbg.png",
+  "signatureImagePath" : "assets/greentickrbg.png",
   "truststore" : {
     "path" : "truststore.jks",
-    "password" : "chandra_ts",
+    "password" : "${TRUSTSIGN_TRUSTSTORE_PASSWORD:-chandra_ts}",
     "type" : "PKCS12",
     "enablePathValidation" : true
   },
