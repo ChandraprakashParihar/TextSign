@@ -11,14 +11,21 @@ import java.nio.file.StandardOpenOption;
 import java.security.KeyStore;
 import java.security.Provider;
 import java.security.Security;
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.util.Enumeration;
 import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * HSM-only PKCS#11 setup: enumerates {@code slotListIndex} values for each configured library until
  * the keystore contains a signer certificate matching the uploaded .cer. Does not use {@link com.trustsign.core.Pkcs11Token}.
  */
 public final class HsmPkcs11ConfigurationService {
+
+  private static final Logger LOG = LoggerFactory.getLogger(HsmPkcs11ConfigurationService.class);
 
   public static final int DEFAULT_SLOT_PROBE_COUNT = 32;
   public static final int MAX_SLOT_PROBE_COUNT = 256;
@@ -78,8 +85,11 @@ public final class HsmPkcs11ConfigurationService {
 
           TokenCertificateSelector.Selection sel = TokenCertificateSelector.selectBySignerCertificates(ks, signerCertificates);
           if (sel != null) {
+            LOG.info("HSM cert matched on lib={} slot={} alias={}", lib, slotIdx, sel.alias());
             return new MatchedSlotLoad(ks, p11, lib, slotIdx, sel);
           }
+          LOG.warn("HSM slot loaded but no cert match. lib={} slot={}", lib, slotIdx);
+          logSlotContents(ks, lib, slotIdx, signerCertificates);
           tried++;
         } catch (Exception e) {
           last = e;
@@ -93,6 +103,16 @@ public final class HsmPkcs11ConfigurationService {
           }
         }
       }
+    }
+
+    // Always log uploaded cert details at WARN so the mismatch is diagnosable
+    // without needing DEBUG level.
+    for (X509Certificate uploaded : signerCertificates) {
+      LOG.warn("HSM match failed. uploaded .cer thumbprint={} subject='{}' serial={} issuer='{}'",
+          TokenCertificateSelector.thumbprint(uploaded),
+          uploaded.getSubjectX500Principal().getName(),
+          uploaded.getSerialNumber().toString(16),
+          uploaded.getIssuerX500Principal().getName());
     }
 
     String hint = last != null ? last.getMessage() : "No slot contained a matching certificate.";
@@ -123,6 +143,41 @@ public final class HsmPkcs11ConfigurationService {
     tmp.toFile().deleteOnExit();
 
     return base.configure(tmp.toAbsolutePath().toString());
+  }
+
+  private static void logSlotContents(KeyStore ks, String lib, int slotIdx,
+      List<X509Certificate> uploadedCerts) {
+    try {
+      LOG.warn("--- HSM slot diagnostic: lib={} slot={} ---", lib, slotIdx);
+      int aliasCount = 0;
+      for (Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
+        String alias = e.nextElement();
+        aliasCount++;
+        Certificate cert = ks.getCertificate(alias);
+        if (cert instanceof X509Certificate x509) {
+          LOG.warn("  token alias='{}' thumbprint={} subject='{}' serial={} issuer='{}'",
+              alias,
+              TokenCertificateSelector.thumbprint(x509),
+              x509.getSubjectX500Principal().getName(),
+              x509.getSerialNumber().toString(16),
+              x509.getIssuerX500Principal().getName());
+        } else {
+          LOG.warn("  token alias='{}' certType={}", alias, cert != null ? cert.getType() : "null");
+        }
+      }
+      if (aliasCount == 0) {
+        LOG.warn("  (keystore is empty — no aliases found on this slot)");
+      }
+      for (X509Certificate uploaded : uploadedCerts) {
+        LOG.warn("  uploaded .cer thumbprint={} subject='{}' serial={} issuer='{}'",
+            TokenCertificateSelector.thumbprint(uploaded),
+            uploaded.getSubjectX500Principal().getName(),
+            uploaded.getSerialNumber().toString(16),
+            uploaded.getIssuerX500Principal().getName());
+      }
+    } catch (Exception e) {
+      LOG.warn("  failed to enumerate slot contents: {}", e.getMessage());
+    }
   }
 
   private HsmPkcs11ConfigurationService() {}
