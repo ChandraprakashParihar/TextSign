@@ -82,13 +82,16 @@ public record AgentConfig(
   ) {}
 
   /**
-   * HSM / PKCS#11 library discovery for the dedicated HSM PDF endpoints. No PIN here — use the {@code pin} multipart field on the API.
+   * HSM / PKCS#11 library discovery and optional PIN for the dedicated HSM PDF endpoints.
+   * PIN resolution: request {@code pin} field → env var {@code TRUSTSIGN_HSM_PIN} → this config field.
    */
   public record HsmConfig(
       @JsonProperty(required = false) String preferredLibrary,
       @JsonProperty(required = false) List<String> windowsCandidates,
       @JsonProperty(required = false) List<String> macCandidates,
       @JsonProperty(required = false) List<String> linuxCandidates,
+      /** Optional HSM token PIN. Can also be set via env var TRUSTSIGN_HSM_PIN or per-request pin field. */
+      @JsonProperty(required = false) String pin,
       /**
        * Optional. For each library, PKCS#11 {@code slotListIndex} values {@code 0 .. slotProbeCount-1} are tried until the uploaded .cer matches.
        * When omitted or non-positive, the server uses default probing (see {@code com.trustsign.hsm.HsmPkcs11ConfigurationService}).

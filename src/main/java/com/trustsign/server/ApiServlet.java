@@ -2723,14 +2723,20 @@ public final class ApiServlet {
             writeJson(resp, 400, Map.of("error", "Missing cer field (signer .cer as file or PEM text)"));
             return;
           }
-          if (pinStr == null || pinStr.isBlank()) {
-            writeJson(resp, 400, Map.of("error", "Missing pin field (HSM token PIN)"));
-            return;
-          }
 
           AgentConfig cfg = loadConfig(resp);
           if (cfg == null)
             return;
+
+          // PIN resolution: request param → env var → config.hsm.pin
+          if (pinStr == null || pinStr.isBlank()) {
+            pinStr = resolveHsmPin(cfg);
+          }
+          if (pinStr == null || pinStr.isBlank()) {
+            writeJson(resp, 400, Map.of("error",
+                "Missing HSM PIN. Provide via 'pin' request field, TRUSTSIGN_HSM_PIN env var, or config.hsm.pin"));
+            return;
+          }
 
           java.util.List<Integer> stampPages = resolvePdfStampPages(mp);
           boolean finalVersion = parseFinalVersionMultipart(mp);
@@ -2858,8 +2864,13 @@ public final class ApiServlet {
             writeJson(resp, 400, Map.of("error", "Missing cer field (signer .cer as file or PEM text)"));
             return;
           }
+          // PIN resolution: request param → env var → config.hsm.pin
           if (pinStr == null || pinStr.isBlank()) {
-            writeJson(resp, 400, Map.of("error", "Missing pin field (HSM token PIN)"));
+            pinStr = resolveHsmPin(cfg);
+          }
+          if (pinStr == null || pinStr.isBlank()) {
+            writeJson(resp, 400, Map.of("error",
+                "Missing HSM PIN. Provide via 'pin' request field, TRUSTSIGN_HSM_PIN env var, or config.hsm.pin"));
             return;
           }
 
@@ -4866,6 +4877,23 @@ public final class ApiServlet {
     }
 
     return trimmed.toCharArray();
+  }
+
+  /**
+   * Resolves HSM PIN from: env var TRUSTSIGN_HSM_PIN → .env file → config.hsm.pin.
+   * Returns null if none found (caller decides whether to error or not).
+   */
+  private String resolveHsmPin(AgentConfig cfg) {
+    String envPin = System.getenv("TRUSTSIGN_HSM_PIN");
+    if (envPin != null && !envPin.isBlank()) return envPin.trim();
+
+    String dotEnvPin = readDotEnvValue("TRUSTSIGN_HSM_PIN");
+    if (dotEnvPin != null && !dotEnvPin.isBlank()) return dotEnvPin.trim();
+
+    if (cfg.hsm() != null && cfg.hsm().pin() != null && !cfg.hsm().pin().isBlank()) {
+      return cfg.hsm().pin().trim();
+    }
+    return null;
   }
 
   private static String readDotEnvValue(String key) {
