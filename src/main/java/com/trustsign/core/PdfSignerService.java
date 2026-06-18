@@ -565,6 +565,62 @@ public final class PdfSignerService {
     return result;
   }
 
+  /**
+   * Signs a PDF using a pre-built IExternalSignature (e.g. direct PKCS#11 C_Sign).
+   * Used when Java's KeyStore cannot expose the private key but the PKCS#11 C API can sign.
+   */
+  public static PdfSigningResult signPdfWithExternalSignature(
+      byte[] pdfBytes,
+      IExternalSignature externalSignature,
+      Certificate[] chain,
+      X509Certificate signingCert,
+      Provider cryptoProvider,
+      String reason,
+      String location,
+      List<Integer> stampPageIndices,
+      PdfSigningOptions options) throws PdfSigningException, IOException {
+    requireNonEmptyPdf(pdfBytes);
+    PdfSigningOptions opts = options == null ? PdfSigningOptions.DEFAULT : options;
+
+    byte[] bytesToSign = opts.finalVersion() ? applyFinalVersionDocumentMetadata(pdfBytes) : pdfBytes;
+    bytesToSign = ensureAnnotsArrayOnTargetPages(bytesToSign, stampPageIndices);
+    PreSignState pre = analyzeInputPdf(bytesToSign, stampPageIndices, opts);
+
+    IExternalDigest digest = new BouncyCastleDigest();
+    TSAClientBouncyCastle tsa = buildTsaClient(opts.tsaConfig());
+
+    PdfSigningResult result;
+    try {
+      byte[] signed = runDetachedSign(bytesToSign,
+          new PdfSigningMaterial(
+              new DummyPrivateKey(signingCert.getPublicKey().getAlgorithm()),
+              chain, cryptoProvider, signingCert),
+          reason, location, pre, opts, digest, externalSignature, tsa);
+      boolean timestamped = tsa != null;
+      result = new PdfSigningResult(signed, timestamped, null);
+    } catch (Exception e) {
+      throw new PdfSigningException("Direct PKCS#11 signing failed: " + safeMessage(e), e);
+    }
+
+    if (opts.ltvConfig() != null && opts.ltvConfig().enabled()) {
+      try {
+        byte[] ltvSigned = appendLtvRevision(result.signedPdf(), opts.ltvConfig());
+        return new PdfSigningResult(ltvSigned, result.isTimestamped(), result.tsaWarning());
+      } catch (Exception e) {
+        throw new LtvException("LTV embedding failed: " + safeMessage(e), e);
+      }
+    }
+    return result;
+  }
+
+  private static final class DummyPrivateKey implements java.security.PrivateKey {
+    private final String algorithm;
+    DummyPrivateKey(String algorithm) { this.algorithm = algorithm; }
+    @Override public String getAlgorithm() { return algorithm; }
+    @Override public String getFormat() { return null; }
+    @Override public byte[] getEncoded() { return null; }
+  }
+
   private static PreSignState analyzeInputPdf(byte[] pdfBytes, List<Integer> stampPageIndices, PdfSigningOptions opts)
       throws IOException, PdfSigningException {
     try (PDDocument doc = PDDocument.load(pdfBytes)) {

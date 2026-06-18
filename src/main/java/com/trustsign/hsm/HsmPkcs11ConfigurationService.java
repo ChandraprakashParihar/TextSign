@@ -88,7 +88,8 @@ public final class HsmPkcs11ConfigurationService {
             LOG.info("HSM cert matched on lib={} slot={} alias={}", lib, slotIdx, sel.alias());
             return new MatchedSlotLoad(ks, p11, lib, slotIdx, sel);
           }
-          LOG.warn("HSM slot loaded but no cert match. lib={} slot={}", lib, slotIdx);
+
+          LOG.warn("HSM slot loaded but no cert match via KeyStore. lib={} slot={}", lib, slotIdx);
           logSlotContents(ks, lib, slotIdx, signerCertificates);
           tried++;
         } catch (Exception e) {
@@ -128,7 +129,7 @@ public final class HsmPkcs11ConfigurationService {
     return Math.min(requested, MAX_SLOT_PROBE_COUNT);
   }
 
-  private static Provider createProviderForSlot(Path libraryPath, int slotListIndex) throws IOException {
+  public static Provider createProviderForSlot(Path libraryPath, int slotListIndex) throws IOException {
     Provider base = Security.getProvider("SunPKCS11");
     if (base == null) {
       throw new IllegalStateException("SunPKCS11 provider not available on this JVM.");

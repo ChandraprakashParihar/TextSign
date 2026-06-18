@@ -135,6 +135,11 @@
 # Classes protected by a -keep rule (server package) are NOT repackaged.
 -repackageclasses 'ts'
 
+# Prevent mixed-case class names (ts.a vs ts.A). On case-insensitive file
+# systems (macOS APFS, Windows NTFS) extracting the obfuscated JAR would
+# let A.class overwrite a.class, causing ClassNotFoundException at runtime.
+-dontusemixedcaseclassnames
+
 # Write the name-mapping file so internal stack traces can be de-obfuscated
 # with ProGuard's ReTrace tool: retrace build/proguard-mapping.txt stacktrace.txt
 -printmapping build/proguard-mapping.txt

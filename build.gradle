@@ -413,7 +413,7 @@ if not exist "config\\config.json" (
 echo Starting TrustSign service...
 echo Press Ctrl+C to stop.
 echo.
-"%JAVA_EXE%" -jar "%JAR%" %*
+"%JAVA_EXE%" --add-opens jdk.crypto.cryptoki/sun.security.pkcs11=ALL-UNNAMED --add-opens jdk.crypto.cryptoki/sun.security.pkcs11.wrapper=ALL-UNNAMED -jar "%JAR%" %*
 pause
 """
     // Linux/macOS launcher (system Java).
@@ -437,7 +437,7 @@ if [ ! -f "config/config.json" ]; then
   exit 1
 fi
 
-exec java -jar "\$JAR" "\$@"
+exec java --add-opens jdk.crypto.cryptoki/sun.security.pkcs11=ALL-UNNAMED --add-opens jdk.crypto.cryptoki/sun.security.pkcs11.wrapper=ALL-UNNAMED -jar "\$JAR" "\$@"
 """
     shFile.setExecutable(true)
 
@@ -467,7 +467,7 @@ fi
 echo "Starting TrustSign service..."
 echo "Press Ctrl+C to stop."
 echo
-java -jar "\$JAR" "\$@"
+java --add-opens jdk.crypto.cryptoki/sun.security.pkcs11=ALL-UNNAMED --add-opens jdk.crypto.cryptoki/sun.security.pkcs11.wrapper=ALL-UNNAMED -jar "\$JAR" "\$@"
 read -r -p "Press Enter to close..."
 """
     commandFile.setExecutable(true)
