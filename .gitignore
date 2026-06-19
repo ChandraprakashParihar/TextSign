@@ -8,7 +8,7 @@ build/
 proguard-mapping.txt
 .gradle/
 bin/
-com/
+/com/
 *.class
 
 # Secrets and machine-specific runtime files – never commit
