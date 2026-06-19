@@ -26,7 +26,7 @@
   "output" : "file",
   "outputFormat" : "base64",
   "signerVersion" : "TrustSign_0.1.0",
-  "signatureImagePath" : "assets/greentickrbg.png",
+  "signatureImagePath" : "greentickrbg.png",
   "truststore" : {
     "path" : "truststore.jks",
     "password" : "${TRUSTSIGN_TRUSTSTORE_PASSWORD:-chandra_ts}",

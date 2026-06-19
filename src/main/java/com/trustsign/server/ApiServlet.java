@@ -88,8 +88,8 @@ public final class ApiServlet {
   private final int sessionIssueRateLimitPerMinute;
   private final ConcurrentHashMap<String, SessionIssueWindow> sessionIssueWindows = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<String, EndpointMetric> endpointMetrics = new ConcurrentHashMap<>();
-  private static final long CONFIG_STAT_TTL_MS = 1_000L;
-  private static final long PUBLIC_KEY_STAT_TTL_MS = 1_000L;
+  private static final long CONFIG_STAT_TTL_MS = 60_000L;
+  private static final long PUBLIC_KEY_STAT_TTL_MS = 60_000L;
   private volatile AgentConfig cachedConfig;
   private volatile String cachedConfigPath;
   private volatile long cachedConfigMtime = -1L;
@@ -3832,6 +3832,7 @@ public final class ApiServlet {
         truststorePath,
         truststorePassword,
         normalizedStoreType);
+    CertificateValidator.writeTruststoreHmac(truststorePath.toFile());
     resetCachesAfterCertificateMapping();
     LOG.info("/map-certificate: mapped {} cert(s), leaf={}, serial={}",
         certificates.size(),
@@ -3852,8 +3853,11 @@ public final class ApiServlet {
   private static Path resolveTruststorePath(Path configDir, String truststoreFile) {
     String name = truststoreFile == null || truststoreFile.isBlank() ? "truststore.jks" : truststoreFile.trim();
     Path candidate = Paths.get(name);
-    Path resolved = candidate.isAbsolute() ? candidate.normalize().toAbsolutePath() : configDir.resolve(candidate).normalize();
-    if (!candidate.isAbsolute() && !resolved.startsWith(configDir)) {
+    if (candidate.isAbsolute()) {
+      throw new IllegalArgumentException("truststoreFile must be a relative path within the config directory");
+    }
+    Path resolved = configDir.resolve(candidate).normalize();
+    if (!resolved.startsWith(configDir)) {
       throw new IllegalArgumentException("truststoreFile must not escape config directory");
     }
     return resolved;
@@ -4870,13 +4874,13 @@ public final class ApiServlet {
           "Token PIN not configured. Set it in config.json (pkcs11.pin) or set environment variable TRUSTSIGN_TOKEN_PIN.");
     }
 
-    String trimmed = cfgPin.trim();
-    if (trimmed.isEmpty()) {
+    String decrypted = com.trustsign.core.ConfigDecryptor.decryptIfEncrypted(cfgPin).trim();
+    if (decrypted.isEmpty()) {
       throw new SecurityException(
           "Token PIN is empty. Check config.json (pkcs11.pin) or set environment variable TRUSTSIGN_TOKEN_PIN.");
     }
 
-    return trimmed.toCharArray();
+    return decrypted.toCharArray();
   }
 
   /**
@@ -4891,7 +4895,7 @@ public final class ApiServlet {
     if (dotEnvPin != null && !dotEnvPin.isBlank()) return dotEnvPin.trim();
 
     if (cfg.hsm() != null && cfg.hsm().pin() != null && !cfg.hsm().pin().isBlank()) {
-      return cfg.hsm().pin().trim();
+      return com.trustsign.core.ConfigDecryptor.decryptIfEncrypted(cfg.hsm().pin()).trim();
     }
     return null;
   }

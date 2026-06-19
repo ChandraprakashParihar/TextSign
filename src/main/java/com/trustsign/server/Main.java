@@ -110,7 +110,8 @@ public final class Main {
     }
     System.setProperty("trustsign.truststore.path", configuredPath.getAbsolutePath());
     if (cfg.truststore().password() != null) {
-      System.setProperty("trustsign.truststore.password", cfg.truststore().password());
+      System.setProperty("trustsign.truststore.password",
+          com.trustsign.core.ConfigDecryptor.decryptIfEncrypted(cfg.truststore().password()));
     }
     if (cfg.truststore().type() != null && !cfg.truststore().type().isBlank()) {
       System.setProperty("trustsign.truststore.type", cfg.truststore().type());

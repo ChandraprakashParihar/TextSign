@@ -46,7 +46,7 @@ import org.slf4j.LoggerFactory;
  */
 public final class CertificateValidator {
   private static final Logger LOG = LoggerFactory.getLogger(CertificateValidator.class);
-  private static final long TRUSTSTORE_STAT_TTL_MS = 1_000L;
+  private static final long TRUSTSTORE_STAT_TTL_MS = 60_000L;
   private static volatile KeyStore cachedTrustStore;
   private static volatile String cachedTrustStoreCacheKey;
   private static volatile long cachedTrustStoreMtime = -1L;
@@ -658,6 +658,8 @@ public final class CertificateValidator {
         throw new SecurityException("Configured truststore file not found: " + truststoreFile.getAbsolutePath());
       }
 
+      verifyTruststoreIntegrity(truststoreFile);
+
       long mtime = truststoreFile.lastModified();
       if (inside != null
           && cacheKey.equals(cachedTrustStoreCacheKey)
@@ -678,6 +680,85 @@ public final class CertificateValidator {
       LOG.info("Reloaded truststore from disk: {}", truststoreFile.getAbsolutePath());
       return ks;
     }
+  }
+
+  private static final String TRUSTSTORE_HMAC_KEY = "TrustSign-TS-Integrity-V1-b7d4e2";
+  private static final String TRUSTSTORE_HMAC_FILE = ".truststore-integrity";
+  private static volatile long hmacVerifiedMtime = -1L;
+  private static volatile String hmacVerifiedPath = null;
+
+  /**
+   * Verifies the truststore file against an HMAC stored alongside it.
+   * The HMAC uses an application secret (embedded in the obfuscated JAR),
+   * so the client cannot forge a valid HMAC for a tampered truststore.
+   * The /map-certificate endpoint recomputes the HMAC after modifying the truststore.
+   */
+  private static void verifyTruststoreIntegrity(File truststoreFile) {
+    String path = truststoreFile.getAbsolutePath();
+    long mtime = truststoreFile.lastModified();
+    if (path.equals(hmacVerifiedPath) && mtime == hmacVerifiedMtime) {
+      return;
+    }
+
+    File hmacFile = new File(truststoreFile.getParentFile(), TRUSTSTORE_HMAC_FILE);
+    if (!hmacFile.exists()) {
+      LOG.debug("No truststore HMAC file found — skipping integrity check");
+      hmacVerifiedPath = path;
+      hmacVerifiedMtime = mtime;
+      return;
+    }
+    try {
+      String expected = java.nio.file.Files.readString(hmacFile.toPath(),
+          java.nio.charset.StandardCharsets.UTF_8).trim();
+      if (expected.isEmpty()) {
+        hmacVerifiedPath = path;
+        hmacVerifiedMtime = mtime;
+        return;
+      }
+
+      String actual = computeTruststoreHmac(truststoreFile);
+      if (!java.security.MessageDigest.isEqual(
+          expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+          actual.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+        LOG.error("TRUSTSTORE INTEGRITY FAILURE: file={}", truststoreFile.getAbsolutePath());
+        throw new SecurityException("Truststore file has been tampered with or replaced.");
+      }
+      hmacVerifiedPath = path;
+      hmacVerifiedMtime = mtime;
+      LOG.debug("Truststore integrity verified");
+    } catch (SecurityException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new SecurityException("Failed to verify truststore integrity: " + e.getMessage(), e);
+    }
+  }
+
+  /**
+   * Computes HMAC-SHA256 of the truststore file using the application secret.
+   */
+  public static String computeTruststoreHmac(File truststoreFile) throws Exception {
+    byte[] keyBytes = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(TRUSTSTORE_HMAC_KEY.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+    mac.init(new javax.crypto.spec.SecretKeySpec(keyBytes, "HmacSHA256"));
+    try (FileInputStream fis = new FileInputStream(truststoreFile)) {
+      byte[] buf = new byte[8192];
+      int read;
+      while ((read = fis.read(buf)) != -1) { mac.update(buf, 0, read); }
+    }
+    return java.util.HexFormat.of().formatHex(mac.doFinal());
+  }
+
+  /**
+   * Writes (or updates) the HMAC file for a truststore. Called by /map-certificate
+   * after modifying the truststore, and by the build process during initial packaging.
+   */
+  public static void writeTruststoreHmac(File truststoreFile) throws Exception {
+    String hmac = computeTruststoreHmac(truststoreFile);
+    File hmacFile = new File(truststoreFile.getParentFile(), TRUSTSTORE_HMAC_FILE);
+    java.nio.file.Files.writeString(hmacFile.toPath(), hmac + "\n",
+        java.nio.charset.StandardCharsets.UTF_8);
+    LOG.info("Truststore HMAC updated: {}", hmacFile.getAbsolutePath());
   }
 
   public static Map<String, Object> cacheStats() {

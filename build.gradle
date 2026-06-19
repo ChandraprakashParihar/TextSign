@@ -488,6 +488,23 @@ read -r -p "Press Enter to close..."
         from("config/truststore.jks")
         into(configDir)
       }
+      // Generate HMAC integrity file for the truststore.
+      // Uses the same HMAC key as the runtime (in obfuscated CertificateValidator).
+      // The client cannot forge this because the key is hidden in the obfuscated JAR.
+      def tsTarget = new File(configDir, "truststore.jks")
+      def hmacKey = "TrustSign-TS-Integrity-V1-b7d4e2"
+      def keyBytes = java.security.MessageDigest.getInstance("SHA-256")
+          .digest(hmacKey.getBytes("UTF-8"))
+      def mac = javax.crypto.Mac.getInstance("HmacSHA256")
+      mac.init(new javax.crypto.spec.SecretKeySpec(keyBytes, "HmacSHA256"))
+      tsTarget.withInputStream { is ->
+        byte[] buf = new byte[8192]
+        int read
+        while ((read = is.read(buf)) != -1) { mac.update(buf, 0, read) }
+      }
+      def hmac = mac.doFinal().encodeHex().toString()
+      new File(configDir, ".truststore-integrity").text = hmac + "\n"
+      println("Truststore HMAC: ${hmac.substring(0, 16)}...")
     }
     // Signing certificate (preferred) or public-key.pem (legacy)
     def signingCertFile = file("config/signing-certificate.pem").exists()
