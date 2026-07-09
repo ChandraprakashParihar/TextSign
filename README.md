@@ -20,6 +20,22 @@ Run:
 TRUSTSIGN_TOKEN_PIN=your-pin java -jar trustsign-0.1.0-all.jar --config=config/config.production.json
 ```
 
+## Running as a Background Service (Windows/macOS/Linux)
+
+Every client package (`clientFolder*` tasks below) includes a `service/` folder
+with an installer for a native background service — Windows Service (via bundled
+WinSW), systemd unit (Linux), or LaunchDaemon (macOS). It starts automatically at
+boot, runs headless, and restarts itself on crash. See `CLIENT-RUN.md` → "Run as a
+background service" for per-platform install steps.
+
+Building the Windows service wrapper requires pinning a WinSW checksum, same
+pattern as the bundled JRE:
+
+```bash
+./gradlew clientFolderWindows -PwinswSha256=<sha256>
+# or export TRUSTSIGN_WINSW_SHA256=<sha256>
+```
+
 ## Packaging for Clients
 
 - Cross-platform client package (Windows/macOS/Linux, requires installed Java):

@@ -1,0 +1,35 @@
+<service>
+  <id>TrustSignService</id>
+  <name>TrustSign Signing Service</name>
+  <description>TrustSign PDF/text signing service (PKCS#11/HSM). Runs in the background, starts automatically at boot (before login) and restarts on crash.</description>
+  <executable>%BASE%\..\..\jre\bin\java.exe</executable>
+  <startarguments>--add-opens jdk.crypto.cryptoki/sun.security.pkcs11=ALL-UNNAMED --add-opens jdk.crypto.cryptoki/sun.security.pkcs11.wrapper=ALL-UNNAMED -jar "%BASE%\..\..\__JAR_NAME__" --config="%BASE%\..\..\config\config.json"</startarguments>
+  <workingdirectory>%BASE%\..\..</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <logpath>%BASE%\..\..\logs</logpath>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart/>
+  <stoptimeout>30 sec</stoptimeout>
+  <stopparentprocessfirst>true</stopparentprocessfirst>
+  <!--
+    By default the service runs as LocalSystem, which works for most PKCS#11
+    drivers. If your USB token/HSM driver requires running under a specific
+    Windows user profile, uncomment and fill this in before running
+    install-service.bat:
+
+  <serviceaccount>
+    <domain>.</domain>
+    <user>YourWindowsUser</user>
+    <password>YourWindowsPassword</password>
+    <allowservicelogon>true</allowservicelogon>
+  </serviceaccount>
+  -->
+  <!-- Set the token PIN here if you don't want it in config.json's pkcs11.pin -->
+  <env name="TRUSTSIGN_TOKEN_PIN" value=""/>
+</service>

@@ -1,0 +1,19 @@
+[Unit]
+Description=TrustSign signing service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__JAVA_BIN__ --add-opens jdk.crypto.cryptoki/sun.security.pkcs11=ALL-UNNAMED --add-opens jdk.crypto.cryptoki/sun.security.pkcs11.wrapper=ALL-UNNAMED -jar __INSTALL_DIR__/__JAR_NAME__ --config=__INSTALL_DIR__/config/config.json
+User=__SERVICE_USER__
+Restart=on-failure
+RestartSec=10
+# Set the token PIN here if you don't want it in config/config.json's pkcs11.pin
+Environment=TRUSTSIGN_TOKEN_PIN=
+StandardOutput=append:__INSTALL_DIR__/logs/service-stdout.log
+StandardError=append:__INSTALL_DIR__/logs/service-stderr.log
+
+[Install]
+WantedBy=multi-user.target

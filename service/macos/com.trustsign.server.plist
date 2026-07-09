@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.trustsign.server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__JAVA_BIN__</string>
+    <string>--add-opens</string>
+    <string>jdk.crypto.cryptoki/sun.security.pkcs11=ALL-UNNAMED</string>
+    <string>--add-opens</string>
+    <string>jdk.crypto.cryptoki/sun.security.pkcs11.wrapper=ALL-UNNAMED</string>
+    <string>-jar</string>
+    <string>__INSTALL_DIR__/__JAR_NAME__</string>
+    <string>--config=__INSTALL_DIR__/config/config.json</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__INSTALL_DIR__</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Restart on crash, but not after a clean (exit code 0) stop. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>__INSTALL_DIR__/logs/service-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>__INSTALL_DIR__/logs/service-stderr.log</string>
+
+  <!-- Set the token PIN here if you don't want it in config/config.json's pkcs11.pin -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TRUSTSIGN_TOKEN_PIN</key>
+    <string></string>
+  </dict>
+</dict>
+</plist>

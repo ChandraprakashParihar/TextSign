@@ -204,8 +204,8 @@ tasks.register("verifyWindowsJreChecksum") {
 
 tasks.register("verifyInstallerInputs") {
   group = "distribution"
-  description = "CI guard: validates installer prerequisites (including JRE checksum pin)"
-  dependsOn("verifyWindowsJreChecksum")
+  description = "CI guard: validates installer prerequisites (including JRE and WinSW checksum pins)"
+  dependsOn("verifyWindowsJreChecksum", "verifyWinswChecksum")
 }
 
 tasks.register("extractWindowsJre") {
@@ -332,6 +332,53 @@ tasks.register("extractLinuxJre") {
   }
 }
 
+// WinSW (MIT-licensed) wraps the JAR as a real Windows Service: auto-start at
+// boot before login, headless (no console window), auto-restart on crash.
+def winswVersion = "2.12.0"
+def winswExeUrl = "https://github.com/winsw/winsw/releases/download/v${winswVersion}/WinSW-x64.exe"
+def winswExe = file("$buildDir/winsw/WinSW-x64.exe")
+def winswSha256 = (findProperty("winswSha256") ?: System.getenv("TRUSTSIGN_WINSW_SHA256"))?.toString()
+
+tasks.register("downloadWinsw", de.undercouch.gradle.tasks.download.Download) {
+  group = "distribution"
+  description = "Downloads the WinSW self-contained x64 binary used to install TrustSign as a Windows Service"
+  onlyIf { !winswExe.exists() }
+  src(winswExeUrl)
+  dest(winswExe)
+  overwrite(false)
+}
+
+tasks.register("verifyWinswChecksum") {
+  group = "distribution"
+  description = "Verifies SHA-256 of the downloaded WinSW binary"
+  dependsOn("downloadWinsw")
+  doLast {
+    if (!winswExe.exists()) {
+      throw new GradleException("WinSW binary missing: ${winswExe}")
+    }
+    if (winswSha256 == null || winswSha256.isBlank()) {
+      throw new GradleException(
+        "Missing expected SHA-256 for WinSW. Set -PwinswSha256=<sha256> " +
+        "or TRUSTSIGN_WINSW_SHA256 environment variable. " +
+        "(Get it from the WinSW v${winswVersion} release page checksums, or run " +
+        "./gradlew printSha256 -Pfile=${winswExe} after a first trusted download.)"
+      )
+    }
+    def md = java.security.MessageDigest.getInstance("SHA-256")
+    winswExe.withInputStream { is ->
+      byte[] buf = new byte[8192]
+      int read
+      while ((read = is.read(buf)) != -1) {
+        md.update(buf, 0, read)
+      }
+    }
+    def actual = md.digest().encodeHex().toString()
+    if (!actual.equalsIgnoreCase(winswSha256.trim())) {
+      throw new GradleException("WinSW SHA-256 mismatch. expected=${winswSha256} actual=${actual}")
+    }
+  }
+}
+
 tasks.register("installDistWithJre") {
   group = "distribution"
   description = "Same as installDist but embeds Windows JRE and patches launcher to use it (for installer)"
@@ -372,6 +419,8 @@ tasks.register("clientFolder") {
     file("CLIENT-RUN.md"),
     file("installer/config.json")
   )
+  inputs.dir(file("service/linux"))
+  inputs.dir(file("service/macos"))
   doLast {
     // Always start clean so test artefacts (e.g. .licence.dat created by running
     // the JAR from build/client/ during development) never end up in the package.
@@ -541,6 +590,23 @@ read -r -p "Press Enter to close..."
         "  \"pkcs11\": { \"pin\": \"your-token-pin\", ... }\n\n" +
         "Option 2 - Environment variable:\n" +
         "  Set TRUSTSIGN_TOKEN_PIN=your-token-pin before running (e.g. in a batch file).\n"
+
+    // Linux/macOS run-as-a-service files. These use install-time placeholder
+    // substitution (see install-service.sh) rather than build-time values, so
+    // they work regardless of where the client folder is eventually extracted.
+    def serviceDir = new File(clientDir, "service")
+    copy {
+      from("service/linux")
+      into(new File(serviceDir, "linux"))
+    }
+    copy {
+      from("service/macos")
+      into(new File(serviceDir, "macos"))
+    }
+    new File(serviceDir, "linux/install-service.sh").setExecutable(true)
+    new File(serviceDir, "linux/uninstall-service.sh").setExecutable(true)
+    new File(serviceDir, "macos/install-service.sh").setExecutable(true)
+    new File(serviceDir, "macos/uninstall-service.sh").setExecutable(true)
   }
 }
 
@@ -565,6 +631,26 @@ tasks.register("clientFolderWindows") {
     copy {
       from(jreDir)
       into(targetJre)
+    }
+
+    // Windows Service files (WinSW): install-service.bat wraps the bundled JRE
+    // + jar as a real background Windows Service that starts at boot.
+    def winswServiceDir = new File(clientDir, "service/windows")
+    winswServiceDir.mkdirs()
+    def jarName = "trustsign-${project.version}-all.jar"
+    copy {
+      from("service/windows/trustsign-service.xml")
+      into(winswServiceDir)
+      filter { it.replace("__JAR_NAME__", jarName) }
+    }
+    copy {
+      from(winswExe)
+      into(winswServiceDir)
+      rename { "trustsign-service.exe" }
+    }
+    copy {
+      from("service/windows/install-service.bat", "service/windows/uninstall-service.bat")
+      into(winswServiceDir)
     }
   }
 }

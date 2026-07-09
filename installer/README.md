@@ -4,8 +4,8 @@ This folder contains the Inno Setup script to build a Windows installer for Trus
 
 - **Bundled JRE**: Eclipse Temurin 17 JRE for Windows x64 — the client does **not** need to install Java.
 - **Same as zip client**: `./gradlew buildInstaller` first runs `clientFolderWindows`, then packages `build/client` into the .exe. So the installed app matches what you get from zipping `build/client`.
-- **Run at startup**: Optional task "Run TrustSign when Windows starts" creates a shortcut in the Startup folder.
-- **Shortcuts**: Start menu and optional desktop shortcut to run TrustSign.
+- **Background service**: Optional task "Install and start TrustSign as a Windows Service" registers TrustSign (via the bundled WinSW wrapper) as a real Windows Service — starts at boot before login, runs headless, restarts on crash. This replaces the old Startup-folder shortcut. The service is stopped and unregistered automatically on uninstall.
+- **Shortcuts**: Start menu and optional desktop shortcut to run TrustSign in the foreground (only offered when the service task isn't selected, to avoid both binding the same port).
 
 ## What's in this folder
 
@@ -16,6 +16,7 @@ This folder contains the Inno Setup script to build a Windows installer for Trus
 
 1. **Java 17+** and **Gradle** (to build the app).
 2. **Inno Setup 6** ([download](https://jrsoftware.org/isinfo.php)). Install to the default path so Gradle finds `ISCC.exe`, or add it to PATH.
+3. **WinSW checksum**: the Windows Service wrapper is downloaded and checksum-verified during the build. Pass `-PwinswSha256=<sha256>` or set `TRUSTSIGN_WINSW_SHA256` (same pattern as the JRE checksum below).
 
 ## Build the installer
 

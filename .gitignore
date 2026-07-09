@@ -5,14 +5,14 @@
 
 # Build outputs and IDE compile artifacts
 build/
-proguard-mapping.txt
+# proguard-mapping.txt
 .gradle/
 bin/
 # /com/
 *.class
 
 # Secrets and machine-specific runtime files – never commit
-.env
+# .env
 config/.licence.dat
 .gradle/trustsign-build-time.txt
 
