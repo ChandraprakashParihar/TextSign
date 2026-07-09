@@ -3833,6 +3833,14 @@ public final class ApiServlet {
         truststorePassword,
         normalizedStoreType);
     CertificateValidator.writeTruststoreHmac(truststorePath.toFile());
+    // CertificateValidator reads trustsign.truststore.* system properties, which are
+    // otherwise only set once at JVM startup (Main.applyTruststoreConfig). Without
+    // re-applying them here, a changed truststore path/password/type would silently
+    // keep validating against the pre-mapping values until the process is restarted.
+    System.setProperty("trustsign.truststore.path", truststorePath.toAbsolutePath().toString());
+    System.setProperty("trustsign.truststore.password",
+        com.trustsign.core.ConfigDecryptor.decryptIfEncrypted(truststorePassword));
+    System.setProperty("trustsign.truststore.type", normalizedStoreType);
     resetCachesAfterCertificateMapping();
     LOG.info("/map-certificate: mapped {} cert(s), leaf={}, serial={}",
         certificates.size(),
@@ -4233,6 +4241,7 @@ public final class ApiServlet {
       cachedSigningCertMtime = -1L;
       cachedSigningCertCheckedAtMs = 0L;
     }
+    CertificateValidator.invalidateTrustStoreCache();
   }
 
   /**

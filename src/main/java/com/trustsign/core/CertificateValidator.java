@@ -771,6 +771,21 @@ public final class CertificateValidator {
     return out;
   }
 
+  /**
+   * Forces the in-memory truststore to reload on next use instead of waiting out
+   * TRUSTSTORE_STAT_TTL_MS. The TTL early-return in loadTrustStoreIfConfigured()
+   * skips the mtime check entirely while still within the window, so a truststore
+   * rewritten by /map-certificate would otherwise keep validating against the
+   * pre-mapping KeyStore for up to a minute. Call this right after the truststore
+   * file is modified on disk.
+   */
+  public static void invalidateTrustStoreCache() {
+    cachedTrustStore = null;
+    cachedTrustStoreCacheKey = null;
+    cachedTrustStoreMtime = -1L;
+    cachedTrustStoreCheckedAtMs = 0L;
+  }
+
   private CertificateValidator() {}
 }
 

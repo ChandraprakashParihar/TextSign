@@ -29,7 +29,7 @@
   "signatureImagePath" : "greentickrbg.png",
   "truststore" : {
     "path" : "truststore.jks",
-    "password" : "${TRUSTSIGN_TRUSTSTORE_PASSWORD:-chandra_ts}",
+    "password" : "test2",
     "type" : "PKCS12",
     "enablePathValidation" : true
   },
