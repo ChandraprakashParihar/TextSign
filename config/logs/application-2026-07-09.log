@@ -1,0 +1,21 @@
+2026-07-09 11:29:21.955 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-07-09 11:29:21.956 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-09 11:29:22.275 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 26185 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-07-09 11:29:22.275 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-07-09 11:29:22.622 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-07-09 11:29:22.649 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 355 ms
+2026-07-09 11:29:22.858 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-07-09 11:29:22.862 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.695 seconds (process running for 1.179)
+2026-07-09 11:29:22.863 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-07-09 11:31:00.748 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-07-09 11:31:00.751 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Completed initialization in 2 ms
+2026-07-09 11:31:00.792 [http-nio-8080-exec-1] INFO  [txnId=a0aa5dffe77c4be2a99e0fa1fb2a5acf] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Reloaded config from disk: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-09 11:31:00.808 [http-nio-8080-exec-1] INFO  [txnId=a0aa5dffe77c4be2a99e0fa1fb2a5acf] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Auto-signing PDF at existing signature field request received
+2026-07-09 11:43:24.000 [http-nio-8080-exec-2] INFO  [txnId=581afeef66374b4f91a3e6a5bee4a8d0] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Auto-signing PDF at existing signature field request received
+2026-07-09 11:43:24.145 [http-nio-8080-exec-2] INFO  [txnId=581afeef66374b4f91a3e6a5bee4a8d0] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Reloaded configured public keys from disk: /Users/jainnibha/chandra-workspace/trustsign/config/public-key.pem
+2026-07-09 11:43:27.306 [http-nio-8080-exec-2] INFO  [txnId=581afeef66374b4f91a3e6a5bee4a8d0] [ip=127.0.0.1] c.t.core.CertificateValidator - Reloaded truststore from disk: /Users/jainnibha/chandra-workspace/trustsign/config/truststore.jks
+2026-07-09 11:43:27.309 [http-nio-8080-exec-2] INFO  [txnId=581afeef66374b4f91a3e6a5bee4a8d0] [ip=127.0.0.1] c.t.core.CertificateValidator - Strict certificate chain validation successful: subject='CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN', chainLength=4, root='CN=CCA India 2022,O=India PKI,C=IN'
+2026-07-09 11:43:27.377 [http-nio-8080-exec-2] WARN  [txnId=581afeef66374b4f91a3e6a5bee4a8d0] [ip=127.0.0.1] com.trustsign.core.PdfSignerService - Signature image path does not exist or is not a file: /Users/jainnibha/chandra-workspace/trustsign/greentickrbg.png
+2026-07-09 11:43:28.827 [http-nio-8080-exec-2] WARN  [txnId=581afeef66374b4f91a3e6a5bee4a8d0] [ip=127.0.0.1] com.trustsign.core.LtvEnabler - Document chain OCSP fetch failed: OCSP fetch failed for all endpoints: [http://ocvs.gov.in]
+2026-07-09 11:46:02.227 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-07-09 11:46:02.234 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete

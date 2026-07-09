@@ -48,7 +48,7 @@ application {
 // Dev convenience: point the activation check at a local licence server.
 // Override by setting TRUSTSIGN_LICENCE_SERVER env var, or edit this URL.
 tasks.named("run") {
-  def licenceServer = System.getenv("TRUSTSIGN_LICENCE_SERVER") ?: "http://localhost:3030/api/v1/activate"
+  def licenceServer = System.getenv("TRUSTSIGN_LICENCE_SERVER") ?: "http://localhost:3030/api/pki/activate"
   jvmArgs "-Dtrustsign.licence.server=${licenceServer}"
   // Forward the terminal's stdin so activation key prompts are interactive.
   standardInput = System.in

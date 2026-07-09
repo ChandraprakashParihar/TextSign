@@ -4114,6 +4114,11 @@ public final class ApiServlet {
     if (Files.exists(truststorePath)) {
       try (java.io.InputStream in = Files.newInputStream(truststorePath)) {
         ks.load(in, storePassword);
+      } catch (IOException | java.security.NoSuchAlgorithmException
+          | java.security.cert.CertificateException e) {
+        // Wrong password or corrupted — existing file is already backed up; start fresh
+        LOG.warn("Cannot open existing truststore ({}); creating fresh truststore.", e.getMessage());
+        ks.load(null, storePassword);
       }
     } else {
       ks.load(null, storePassword);
