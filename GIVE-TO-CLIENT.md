@@ -80,7 +80,22 @@ The client unzips, places `activation-key.txt` in the `config/` folder, sets the
 
 ---
 
-## 4. Optional: truststore / chain validation
+## 4. Optional (recommended): install as a background service
+
+So the client doesn't have to keep a console window open / manually restart it after
+reboot, install it as a native background service — see `CLIENT-RUN.md` → "Run as a
+background service" for the Windows/macOS/Linux steps. The Windows installer also
+offers this as a checkbox.
+
+**Order matters:** place `activation-key.txt` in `config/` and confirm the app
+activates successfully (run it once in the foreground first) **before** installing
+the service. A service has no console to prompt for the activation key — if
+`.licence.dat` doesn't exist yet when the service starts, it will crash-loop trying
+to read a key from stdin that isn't there.
+
+---
+
+## 5. Optional: truststore / chain validation
 
 If you want the client to use **certificate chain validation** (your XT CA certs):
 

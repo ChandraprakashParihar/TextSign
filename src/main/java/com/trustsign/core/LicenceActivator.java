@@ -69,7 +69,7 @@ public final class LicenceActivator {
      * {@code trustsign.licence.server} (e.g. for staging/testing).
      */
     public static final String DEFAULT_SERVER_URL =
-        "https://7935-122-179-91-122.ngrok-free.app/api/pki/activate";
+        "https://demo.xtranetindia.com/PKILic/rnd/LicenseActivation_comp";
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String PBKDF2_ALG = "PBKDF2WithHmacSHA256";

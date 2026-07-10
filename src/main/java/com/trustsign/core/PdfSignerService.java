@@ -1552,8 +1552,19 @@ public final class PdfSignerService {
     PDRectangle visible = page.getCropBox();
     float vx = visible.getLowerLeftX();
     float vy = visible.getLowerLeftY();
-    float vW = visible.getWidth();
-    float vH = visible.getHeight();
+    float cropWidth = visible.getWidth();
+    float cropHeight = visible.getHeight();
+    // A widget's /Rect is defined in the page's raw (unrotated) coordinate
+    // space, but callers (and every PDF viewer) think in terms of the page as
+    // actually displayed. When /Rotate is 90 or 270 the visual page is
+    // rotated a quarter turn from the raw CropBox, so width/height swap and
+    // the final rect must be transformed back into raw space (see below)
+    // before it's written out — otherwise x/y land in the wrong spot on any
+    // rotated page (e.g. scans, or pages authored in landscape + rotated).
+    int rotation = ((page.getRotation() % 360) + 360) % 360;
+    boolean swapped = rotation == 90 || rotation == 270;
+    float vW = swapped ? cropHeight : cropWidth;
+    float vH = swapped ? cropWidth : cropHeight;
     SignaturePlacement effectivePlacement = placement == null ? SignaturePlacement.DEFAULT : placement;
     float boxWidth = effectivePlacement.width() != null
         ? effectivePlacement.width()
@@ -1580,14 +1591,14 @@ public final class PdfSignerService {
       requestedY = DEFAULT_EDGE_MARGIN;
     }
 
+    // Everything up to here is in visual (0,0)-origin space — i.e. the page
+    // as it is actually displayed, matching what the caller specified.
     Rectangle local = calculateSignatureRectangle(requestedX, requestedY, boxWidth, boxHeight, vW, vH);
-    float x = vx + local.getX();
-    float y = vy + local.getY();
+    float x = local.getX();
+    float y = local.getY();
     float w = local.getWidth();
     float h = local.getHeight();
-    float maxX = vx + vW;
-    float maxY = vy + vH;
-    boolean outside = x < vx || y < vy || (x + w) > maxX || (y + h) > maxY;
+    boolean outside = x < 0f || y < 0f || (x + w) > vW || (y + h) > vH;
     if (outside) {
       CoordinateOverflowMode mode = effectivePlacement.overflowMode() == null
           ? CoordinateOverflowMode.ADJUST
@@ -1599,8 +1610,8 @@ public final class PdfSignerService {
       if (w > vW || h > vH) {
         throw new InvalidPdfException("Signature width/height exceed page bounds for page " + (pageIndex + 1));
       }
-      x = Math.max(vx, Math.min(x, maxX - w));
-      y = Math.max(vy, Math.min(y, maxY - h));
+      x = Math.max(0f, Math.min(x, vW - w));
+      y = Math.max(0f, Math.min(y, vH - h));
     }
     // LOG.info("Signature placement page={} mode={} rect=[x={}, y={}, w={}, h={}] page=[w={}, h={}]",
     //     pageIndex + 1,
@@ -1609,11 +1620,43 @@ public final class PdfSignerService {
     //         : "default-bottom-right",
     //     round2(x), round2(y), round2(w), round2(h), round2(vW), round2(vH));
 
+    // Map the visual-space rectangle (x,y)-(x+w,y+h) back into the page's raw
+    // (unrotated) coordinate space, since that's what /Rect must be expressed
+    // in. Derived as the inverse of the raw-to-visual rotation each /Rotate
+    // value implies; verified against pages with real /Rotate 90/180/270.
+    float rLlx, rLly, rUrx, rUry;
+    switch (rotation) {
+      case 90 -> {
+        rLlx = vH - (y + h);
+        rLly = x;
+        rUrx = vH - y;
+        rUry = x + w;
+      }
+      case 180 -> {
+        rLlx = vW - (x + w);
+        rLly = vH - (y + h);
+        rUrx = vW - x;
+        rUry = vH - y;
+      }
+      case 270 -> {
+        rLlx = y;
+        rLly = vW - (x + w);
+        rUrx = y + h;
+        rUry = vW - x;
+      }
+      default -> {
+        rLlx = x;
+        rLly = y;
+        rUrx = x + w;
+        rUry = y + h;
+      }
+    }
+
     PDRectangle rect = new PDRectangle();
-    rect.setLowerLeftX(x);
-    rect.setLowerLeftY(y);
-    rect.setUpperRightX(x + w);
-    rect.setUpperRightY(y + h);
+    rect.setLowerLeftX(vx + rLlx);
+    rect.setLowerLeftY(vy + rLly);
+    rect.setUpperRightX(vx + rUrx);
+    rect.setUpperRightY(vy + rUry);
     return rect;
   }
 

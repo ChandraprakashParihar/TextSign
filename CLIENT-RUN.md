@@ -79,6 +79,11 @@ build/client/service/
   macos/    install-service.sh, uninstall-service.sh, com.trustsign.server.plist
 ```
 
+
+sudo launchctl disable system/com.trustsign.server
+sudo launchctl enable system/com.trustsign.server
+sudo ./service/macos/install-service.sh
+
 **Important:** set up `config/config.json` (PIN, port, etc.) and, if applicable,
 `activation-key.txt` **before** installing the service — a service has no console
 to prompt you interactively.
