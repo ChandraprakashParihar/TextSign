@@ -62,6 +62,16 @@ public class SpringServerConfig {
   }
 
   @Bean
+  public FilterRegistrationBean<PrivateNetworkAccessFilter> privateNetworkAccessFilterRegistration(
+      AgentConfig cfg) {
+    FilterRegistrationBean<PrivateNetworkAccessFilter> bean =
+        new FilterRegistrationBean<>(new PrivateNetworkAccessFilter(cfg.allowedOrigins()));
+    bean.addUrlPatterns("/pki/*");
+    bean.setOrder(Ordered.HIGHEST_PRECEDENCE);
+    return bean;
+  }
+
+  @Bean
   public FilterRegistrationBean<RequestTracingFilter> requestTracingFilterRegistration() {
     FilterRegistrationBean<RequestTracingFilter> bean =
         new FilterRegistrationBean<>(new RequestTracingFilter());

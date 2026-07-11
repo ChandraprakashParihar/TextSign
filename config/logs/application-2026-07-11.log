@@ -1,0 +1,102 @@
+2026-07-11 11:08:50.709 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-07-11 11:08:50.710 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 11:08:51.040 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 16204 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-07-11 11:08:51.040 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-07-11 11:08:51.415 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-07-11 11:08:51.447 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 385 ms
+2026-07-11 11:08:51.658 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-07-11 11:08:51.662 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.741 seconds (process running for 1.261)
+2026-07-11 11:08:51.664 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-07-11 11:09:00.734 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-07-11 11:09:00.735 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Completed initialization in 0 ms
+2026-07-11 11:09:00.755 [http-nio-8080-exec-1] INFO  [txnId=37dfaef47868435d973b9bc7d7bcfc8e] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Reloaded config from disk: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 11:09:00.756 [http-nio-8080-exec-1] ERROR [txnId=37dfaef47868435d973b9bc7d7bcfc8e] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Rejecting request from disallowed IP: 0:0:0:0:0:0:0:1
+2026-07-11 11:09:05.772 [http-nio-8080-exec-2] ERROR [txnId=721ce526ce634ff38fe6786abae326ec] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Rejecting request from disallowed IP: 0:0:0:0:0:0:0:1
+2026-07-11 11:09:13.842 [http-nio-8080-exec-3] ERROR [txnId=03ea01b2b3984b9c8ba6272cb3639949] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Rejecting request from disallowed IP: 0:0:0:0:0:0:0:1
+2026-07-11 11:09:15.777 [http-nio-8080-exec-4] ERROR [txnId=d2dd42f6790b4376906ca051056bd14d] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Rejecting request from disallowed IP: 0:0:0:0:0:0:0:1
+2026-07-11 11:09:30.662 [http-nio-8080-exec-5] ERROR [txnId=b025ef3cc38c4f14893be6e6fdaf1950] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Rejecting request from disallowed IP: 0:0:0:0:0:0:0:1
+2026-07-11 11:09:51.410 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-07-11 11:09:51.415 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete
+2026-07-11 11:09:54.835 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-07-11 11:09:54.835 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 11:09:55.153 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 16802 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-07-11 11:09:55.153 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-07-11 11:09:55.520 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-07-11 11:09:55.550 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 376 ms
+2026-07-11 11:09:55.759 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-07-11 11:09:55.763 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.723 seconds (process running for 1.207)
+2026-07-11 11:09:55.764 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-07-11 11:10:00.942 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-07-11 11:10:00.943 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-07-11 11:10:00.964 [http-nio-8080-exec-1] INFO  [txnId=e2f2cdd379fa4106b4d2003e66f8ef6a] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Reloaded config from disk: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 11:10:00.964 [http-nio-8080-exec-1] ERROR [txnId=e2f2cdd379fa4106b4d2003e66f8ef6a] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Rejecting request from disallowed IP: 0:0:0:0:0:0:0:1
+2026-07-11 11:10:01.134 [http-nio-8080-exec-2] ERROR [txnId=bbc716b3cf3442909eb87df90521ea5b] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Rejecting request from disallowed IP: 0:0:0:0:0:0:0:1
+2026-07-11 11:10:02.890 [http-nio-8080-exec-3] ERROR [txnId=8cce7808a3f54123850a66ced08fc086] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Rejecting request from disallowed IP: 0:0:0:0:0:0:0:1
+2026-07-11 11:10:04.195 [http-nio-8080-exec-4] ERROR [txnId=a18bf0624aa5409fa73fdbf813efc5fc] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Rejecting request from disallowed IP: 0:0:0:0:0:0:0:1
+2026-07-11 11:10:42.531 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-07-11 11:10:42.536 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete
+2026-07-11 11:10:50.923 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-07-11 11:10:50.924 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 11:10:51.228 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 17308 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-07-11 11:10:51.228 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-07-11 11:10:51.584 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-07-11 11:10:51.613 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 364 ms
+2026-07-11 11:10:51.820 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-07-11 11:10:51.825 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.707 seconds (process running for 1.169)
+2026-07-11 11:10:51.826 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-07-11 11:10:57.891 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-07-11 11:10:57.892 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-07-11 11:10:57.913 [http-nio-8080-exec-1] INFO  [txnId=a5a0d2acdc594dd9bce73de916a1b931] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Reloaded config from disk: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 11:52:21.770 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-07-11 11:52:21.776 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete
+2026-07-11 11:52:37.039 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-07-11 11:52:37.041 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 11:52:37.377 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 31589 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-07-11 11:52:37.377 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-07-11 11:52:37.755 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-07-11 11:52:37.784 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 385 ms
+2026-07-11 11:52:37.999 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-07-11 11:52:38.003 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.742 seconds (process running for 1.271)
+2026-07-11 11:52:38.004 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-07-11 11:52:50.438 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-07-11 11:52:50.439 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-07-11 11:52:50.461 [http-nio-8080-exec-1] INFO  [txnId=dd9ae21839d242fbad888331fe80fbff] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Reloaded config from disk: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 11:53:34.909 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-07-11 11:53:34.913 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete
+2026-07-11 11:55:03.275 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-07-11 11:55:03.276 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 11:55:03.582 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 32642 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-07-11 11:55:03.583 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-07-11 11:55:03.982 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-07-11 11:55:04.011 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 408 ms
+2026-07-11 11:55:04.221 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-07-11 11:55:04.225 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.754 seconds (process running for 1.229)
+2026-07-11 11:55:04.226 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-07-11 11:55:17.034 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-07-11 11:55:17.035 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-07-11 11:55:17.064 [http-nio-8080-exec-1] INFO  [txnId=6b13be6a869d42bfbf01579db6b0a059] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Reloaded config from disk: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 12:22:11.582 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-07-11 12:22:11.591 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete
+2026-07-11 12:32:50.557 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-07-11 12:32:50.559 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 12:32:50.843 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 45906 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-07-11 12:32:50.844 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-07-11 12:32:51.262 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-07-11 12:32:51.300 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 431 ms
+2026-07-11 12:32:51.534 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-07-11 12:32:51.538 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.821 seconds (process running for 1.349)
+2026-07-11 12:32:51.539 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-07-11 12:33:07.389 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-07-11 12:33:07.391 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-07-11 12:33:07.416 [http-nio-8080-exec-1] INFO  [txnId=0baff40a9259473884b8dd72c55198b5] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Reloaded config from disk: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-11 12:33:11.357 [http-nio-8080-exec-2] INFO  [txnId=0baff40a9259473884b8dd72c55198b5] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Auto-signing PDF request received
+2026-07-11 12:33:14.668 [http-nio-8080-exec-2] INFO  [txnId=0baff40a9259473884b8dd72c55198b5] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Loaded signing certificate: thumbprint=484888c16e2262f5193a381c66970a6c98808453 subject='CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN'
+2026-07-11 12:33:15.519 [http-nio-8080-exec-2] INFO  [txnId=0baff40a9259473884b8dd72c55198b5] [ip=0:0:0:0:0:0:0:1] c.t.core.CertificateValidator - Reloaded truststore from disk: /Users/jainnibha/chandra-workspace/trustsign/config/truststore.jks
+2026-07-11 12:33:15.523 [http-nio-8080-exec-2] INFO  [txnId=0baff40a9259473884b8dd72c55198b5] [ip=0:0:0:0:0:0:0:1] c.t.core.CertificateValidator - Strict certificate chain validation successful: subject='CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN', chainLength=4, root='CN=CCA India 2022,O=India PKI,C=IN'
+2026-07-11 12:33:15.537 [http-nio-8080-exec-2] INFO  [txnId=0baff40a9259473884b8dd72c55198b5] [ip=0:0:0:0:0:0:0:1] com.trustsign.core.PdfSignerService - Starting PDF signing. pages=1, finalVersion=false, tsaEnabled=false
+2026-07-11 12:33:15.616 [http-nio-8080-exec-2] WARN  [txnId=0baff40a9259473884b8dd72c55198b5] [ip=0:0:0:0:0:0:0:1] com.trustsign.core.PdfSignerService - Signature image path does not exist or is not a file: /Users/jainnibha/chandra-workspace/trustsign/greentickrbg.png
+2026-07-11 12:33:16.538 [http-nio-8080-exec-2] WARN  [txnId=0baff40a9259473884b8dd72c55198b5] [ip=0:0:0:0:0:0:0:1] com.trustsign.core.LtvEnabler - Document chain OCSP fetch failed: OCSP fetch failed for all endpoints: [http://ocvs.gov.in]
+2026-07-11 12:33:17.043 [http-nio-8080-exec-2] INFO  [txnId=0baff40a9259473884b8dd72c55198b5] [ip=0:0:0:0:0:0:0:1] com.trustsign.core.PdfSignerService - PDF signing completed in 1506 ms. timestamped=false, tsaFallback=false
+2026-07-11 12:33:17.044 [http-nio-8080-exec-2] INFO  [txnId=0baff40a9259473884b8dd72c55198b5] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - PDF signed. alias=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4's XtraTrust Sub CA 2022 ID pages=1 timestamped=false tookMs=1520
+2026-07-11 12:36:45.192 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-07-11 12:36:45.196 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete
