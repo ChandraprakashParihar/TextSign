@@ -1610,15 +1610,24 @@ public final class PdfSignerService {
       if (w > vW || h > vH) {
         throw new InvalidPdfException("Signature width/height exceed page bounds for page " + (pageIndex + 1));
       }
-      x = Math.max(0f, Math.min(x, vW - w));
-      y = Math.max(0f, Math.min(y, vH - h));
+      float adjustedX = Math.max(0f, Math.min(x, vW - w));
+      float adjustedY = Math.max(0f, Math.min(y, vH - h));
+      LOG.warn(
+          "Signature placement out of bounds for page {}; ADJUST mode moved requested rect "
+              + "[x={}, y={}, w={}, h={}] to [x={}, y={}, w={}, h={}] within page bounds [w={}, h={}]",
+          pageIndex + 1, round2(x), round2(y), round2(w), round2(h),
+          round2(adjustedX), round2(adjustedY), round2(w), round2(h), round2(vW), round2(vH));
+      x = adjustedX;
+      y = adjustedY;
     }
-    // LOG.info("Signature placement page={} mode={} rect=[x={}, y={}, w={}, h={}] page=[w={}, h={}]",
-    //     pageIndex + 1,
-    //     effectivePlacement.hasCustomCoordinates()
-    //         ? ("custom-" + (effectivePlacement.origin() == CoordinateOrigin.TOP_LEFT ? "top-left" : "bottom-left"))
-    //         : "default-bottom-right",
-    //     round2(x), round2(y), round2(w), round2(h), round2(vW), round2(vH));
+    LOG.info("Signature placement page={} mode={} requested=[x={}, y={}] rect=[x={}, y={}, w={}, h={}] page=[w={}, h={}]",
+        pageIndex + 1,
+        effectivePlacement.hasCustomCoordinates()
+            ? ("custom-" + (effectivePlacement.origin() == CoordinateOrigin.TOP_LEFT ? "top-left" : "bottom-left"))
+            : "default-bottom-right",
+        effectivePlacement.hasCustomCoordinates() ? round2(effectivePlacement.x()) : null,
+        effectivePlacement.hasCustomCoordinates() ? round2(effectivePlacement.y()) : null,
+        round2(x), round2(y), round2(w), round2(h), round2(vW), round2(vH));
 
     // Map the visual-space rectangle (x,y)-(x+w,y+h) back into the page's raw
     // (unrotated) coordinate space, since that's what /Rect must be expressed
@@ -1679,9 +1688,9 @@ public final class PdfSignerService {
     return new Rectangle(x, y, width, height);
   }
 
-  // private static float round2(float v) {
-  //   return Math.round(v * 100f) / 100f;
-  // }
+  private static float round2(float v) {
+    return Math.round(v * 100f) / 100f;
+  }
 
   private static List<Integer> resolveStampPages(int pageCount, List<Integer> stampPageIndices)
       throws InvalidPdfException {
