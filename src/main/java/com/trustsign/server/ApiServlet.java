@@ -186,9 +186,10 @@ public final class ApiServlet {
       String msg = safeMsg(e);
       if (msg != null && msg.toLowerCase(java.util.Locale.ROOT).contains("config file not found")) {
         File f = resolveConfigFile();
-        writeJson(resp, 500, Map.of("error", "Config file not found", "path", f.getAbsolutePath()));
+        writeJson(resp, 500, Map.of("error", "Configuration file is missing. Please contact Xtratrust Support Team.",
+            "path", f.getAbsolutePath()));
       } else {
-        writeJson(resp, 500, Map.of("error", "Invalid config", "details", msg));
+        writeJson(resp, 500, Map.of("error", "Invalid config. Please contact Xtratrust Support Team.", "details", msg));
       }
       return null;
     }
@@ -570,7 +571,8 @@ public final class ApiServlet {
     return cfg != null && cfg.tsa() != null && cfg.tsa().url() != null && !cfg.tsa().url().isBlank();
   }
 
-  private static String validateTsaArtifactsIfConfigured(PdfSignerService.PdfSigningResult signResult, AgentConfig cfg) {
+  private static String validateTsaArtifactsIfConfigured(PdfSignerService.PdfSigningResult signResult,
+      AgentConfig cfg) {
     if (!isTsaConfigured(cfg)) {
       return null;
     }
@@ -780,7 +782,8 @@ public final class ApiServlet {
     List<String> libs = OsPkcs11Resolver.candidates(cfg);
     if (libs.isEmpty()) {
       out.put("status", "error");
-      out.put("error", "No PKCS#11 libraries configured for this OS");
+      out.put("error",
+          "The required security library is not configured for this operating system. Please contact Xtratrust Support Team.");
       return out;
     }
 
@@ -798,7 +801,8 @@ public final class ApiServlet {
       loaded = Pkcs11Token.load(pin, libs);
     } catch (RuntimeException e) {
       out.put("status", "error");
-      out.put("error", "Token load failed");
+      out.put("error",
+          "Unable to access the security token. Please verify that the token is connected and your token pin is correct.");
       out.put("details", buildTokenErrorDetail(e));
       return out;
     }
@@ -1178,7 +1182,8 @@ public final class ApiServlet {
             return;
           List<String> libs = OsPkcs11Resolver.candidates(cfg);
           if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            writeJson(resp, 400, Map.of("error",
+                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
             return;
           }
 
@@ -1191,7 +1196,8 @@ public final class ApiServlet {
             LOG.error("Token load failed (certificates). tookMs={} details={}",
                 System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of(
-                "error", "Token load failed",
+                "error",
+                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
                 "details", detail));
             return;
           }
@@ -1398,7 +1404,8 @@ public final class ApiServlet {
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            writeJson(resp, 400, Map.of("error",
+                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
             return;
           }
 
@@ -1410,7 +1417,8 @@ public final class ApiServlet {
             LOG.error("Token load failed (auto-sign-text). tookMs={} details={}",
                 System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of(
-                "error", "Token load failed",
+                "error",
+                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
                 "details", detail));
             return;
           }
@@ -1427,9 +1435,11 @@ public final class ApiServlet {
           }
 
           if (selection == null || selection.chain == null || selection.chain.length == 0) {
-            String hint = (cerBytes != null && cerBytes.length > 0)
-                ? "No certificate on token matches the uploaded .cer (thumbprint mismatch)"
-                : "No certificate on token matches any configured public key";
+            // String hint = (cerBytes != null && cerBytes.length > 0)
+            // ? "Registered certificate was not found in the token. Please use correct
+            // token or check token driver."
+            // : "No certificate on token matches any configured public key";
+            String hint = "Registered certificate was not found in the token. Please use correct token or check token driver.";
             writeJson(resp, 400, Map.of("error", hint));
             return;
           }
@@ -1584,7 +1594,8 @@ public final class ApiServlet {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
-          if (!validateReasonLocation(resp, reason, location)) return;
+          if (!validateReasonLocation(resp, reason, location))
+            return;
 
           if (data == null || data.length == 0) {
             LOG.error("PDF file is null or empty");
@@ -1635,7 +1646,8 @@ public final class ApiServlet {
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            writeJson(resp, 400, Map.of("error",
+                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
             return;
           }
 
@@ -1647,7 +1659,8 @@ public final class ApiServlet {
             LOG.error("Token load failed (auto-sign-pdf). tookMs={} details={}",
                 System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of(
-                "error", "Token load failed",
+                "error",
+                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
                 "details", detail));
             return;
           }
@@ -1664,9 +1677,11 @@ public final class ApiServlet {
           }
 
           if (selection == null || selection.chain == null || selection.chain.length == 0) {
-            String hint = (cerBytes != null && cerBytes.length > 0)
-                ? "No certificate on token matches the uploaded .cer (thumbprint mismatch)"
-                : "No certificate on token matches any configured public key";
+            // String hint = (cerBytes != null && cerBytes.length > 0)
+            // ? "Registered certificate was not found in the token. Please use correct
+            // token or check token driver."
+            // : "No certificate on token matches any configured public key";
+            String hint = "Registered certificate was not found in the token. Please use correct token or check token driver.";
             writeJson(resp, 400, Map.of("error", hint));
             return;
           }
@@ -1737,7 +1752,8 @@ public final class ApiServlet {
             } catch (PdfSignerService.PdfSigningException e) {
               LOG.error("PDF signing failed. alias={} tookMs={} err={}",
                   matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
-              writeJson(resp, 500, Map.of("error", "PDF signing failed", "details", safeMsg(e)));
+              writeJson(resp, 500, Map.of("error",
+                  "Unable to sign the PDF document. Please contact Xtratrust support team.", "details", safeMsg(e)));
               return;
             } catch (IOException e) {
               LOG.error("Invalid PDF structure. alias={} tookMs={} err={}",
@@ -1836,7 +1852,8 @@ public final class ApiServlet {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
-          if (!validateReasonLocation(resp, reason, location)) return;
+          if (!validateReasonLocation(resp, reason, location))
+            return;
 
           if (data == null || data.length == 0) {
             LOG.error("PDF file is null or empty");
@@ -1887,7 +1904,8 @@ public final class ApiServlet {
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            writeJson(resp, 400, Map.of("error",
+                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
             return;
           }
 
@@ -1899,7 +1917,8 @@ public final class ApiServlet {
             LOG.error("Token load failed (auto-sign-pdf). tookMs={} details={}",
                 System.currentTimeMillis() - startMs, detail);
             writeJson(resp, 400, Map.of(
-                "error", "Token load failed",
+                "error",
+                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
                 "details", detail));
             return;
           }
@@ -1916,9 +1935,11 @@ public final class ApiServlet {
           }
 
           if (selection == null || selection.chain == null || selection.chain.length == 0) {
-            String hint = (cerBytes != null && cerBytes.length > 0)
-                ? "No certificate on token matches the uploaded .cer (thumbprint mismatch)"
-                : "No certificate on token matches any configured public key";
+            // String hint = (cerBytes != null && cerBytes.length > 0)
+            // ? "Registered certificate was not found in the token. Please use correct
+            // token or check token driver."
+            // : "No certificate on token matches any configured public key";
+            String hint = "Registered certificate was not found in the token. Please use correct token or check token driver.";
             writeJson(resp, 400, Map.of("error", hint));
             return;
           }
@@ -1989,7 +2010,8 @@ public final class ApiServlet {
             } catch (PdfSignerService.PdfSigningException e) {
               LOG.error("PDF signing failed. alias={} tookMs={} err={}",
                   matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
-              writeJson(resp, 500, Map.of("error", "PDF signing failed", "details", safeMsg(e)));
+              writeJson(resp, 500, Map.of("error",
+                  "Unable to sign the PDF document. Please contact Xtratrust support team.", "details", safeMsg(e)));
               return;
             } catch (IOException e) {
               LOG.error("Invalid PDF structure. alias={} tookMs={} err={}",
@@ -2082,7 +2104,8 @@ public final class ApiServlet {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
-          if (!validateReasonLocation(resp, reason, location)) return;
+          if (!validateReasonLocation(resp, reason, location))
+            return;
           Integer signIndex = parsePositiveInt(readMultipartString(mp, "signIndex", true));
           if (signIndex == null) {
             writeJson(resp, 400, Map.of("error", "Missing or invalid signIndex (must be a positive integer)"));
@@ -2152,7 +2175,8 @@ public final class ApiServlet {
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            writeJson(resp, 400, Map.of("error",
+                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
             return;
           }
           Pkcs11Token.Loaded loaded;
@@ -2160,7 +2184,9 @@ public final class ApiServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
-            writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
+            writeJson(resp, 400, Map.of("error",
+                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
+                "details", detail));
             return;
           }
           KeyStore ks = loaded.keyStore();
@@ -2173,9 +2199,11 @@ public final class ApiServlet {
             return;
           }
           if (selection == null || selection.chain == null || selection.chain.length == 0) {
-            String hint = (cerBytes != null && cerBytes.length > 0)
-                ? "No certificate on token matches the uploaded .cer (thumbprint mismatch)"
-                : "No certificate on token matches any configured public key";
+            // String hint = (cerBytes != null && cerBytes.length > 0)
+            // ? "Registered certificate was not found in the token. Please use correct
+            // token or check token driver."
+            // : "No certificate on token matches any configured public key";
+            String hint = "Registered certificate was not found in the token. Please use correct token or check token driver.";
             writeJson(resp, 400, Map.of("error", hint));
             return;
           }
@@ -2231,7 +2259,8 @@ public final class ApiServlet {
                 writeJson(resp, 422, Map.of("error", "Selected signature field has no visible widget rectangle"));
                 return;
               }
-              // Sign the *existing* signature field (by name) instead of overlaying a new widget.
+              // Sign the *existing* signature field (by name) instead of overlaying a new
+              // widget.
               // This prevents the original signature box/container from remaining visible.
               signResult = PdfSignerService.signPdfAtSignatureFieldIndex(
                   pdfToSign,
@@ -2249,7 +2278,8 @@ public final class ApiServlet {
             } catch (PdfSignerService.PdfSigningException e) {
               LOG.error("PDF signing at field failed. alias={} tookMs={} err={}",
                   matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
-              writeJson(resp, 500, Map.of("error", "PDF signing failed", "details", safeMsg(e)));
+              writeJson(resp, 500, Map.of("error",
+                  "Unable to sign the PDF document. Please contact Xtratrust support team.", "details", safeMsg(e)));
               return;
             } catch (IOException e) {
               writeJson(resp, 400, Map.of("error", "Invalid PDF structure", "details", safeMsg(e)));
@@ -2272,7 +2302,7 @@ public final class ApiServlet {
             }
             if (afterCompletedSignatures <= beforeCompletedSignatures) {
               writeJson(resp, 500, Map.of(
-                  "error", "PDF signing failed",
+                  "error", "Unable to sign the PDF document. Please contact Xtratrust support team.",
                   "details", "No completed signature found in signed output"));
               return;
             }
@@ -2370,7 +2400,8 @@ public final class ApiServlet {
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            writeJson(resp, 400, Map.of("error",
+                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
             return;
           }
           Pkcs11Token.Loaded loaded;
@@ -2380,7 +2411,9 @@ public final class ApiServlet {
             String detail = buildTokenErrorDetail(e);
             LOG.error("Token load failed (auto-sign-text-cms). tookMs={} details={}",
                 System.currentTimeMillis() - startMs, detail);
-            writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
+            writeJson(resp, 400, Map.of("error",
+                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
+                "details", detail));
             return;
           }
           KeyStore ks = loaded.keyStore();
@@ -2393,9 +2426,11 @@ public final class ApiServlet {
             return;
           }
           if (selection == null || selection.chain == null || selection.chain.length == 0) {
-            String hint = (cerBytes != null && cerBytes.length > 0)
-                ? "No certificate on token matches the uploaded .cer (thumbprint mismatch)"
-                : "No certificate on token matches any configured public key";
+            // String hint = (cerBytes != null && cerBytes.length > 0)
+            // ? "Registered certificate was not found in the token. Please use correct
+            // token or check token driver."
+            // : "No certificate on token matches any configured public key";
+            String hint = "Registered certificate was not found in the token. Please use correct token or check token driver.";
             writeJson(resp, 400, Map.of("error", hint));
             return;
           }
@@ -2507,7 +2542,8 @@ public final class ApiServlet {
               location = new String(lb, java.nio.charset.StandardCharsets.UTF_8).trim();
             }
           }
-          if (!validateReasonLocation(resp, reason, location)) return;
+          if (!validateReasonLocation(resp, reason, location))
+            return;
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -2531,7 +2567,8 @@ public final class ApiServlet {
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            writeJson(resp, 400, Map.of("error",
+                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
             return;
           }
 
@@ -2540,7 +2577,9 @@ public final class ApiServlet {
             loaded = Pkcs11Token.load(pin, libs);
           } catch (RuntimeException e) {
             String detail = buildTokenErrorDetail(e);
-            writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
+            writeJson(resp, 400, Map.of("error",
+                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
+                "details", detail));
             return;
           }
 
@@ -2554,9 +2593,11 @@ public final class ApiServlet {
             return;
           }
           if (selection == null || selection.chain == null || selection.chain.length == 0) {
-            String hint = (cerBytes != null && cerBytes.length > 0)
-                ? "No certificate on token matches the uploaded .cer (thumbprint mismatch)"
-                : "No certificate on token matches any configured public key";
+            // String hint = (cerBytes != null && cerBytes.length > 0)
+            // ? "Registered certificate was not found in the token. Please use correct
+            // token or check token driver."
+            // : "No certificate on token matches any configured public key";
+            String hint = "Registered certificate was not found in the token. Please use correct token or check token driver.";
             writeJson(resp, 400, Map.of("error", hint));
             return;
           }
@@ -2599,7 +2640,8 @@ public final class ApiServlet {
           } catch (PdfSignerService.PdfSigningException e) {
             LOG.error("PDF signing failed. alias={} tookMs={} err={}",
                 matchedAlias, System.currentTimeMillis() - startMs, safeMsg(e), e);
-            writeJson(resp, 500, Map.of("error", "PDF signing failed", "details", safeMsg(e)));
+            writeJson(resp, 500, Map.of("error",
+                "Unable to sign the PDF document. Please contact Xtratrust support team.", "details", safeMsg(e)));
             return;
           } catch (IOException e) {
             LOG.error("Invalid PDF structure. alias={} tookMs={} err={}",
@@ -2709,7 +2751,8 @@ public final class ApiServlet {
               location = new String(lb, StandardCharsets.UTF_8).trim();
             }
           }
-          if (!validateReasonLocation(resp, reason, location)) return;
+          if (!validateReasonLocation(resp, reason, location))
+            return;
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -2793,7 +2836,8 @@ public final class ApiServlet {
           } catch (Exception e) {
             LOG.error("/hsm/sign-pdf failed. tookMs={} err={}", System.currentTimeMillis() - startMs, safeMsg(e),
                 e);
-            writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
+            writeJson(resp, 400, Map.of("error",
+                "Unable to sign the PDF document. Please contact Xtratrust support team.", "details", safeMsg(e)));
             return;
           } finally {
             java.util.Arrays.fill(pinChars, '\0');
@@ -2850,7 +2894,8 @@ public final class ApiServlet {
               location = new String(lb, StandardCharsets.UTF_8).trim();
             }
           }
-          if (!validateReasonLocation(resp, reason, location)) return;
+          if (!validateReasonLocation(resp, reason, location))
+            return;
 
           if (data == null || data.length == 0) {
             writeJson(resp, 400, Map.of("error", "Missing PDF file field: file"));
@@ -2975,7 +3020,8 @@ public final class ApiServlet {
             } catch (Exception e) {
               LOG.error("/hsm/auto-sign-pdf failed. tookMs={} err={}",
                   System.currentTimeMillis() - startMs, safeMsg(e), e);
-              writeJson(resp, 400, Map.of("error", "HSM PDF signing failed", "details", safeMsg(e)));
+              writeJson(resp, 400, Map.of("error",
+                  "Unable to sign the PDF document. Please contact Xtratrust support team.", "details", safeMsg(e)));
               return;
             } finally {
               java.util.Arrays.fill(pinChars, '\0');
@@ -3088,7 +3134,8 @@ public final class ApiServlet {
           char[] pin = resolvePin(cfg);
           List<String> libs = resolvePkcs11Libraries(cfg);
           if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error", "No PKCS#11 libraries configured for this OS"));
+            writeJson(resp, 400, Map.of("error",
+                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
             return;
           }
 
@@ -3099,7 +3146,9 @@ public final class ApiServlet {
             String detail = buildTokenErrorDetail(e);
             LOG.error("Token load failed (sign-text). tookMs={} details={}",
                 System.currentTimeMillis() - startMs, detail);
-            writeJson(resp, 400, Map.of("error", "Token load failed", "details", detail));
+            writeJson(resp, 400, Map.of("error",
+                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
+                "details", detail));
             return;
           }
 
@@ -3114,9 +3163,11 @@ public final class ApiServlet {
           }
 
           if (selection == null || selection.chain == null || selection.chain.length == 0) {
-            String hint = (cerBytes != null && cerBytes.length > 0)
-                ? "No certificate on token matches the uploaded .cer (thumbprint mismatch)"
-                : "No certificate on token matches any configured public key";
+            // String hint = (cerBytes != null && cerBytes.length > 0)
+            // ? "Registered certificate was not found in the token. Please use correct
+            // token or check token driver."
+            // : "No certificate on token matches any configured public key";
+            String hint = "Registered certificate was not found in the token. Please use correct token or check token driver.";
             writeJson(resp, 400, Map.of("error", hint));
             return;
           }
@@ -3392,16 +3443,17 @@ public final class ApiServlet {
         if (dot > 0) {
           byte[] payloadBytes = java.util.Base64.getUrlDecoder()
               .decode(tokenString.substring(0, dot));
-          com.fasterxml.jackson.databind.JsonNode payload =
-              Json.MAPPER.readTree(payloadBytes);
+          com.fasterxml.jackson.databind.JsonNode payload = Json.MAPPER.readTree(payloadBytes);
           if (payload != null) {
-            if (payload.has("sub"))  out.put("customerId",   payload.get("sub").asText());
-            if (payload.has("jti"))  out.put("activationId", payload.get("jti").asText());
+            if (payload.has("sub"))
+              out.put("customerId", payload.get("sub").asText());
+            if (payload.has("jti"))
+              out.put("activationId", payload.get("jti").asText());
             if (payload.has("exp")) {
               long expMs = payload.get("exp").asLong() * 1000L;
               long remainingMs = expMs - System.currentTimeMillis();
-              out.put("expiry",        Instant.ofEpochMilli(expMs).toString());
-              out.put("remainingMs",   remainingMs);
+              out.put("expiry", Instant.ofEpochMilli(expMs).toString());
+              out.put("remainingMs", remainingMs);
               out.put("remainingDays", remainingMs / 86_400_000.0);
             }
             if (payload.has("iat")) {
@@ -3439,8 +3491,8 @@ public final class ApiServlet {
   }
 
   // private void requireSession(HttpServletRequest req) {
-  //   String token = req.getHeader("X-Session-Token");
-  //   sessions.requireValid(token);
+  // String token = req.getHeader("X-Session-Token");
+  // sessions.requireValid(token);
   // }
 
   private static String normPath(String pathInfo) {
@@ -3528,7 +3580,8 @@ public final class ApiServlet {
     resp.setContentType("application/json");
     Object normalized = normalizeResponseShape(status, body);
     Object withTxn = attachTxnId(normalized, resp);
-    Json.MAPPER.writeValue(resp.getOutputStream(), redactErrorDetails(withTxn));
+    // Json.MAPPER.writeValue(resp.getOutputStream(), redactErrorDetails(withTxn));
+    Json.MAPPER.writeValue(resp.getOutputStream(), withTxn);
   }
 
   private Object attachTxnId(Object body, HttpServletResponse resp) {
@@ -3691,23 +3744,24 @@ public final class ApiServlet {
     };
   }
 
-  private Object redactErrorDetails(Object body) {
-    if (exposeErrorDetails || !(body instanceof Map<?, ?> original) || !original.containsKey("details")) {
-      return body;
-    }
-    Map<String, Object> sanitized = new LinkedHashMap<>();
-    for (Map.Entry<?, ?> e : original.entrySet()) {
-      if (e.getKey() == null) {
-        continue;
-      }
-      String key = String.valueOf(e.getKey());
-      if ("details".equals(key)) {
-        continue;
-      }
-      sanitized.put(key, e.getValue());
-    }
-    return sanitized;
-  }
+  // private Object redactErrorDetails(Object body) {
+  // if (exposeErrorDetails || !(body instanceof Map<?, ?> original) ||
+  // !original.containsKey("details")) {
+  // return body;
+  // }
+  // Map<String, Object> sanitized = new LinkedHashMap<>();
+  // for (Map.Entry<?, ?> e : original.entrySet()) {
+  // if (e.getKey() == null) {
+  // continue;
+  // }
+  // String key = String.valueOf(e.getKey());
+  // if ("details".equals(key)) {
+  // continue;
+  // }
+  // sanitized.put(key, e.getValue());
+  // }
+  // return sanitized;
+  // }
 
   private boolean allowSessionIssue(HttpServletRequest req) {
     String ip = RequestTrace.resolveClientIp(req);
@@ -3814,7 +3868,8 @@ public final class ApiServlet {
     }
 
     writePublicKeyPem(publicKeyPath, leaf.getPublicKey());
-    // Also write signing-certificate.pem (full certificate chain) for thumbprint matching
+    // Also write signing-certificate.pem (full certificate chain) for thumbprint
+    // matching
     Path signingCertPath = configDir.resolve("signing-certificate.pem").normalize();
     writeSigningCertificatePem(signingCertPath, certificates);
     java.util.List<String> aliases = importCertificatesToTruststore(
@@ -3833,10 +3888,12 @@ public final class ApiServlet {
         truststorePassword,
         normalizedStoreType);
     CertificateValidator.writeTruststoreHmac(truststorePath.toFile());
-    // CertificateValidator reads trustsign.truststore.* system properties, which are
+    // CertificateValidator reads trustsign.truststore.* system properties, which
+    // are
     // otherwise only set once at JVM startup (Main.applyTruststoreConfig). Without
     // re-applying them here, a changed truststore path/password/type would silently
-    // keep validating against the pre-mapping values until the process is restarted.
+    // keep validating against the pre-mapping values until the process is
+    // restarted.
     System.setProperty("trustsign.truststore.path", truststorePath.toAbsolutePath().toString());
     System.setProperty("trustsign.truststore.password",
         com.trustsign.core.ConfigDecryptor.decryptIfEncrypted(truststorePassword));
@@ -3927,7 +3984,8 @@ public final class ApiServlet {
     }
     java.util.ArrayList<X509Certificate> available = new java.util.ArrayList<>(certificates);
 
-    // Identify the end-entity signer: the only non-CA cert, or first cert if all are CAs.
+    // Identify the end-entity signer: the only non-CA cert, or first cert if all
+    // are CAs.
     X509Certificate signer = available.stream()
         .filter(c -> c != null && c.getBasicConstraints() < 0)
         .findFirst()
@@ -3960,12 +4018,12 @@ public final class ApiServlet {
     }
 
     // Map positional chain entries to the four named alias roles used by the
-    // truststore import.  For chains shorter than 4, the root cert is reused for
+    // truststore import. For chains shorter than 4, the root cert is reused for
     // the missing intermediate roles so the truststore is always populated.
     int last = chain.size() - 1;
-    X509Certificate root  = chain.get(last);
-    X509Certificate subca = chain.size() > 1 ? chain.get(1)                    : root;
-    X509Certificate ca    = chain.size() > 2 ? chain.get(chain.size() - 2)     : root;
+    X509Certificate root = chain.get(last);
+    X509Certificate subca = chain.size() > 1 ? chain.get(1) : root;
+    X509Certificate ca = chain.size() > 2 ? chain.get(chain.size() - 2) : root;
     return new DerivedChainAliases(signer, subca, ca, root);
   }
 
@@ -4000,7 +4058,8 @@ public final class ApiServlet {
         return null;
       }
       ASN1OctetString octet = ASN1OctetString.getInstance(ASN1Primitive.fromByteArray(extVal));
-      AuthorityInformationAccess aia = AuthorityInformationAccess.getInstance(ASN1Primitive.fromByteArray(octet.getOctets()));
+      AuthorityInformationAccess aia = AuthorityInformationAccess
+          .getInstance(ASN1Primitive.fromByteArray(octet.getOctets()));
       for (AccessDescription ad : aia.getAccessDescriptions()) {
         if (!AccessDescription.id_ad_caIssuers.equals(ad.getAccessMethod())) {
           continue;
@@ -4015,7 +4074,8 @@ public final class ApiServlet {
         }
         List<X509Certificate> downloaded = downloadCertificates(uri);
         for (X509Certificate candidate : downloaded) {
-          String subject = candidate.getSubjectX500Principal() == null ? null : candidate.getSubjectX500Principal().getName();
+          String subject = candidate.getSubjectX500Principal() == null ? null
+              : candidate.getSubjectX500Principal().getName();
           if (!issuerDn.equals(subject)) {
             continue;
           }
@@ -4073,7 +4133,8 @@ public final class ApiServlet {
 
   private static void writeSigningCertificatePem(Path outputPath, List<X509Certificate> certs) throws Exception {
     Path parent = outputPath.getParent();
-    if (parent != null) Files.createDirectories(parent);
+    if (parent != null)
+      Files.createDirectories(parent);
     StringBuilder pem = new StringBuilder();
     java.util.Base64.Encoder b64 = java.util.Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII));
     for (X509Certificate cert : certs) {
@@ -4192,7 +4253,8 @@ public final class ApiServlet {
       Path truststorePath,
       String truststorePassword,
       String truststoreType) throws IOException {
-    com.fasterxml.jackson.databind.JsonNode node = Json.MAPPER.readTree(Files.readString(configPath, StandardCharsets.UTF_8));
+    com.fasterxml.jackson.databind.JsonNode node = Json.MAPPER
+        .readTree(Files.readString(configPath, StandardCharsets.UTF_8));
     if (!(node instanceof com.fasterxml.jackson.databind.node.ObjectNode root)) {
       throw new IOException("Config file root must be a JSON object");
     }
@@ -4355,18 +4417,18 @@ public final class ApiServlet {
 
   /**
    * Detects the JCA algorithm name from a SubjectPublicKeyInfo DER byte array
-   * by reading the AlgorithmIdentifier OID.  Falls back to "RSA" on any error.
+   * by reading the AlgorithmIdentifier OID. Falls back to "RSA" on any error.
    */
   private static String detectSpkiAlgorithm(byte[] spkiDer) {
     try {
-      org.bouncycastle.asn1.x509.SubjectPublicKeyInfo spki =
-          org.bouncycastle.asn1.x509.SubjectPublicKeyInfo.getInstance(spkiDer);
+      org.bouncycastle.asn1.x509.SubjectPublicKeyInfo spki = org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
+          .getInstance(spkiDer);
       String oid = spki.getAlgorithm().getAlgorithm().getId();
       return switch (oid) {
         case "1.2.840.113549.1.1.1" -> "RSA";
-        case "1.2.840.10045.2.1"    -> "EC";
-        case "1.2.840.10040.4.1"    -> "DSA";
-        default                      -> "RSA";
+        case "1.2.840.10045.2.1" -> "EC";
+        case "1.2.840.10040.4.1" -> "DSA";
+        default -> "RSA";
       };
     } catch (Exception ignored) {
       return "RSA";
@@ -4489,18 +4551,17 @@ public final class ApiServlet {
    *
    * Priority:
    * 1. If {@code cerBytes} (uploaded .cer) is present → match by thumbprint
-   * 2. Otherwise → load configured certificate from config/signing-certificate.pem
-   *    (or config/public-key.pem if it contains a certificate) → match by thumbprint
+   * 2. Otherwise → load configured certificate from
+   * config/signing-certificate.pem
+   * (or config/public-key.pem if it contains a certificate) → match by thumbprint
    * 3. Last resort fallback → public-key.pem public key matching (legacy)
    */
   private CertificateSelection selectCertificateFromToken(KeyStore ks, byte[] cerBytes) throws Exception {
     // 1. Uploaded .cer takes priority
     if (cerBytes != null && cerBytes.length > 0) {
-      java.util.List<java.security.cert.X509Certificate> provided =
-          SigningCertificateParser.parseFromUpload(cerBytes);
+      java.util.List<java.security.cert.X509Certificate> provided = SigningCertificateParser.parseFromUpload(cerBytes);
       if (!provided.isEmpty()) {
-        TokenCertificateSelector.Selection sel =
-            TokenCertificateSelector.selectBySignerCertificates(ks, provided);
+        TokenCertificateSelector.Selection sel = TokenCertificateSelector.selectBySignerCertificates(ks, provided);
         if (sel != null) {
           return new CertificateSelection(sel.alias(), sel.certificate(), sel.chain());
         }
@@ -4512,8 +4573,7 @@ public final class ApiServlet {
     try {
       java.util.List<java.security.cert.X509Certificate> configured = loadConfiguredSigningCertificates();
       if (configured != null && !configured.isEmpty()) {
-        TokenCertificateSelector.Selection sel =
-            TokenCertificateSelector.selectBySignerCertificates(ks, configured);
+        TokenCertificateSelector.Selection sel = TokenCertificateSelector.selectBySignerCertificates(ks, configured);
         if (sel != null) {
           return new CertificateSelection(sel.alias(), sel.certificate(), sel.chain());
         }
@@ -4534,7 +4594,8 @@ public final class ApiServlet {
    * Resolution order:
    * 1. System property {@code trustsign.signingCertificate.path}
    * 2. {@code config/signing-certificate.pem}
-   * 3. {@code config/public-key.pem} (only if it contains a certificate, not just a public key)
+   * 3. {@code config/public-key.pem} (only if it contains a certificate, not just
+   * a public key)
    */
   private static java.util.List<java.security.cert.X509Certificate> loadConfiguredSigningCertificates()
       throws Exception {
@@ -4570,8 +4631,7 @@ public final class ApiServlet {
       }
 
       byte[] bytes = java.nio.file.Files.readAllBytes(certFile.toPath());
-      java.util.List<java.security.cert.X509Certificate> certs =
-          SigningCertificateParser.parseFromUpload(bytes);
+      java.util.List<java.security.cert.X509Certificate> certs = SigningCertificateParser.parseFromUpload(bytes);
       if (certs.isEmpty()) {
         throw new IOException("Signing certificate file did not contain any X.509 certificates: " + path);
       }
@@ -4594,9 +4654,11 @@ public final class ApiServlet {
       return new File(path.trim());
     }
     File f1 = new File("config/signing-certificate.pem");
-    if (f1.exists()) return f1;
+    if (f1.exists())
+      return f1;
     File f2 = new File("config/signing-certificate.cer");
-    if (f2.exists()) return f2;
+    if (f2.exists())
+      return f2;
     // Check if public-key.pem contains a certificate (not just a public key)
     File f3 = new File("config/public-key.pem");
     if (f3.exists()) {
@@ -4626,7 +4688,9 @@ public final class ApiServlet {
       return validationFailure(body, steps, "tokenPresence", "No PKCS#11 libraries configured", safeMsg(e));
     }
     if (libs.isEmpty()) {
-      return validationFailure(body, steps, "tokenPresence", "No PKCS#11 libraries configured for this OS", null);
+      return validationFailure(body, steps, "tokenPresence",
+          "The required security library is not configured for this operating system. Please contact Xtratrust Support Team.",
+          null);
     }
 
     char[] pin;
@@ -4885,28 +4949,31 @@ public final class ApiServlet {
     String cfgPin = (cfg.pkcs11() != null && cfg.pkcs11().pin() != null) ? cfg.pkcs11().pin() : null;
     if (cfgPin == null || cfgPin.isBlank()) {
       throw new SecurityException(
-          "Token PIN not configured. Set it in config.json (pkcs11.pin) or set environment variable TRUSTSIGN_TOKEN_PIN.");
+          "Token PIN not configured.");
     }
 
     String decrypted = com.trustsign.core.ConfigDecryptor.decryptIfEncrypted(cfgPin).trim();
     if (decrypted.isEmpty()) {
       throw new SecurityException(
-          "Token PIN is empty. Check config.json (pkcs11.pin) or set environment variable TRUSTSIGN_TOKEN_PIN.");
+          "Token PIN is empty.");
     }
 
     return decrypted.toCharArray();
   }
 
   /**
-   * Resolves HSM PIN from: env var TRUSTSIGN_HSM_PIN → .env file → config.hsm.pin.
+   * Resolves HSM PIN from: env var TRUSTSIGN_HSM_PIN → .env file →
+   * config.hsm.pin.
    * Returns null if none found (caller decides whether to error or not).
    */
   private String resolveHsmPin(AgentConfig cfg) {
     String envPin = System.getenv("TRUSTSIGN_HSM_PIN");
-    if (envPin != null && !envPin.isBlank()) return envPin.trim();
+    if (envPin != null && !envPin.isBlank())
+      return envPin.trim();
 
     String dotEnvPin = readDotEnvValue("TRUSTSIGN_HSM_PIN");
-    if (dotEnvPin != null && !dotEnvPin.isBlank()) return dotEnvPin.trim();
+    if (dotEnvPin != null && !dotEnvPin.isBlank())
+      return dotEnvPin.trim();
 
     if (cfg.hsm() != null && cfg.hsm().pin() != null && !cfg.hsm().pin().isBlank()) {
       return com.trustsign.core.ConfigDecryptor.decryptIfEncrypted(cfg.hsm().pin()).trim();
@@ -5006,6 +5073,7 @@ public final class ApiServlet {
     String topMsg = e.getMessage();
     if (topMsg != null && !topMsg.isBlank())
       return topMsg;
+    System.out.println(topMsg);
     return "Connect your PKCS#11 token, check the library path and PIN, and try again.";
   }
 }

@@ -78,8 +78,19 @@ public final class LtvEnabler {
 
     for (PDSignature sig : document.getSignatureDictionaries()) {
       if (sig == null) continue;
-      byte[] contents =
-          pdfSourceBytes != null ? sig.getContents(pdfSourceBytes) : sig.getContents();
+      byte[] contents;
+      try {
+        contents = pdfSourceBytes != null ? sig.getContents(pdfSourceBytes) : sig.getContents();
+      } catch (Exception e) {
+        // A signature already present in the document can have a /ByteRange that no longer
+        // matches the file's current bytes (e.g. it was re-saved by another tool after that
+        // signature was applied) — this shows up as PDFBox failing to re-extract its /Contents.
+        // That's a pre-existing problem with a signature we didn't create; it must not block
+        // LTV data from being embedded for the signature(s) we're actually trying to protect.
+        LOG.warn("Skipping LTV/VRI data for signature '{}': could not read its /Contents ({})",
+            sig.getName(), e.getMessage());
+        continue;
+      }
       if (contents == null || contents.length == 0) continue;
       byte[] pkcs7Der;
       try {

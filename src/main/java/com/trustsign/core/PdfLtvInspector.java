@@ -28,9 +28,13 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Debug helper to inspect DSS/VRI state for Acrobat LTV diagnosis. */
 public final class PdfLtvInspector {
+  private static final Logger LOG = LoggerFactory.getLogger(PdfLtvInspector.class);
+
   public record SignatureVriReport(
       String name,
       String subFilter,
@@ -95,7 +99,20 @@ public final class PdfLtvInspector {
       List<SignatureVriReport> reports = new ArrayList<>();
       ASN1ObjectIdentifier tsOid = new ASN1ObjectIdentifier("1.2.840.113549.1.9.16.2.14");
       for (PDSignature sig : sigs) {
-        byte[] contents = sig.getContents(pdfBytes);
+        byte[] contents;
+        try {
+          contents = sig.getContents(pdfBytes);
+        } catch (Exception e) {
+          // A signature already in the document (not necessarily the one we just added) can
+          // have a /ByteRange that no longer matches the file's current bytes — see LtvEnabler
+          // for the same issue. One unrelated broken signature must not fail inspection of the
+          // rest of the document's LTV structure (DSS/VRI/Certs/OCSPs/CRLs, other signatures).
+          LOG.warn("Could not read /Contents for signature '{}' during LTV inspection: {}",
+              sig.getName(), e.getMessage());
+          reports.add(new SignatureVriReport(sig.getName(), sig.getSubFilter(),
+              null, false, null, false, false, 0));
+          continue;
+        }
         String keyDer = null;
         String keyFull = null;
         boolean presentDer = false;
