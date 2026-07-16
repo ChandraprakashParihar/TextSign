@@ -1,7 +1,7 @@
 {
   "port" : 8080,
   "allowedOrigins" : [ "http://localhost", "http://localhost:3000", "http://localhost:8080", "https://uat.xtratrust.com" ],
-  "allowedClientIps" : [ "127.0.0.1", "::1", "localhost" ,"0:0:0:0:0:0:0:1"],
+  "allowedClientIps" : [ "127.0.0.1", "::1", "localhost", "0:0:0:0:0:0:0:1" ],
   "logging" : {
     "directory" : "logs",
     "consoleEnabled" : true,
@@ -29,7 +29,7 @@
   "signatureImagePath" : "greentickrbg.png",
   "truststore" : {
     "path" : "truststore.jks",
-    "password" : "test2",
+    "password" : "ts_new",
     "type" : "PKCS12",
     "enablePathValidation" : true
   },

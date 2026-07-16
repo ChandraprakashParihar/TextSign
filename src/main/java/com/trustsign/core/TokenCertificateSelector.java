@@ -29,6 +29,13 @@ public final class TokenCertificateSelector {
     }
     for (Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
       String alias = e.nextElement();
+      // Only a private-key entry can actually sign. Tokens frequently also carry
+      // the issuer chain (SubCA/CA/root) as separate trusted-cert-only aliases;
+      // matching one of those by thumbprint would return a certificate with no
+      // private key and no getCertificateChain() result, masquerading as "not found".
+      if (!ks.isKeyEntry(alias)) {
+        continue;
+      }
       Certificate cert = ks.getCertificate(alias);
       if (cert instanceof X509Certificate x509) {
         for (X509Certificate provided : providedCertificates) {
@@ -78,6 +85,9 @@ public final class TokenCertificateSelector {
     }
     for (Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
       String alias = e.nextElement();
+      if (!ks.isKeyEntry(alias)) {
+        continue;
+      }
       Certificate cert = ks.getCertificate(alias);
       if (cert instanceof X509Certificate x509) {
         PublicKey certKey = x509.getPublicKey();

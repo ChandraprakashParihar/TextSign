@@ -1,6 +1,7 @@
 package com.trustsign.core;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.*;
@@ -161,6 +162,30 @@ public final class Pkcs11Token {
       return out;
     } catch (Exception e) {
       throw new RuntimeException("Failed to list certificates from token.", e);
+    }
+  }
+
+  /**
+   * Finds the alias of the token certificate whose serial number matches
+   * {@code serial}. Serial numbers are only unique per issuing CA, so if the
+   * token holds certificates from multiple CAs with colliding serials, the
+   * first key-entry match wins.
+   */
+  public static Optional<String> findAliasBySerial(KeyStore ks, BigInteger serial) {
+    try {
+      Enumeration<String> aliases = ks.aliases();
+      while (aliases.hasMoreElements()) {
+        String alias = aliases.nextElement();
+        if (!ks.isKeyEntry(alias)) continue;
+
+        Certificate cert = ks.getCertificate(alias);
+        if (cert instanceof X509Certificate x509 && serial.equals(x509.getSerialNumber())) {
+          return Optional.of(alias);
+        }
+      }
+      return Optional.empty();
+    } catch (Exception e) {
+      throw new RuntimeException("Failed to search token for certificate by serial number.", e);
     }
   }
 

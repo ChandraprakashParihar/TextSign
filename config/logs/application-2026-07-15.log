@@ -1,0 +1,17 @@
+2026-07-15 12:41:53.183 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-07-15 12:41:53.184 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-15 12:41:53.514 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 43337 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-07-15 12:41:53.515 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-07-15 12:41:53.893 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-07-15 12:41:53.931 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 395 ms
+2026-07-15 12:41:54.146 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-07-15 12:41:54.150 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.755 seconds (process running for 1.275)
+2026-07-15 12:41:54.152 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-07-15 12:42:48.543 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-07-15 12:42:48.544 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-07-15 12:42:48.562 [http-nio-8080-exec-1] INFO  [txnId=7881c78739dc4003aa00089d334c3fe2] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Reloaded config from disk: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-15 12:43:17.121 [http-nio-8080-exec-3] INFO  [txnId=1bf51722fb0d4541b780ed9b69bbd40a] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /map-certificate: backed up existing truststore to /Users/jainnibha/chandra-workspace/trustsign/config/truststore.jks.bak
+2026-07-15 12:43:17.159 [http-nio-8080-exec-3] INFO  [txnId=1bf51722fb0d4541b780ed9b69bbd40a] [ip=127.0.0.1] c.t.core.CertificateValidator - Truststore HMAC updated: /Users/jainnibha/chandra-workspace/trustsign/config/.truststore-integrity
+2026-07-15 12:43:17.159 [http-nio-8080-exec-3] INFO  [txnId=1bf51722fb0d4541b780ed9b69bbd40a] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /map-certificate: mapped 4 cert(s), leaf=CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN, serial=6d6b6bc104
+2026-07-15 12:50:22.134 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-07-15 12:50:22.138 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete

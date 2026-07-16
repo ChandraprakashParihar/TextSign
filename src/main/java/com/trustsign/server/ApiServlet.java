@@ -32,6 +32,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
 import java.net.URL;
 import java.net.URLConnection;
 import java.security.KeyStore;
@@ -1305,9 +1306,19 @@ public final class ApiServlet {
           if (cfg == null) {
             return;
           }
+          // Certificate can be supplied either as an uploaded 'cer' payload, or by
+          // 'serialNumber' (hex or decimal) to look up on the PKCS#11 token already
+          // attached to this machine — the two are mutually exclusive.
+          String serialNumberParam = readMultipartString(mp, "serialNumber", true);
           byte[] cerPayload = readMultipartCerPayload(mp);
-          if (cerPayload == null || cerPayload.length == 0) {
-            writeJson(resp, 400, Map.of("error", "Missing certificate payload: cer"));
+          boolean hasSerial = serialNumberParam != null && !serialNumberParam.isBlank();
+          boolean hasCer = cerPayload != null && cerPayload.length > 0;
+          if (!hasSerial && !hasCer) {
+            writeJson(resp, 400, Map.of("error", "Provide either 'cer' or 'serialNumber'"));
+            return;
+          }
+          if (hasSerial && hasCer) {
+            writeJson(resp, 400, Map.of("error", "Provide only one of 'cer' or 'serialNumber', not both"));
             return;
           }
           String truststorePassword = readMultipartString(mp, "truststorePassword", true);
@@ -1323,13 +1334,39 @@ public final class ApiServlet {
               readMultipartString(mp, "truststoreType", true),
               cfg.truststore() != null ? cfg.truststore().type() : null,
               "PKCS12");
+          // Optional: persist the PKCS#11 / HSM token PIN into config.json as part
+          // of this same call. tokenPin is also used, in-memory, for the token
+          // lookup below when mapping by serialNumber — it is only written to disk
+          // after mapping succeeds, so a wrong PIN never gets persisted.
+          String tokenPinParam = readMultipartString(mp, "tokenPin", true);
+          String hsmPinParam = readMultipartString(mp, "hsmPin", true);
           try {
-            MapCertificateResult mapping = mapCertificateArtifacts(
-                resolveConfigFile(),
-                cerPayload,
-                truststoreFile,
-                truststorePassword,
-                truststoreType);
+            MapCertificateResult mapping = hasSerial
+                ? mapCertificateArtifacts(
+                    resolveConfigFile(),
+                    resolveCertificatesFromTokenBySerial(cfg, serialNumberParam, tokenPinParam),
+                    truststoreFile,
+                    truststorePassword,
+                    truststoreType)
+                : mapCertificateArtifacts(
+                    resolveConfigFile(),
+                    cerPayload,
+                    truststoreFile,
+                    truststorePassword,
+                    truststoreType);
+
+            boolean tokenPinUpdated = tokenPinParam != null && !tokenPinParam.isBlank();
+            boolean hsmPinUpdated = hsmPinParam != null && !hsmPinParam.isBlank();
+            if (tokenPinUpdated) {
+              updateConfigPin(resolveConfigFile().toPath(), "pkcs11", tokenPinParam.trim());
+            }
+            if (hsmPinUpdated) {
+              updateConfigPin(resolveConfigFile().toPath(), "hsm", hsmPinParam.trim());
+            }
+            if (tokenPinUpdated || hsmPinUpdated) {
+              resetCachesAfterCertificateMapping();
+            }
+
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("ok", true);
             body.put("mappedCount", mapping.importedCertificates());
@@ -1342,6 +1379,8 @@ public final class ApiServlet {
             body.put("truststoreType", mapping.truststoreType());
             body.put("subjectDn", mapping.leafSubjectDn());
             body.put("serialNumber", mapping.leafSerialHex());
+            body.put("tokenPinUpdated", tokenPinUpdated);
+            body.put("hsmPinUpdated", hsmPinUpdated);
             writeJson(resp, 200, body);
           } catch (IllegalArgumentException e) {
             writeJson(resp, 400, Map.of("error", e.getMessage()));
@@ -3815,12 +3854,6 @@ public final class ApiServlet {
       String truststoreFile,
       String truststorePassword,
       String truststoreType) throws Exception {
-    if (configFile == null) {
-      throw new IllegalArgumentException("Config file is required");
-    }
-    if (truststorePassword == null || truststorePassword.isBlank()) {
-      throw new IllegalArgumentException("truststorePassword is required");
-    }
     if (cerPayload == null || cerPayload.length == 0) {
       throw new IllegalArgumentException("Certificate payload is empty");
     }
@@ -3831,6 +3864,100 @@ public final class ApiServlet {
     List<X509Certificate> certificates = parseX509Certificates(cerPayload);
     if (certificates.isEmpty()) {
       throw new IllegalArgumentException("Could not parse X.509 certificate(s) from cer payload");
+    }
+    if (certificates.size() > 50) {
+      throw new IllegalArgumentException("Certificate payload contains more than 50 certificates");
+    }
+    return mapCertificateArtifacts(configFile, certificates, truststoreFile, truststorePassword, truststoreType);
+  }
+
+  /**
+   * Resolves the signer certificate (and its chain, if the token exposes one)
+   * from the PKCS#11 token already attached to this machine, by matching
+   * {@code serialNumberRaw} against every key-entry certificate's serial
+   * number. Uses the same {@code cfg.pkcs11()} library/PIN resolution as
+   * {@code GET /certificates}.
+   */
+  private List<X509Certificate> resolveCertificatesFromTokenBySerial(
+      AgentConfig cfg, String serialNumberRaw, String pinOverride) {
+    BigInteger serial = parseCertificateSerialNumber(serialNumberRaw);
+    List<String> libs = OsPkcs11Resolver.candidates(cfg);
+    if (libs.isEmpty()) {
+      throw new IllegalArgumentException(
+          "The required security library is not configured for this operating system.");
+    }
+    char[] pin = (pinOverride != null && !pinOverride.isBlank())
+        ? pinOverride.trim().toCharArray()
+        : resolvePin(cfg);
+    Pkcs11Token.Loaded loaded;
+    try {
+      loaded = Pkcs11Token.load(pin, libs);
+    } catch (RuntimeException e) {
+      throw new IllegalArgumentException(
+          "Unable to access the security token. Please verify that the token is connected and your token pin is correct: "
+              + safeMsg(e));
+    }
+    String alias = Pkcs11Token.findAliasBySerial(loaded.keyStore(), serial)
+        .orElseThrow(() -> new IllegalArgumentException(
+            "No certificate with serial number " + serial.toString(16) + " found on the attached token"));
+    try {
+      List<X509Certificate> certificates = new java.util.ArrayList<>();
+      Certificate[] chain = loaded.keyStore().getCertificateChain(alias);
+      if (chain != null) {
+        for (Certificate c : chain) {
+          if (c instanceof X509Certificate x509) {
+            certificates.add(x509);
+          }
+        }
+      }
+      if (certificates.isEmpty()) {
+        Certificate single = loaded.keyStore().getCertificate(alias);
+        if (single instanceof X509Certificate x509) {
+          certificates.add(x509);
+        }
+      }
+      if (certificates.isEmpty()) {
+        throw new IllegalArgumentException("Token alias '" + alias + "' has no usable X.509 certificate");
+      }
+      return certificates;
+    } catch (java.security.KeyStoreException e) {
+      throw new IllegalArgumentException("Failed to read certificate chain from token: " + safeMsg(e));
+    }
+  }
+
+  /**
+   * Accepts hex (optionally {@code 0x}-prefixed, with {@code :} or space
+   * separators as commonly copy-pasted from certificate viewers) or plain
+   * decimal serial numbers.
+   */
+  private static BigInteger parseCertificateSerialNumber(String raw) {
+    String trimmed = raw.trim();
+    String cleaned = trimmed.replaceAll("(?i)^0x", "").replace(":", "").replace(" ", "");
+    try {
+      return new BigInteger(cleaned, 16);
+    } catch (NumberFormatException hexFailed) {
+      try {
+        return new BigInteger(trimmed);
+      } catch (NumberFormatException decFailed) {
+        throw new IllegalArgumentException("Invalid serialNumber: " + raw);
+      }
+    }
+  }
+
+  private MapCertificateResult mapCertificateArtifacts(
+      File configFile,
+      List<X509Certificate> certificates,
+      String truststoreFile,
+      String truststorePassword,
+      String truststoreType) throws Exception {
+    if (configFile == null) {
+      throw new IllegalArgumentException("Config file is required");
+    }
+    if (truststorePassword == null || truststorePassword.isBlank()) {
+      throw new IllegalArgumentException("truststorePassword is required");
+    }
+    if (certificates == null || certificates.isEmpty()) {
+      throw new IllegalArgumentException("No certificates supplied for mapping");
     }
     if (certificates.size() > 50) {
       throw new IllegalArgumentException("Certificate payload contains more than 50 certificates");
@@ -4286,6 +4413,34 @@ public final class ApiServlet {
         StandardOpenOption.WRITE);
   }
 
+  /**
+   * Sets {@code pin} under the given top-level config section ("pkcs11" or
+   * "hsm"), creating the section if absent, preserving every other field.
+   */
+  private static void updateConfigPin(Path configPath, String section, String pin) throws IOException {
+    com.fasterxml.jackson.databind.JsonNode node = Json.MAPPER
+        .readTree(Files.readString(configPath, StandardCharsets.UTF_8));
+    if (!(node instanceof com.fasterxml.jackson.databind.node.ObjectNode root)) {
+      throw new IOException("Config file root must be a JSON object");
+    }
+    com.fasterxml.jackson.databind.JsonNode existingSection = root.get(section);
+    com.fasterxml.jackson.databind.node.ObjectNode sectionNode;
+    if (existingSection instanceof com.fasterxml.jackson.databind.node.ObjectNode objectNode) {
+      sectionNode = objectNode;
+    } else {
+      sectionNode = Json.MAPPER.createObjectNode();
+      root.set(section, sectionNode);
+    }
+    sectionNode.put("pin", pin);
+    String updated = Json.MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+    Files.writeString(
+        configPath,
+        updated + "\n",
+        StandardCharsets.UTF_8,
+        StandardOpenOption.TRUNCATE_EXISTING,
+        StandardOpenOption.WRITE);
+  }
+
   private void resetCachesAfterCertificateMapping() {
     synchronized (this) {
       cachedConfig = null;
@@ -4531,6 +4686,9 @@ public final class ApiServlet {
 
     for (java.util.Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
       String alias = e.nextElement();
+      if (!ks.isKeyEntry(alias)) {
+        continue;
+      }
       Certificate cert = ks.getCertificate(alias);
       if (cert instanceof X509Certificate x509) {
         PublicKey certKey = x509.getPublicKey();
@@ -4565,6 +4723,7 @@ public final class ApiServlet {
         if (sel != null) {
           return new CertificateSelection(sel.alias(), sel.certificate(), sel.chain());
         }
+        logCertificateSelectionMiss("uploaded cer", provided, ks);
       }
       return null;
     }
@@ -4577,6 +4736,7 @@ public final class ApiServlet {
         if (sel != null) {
           return new CertificateSelection(sel.alias(), sel.certificate(), sel.chain());
         }
+        logCertificateSelectionMiss("config/signing-certificate.pem", configured, ks);
         return null;
       }
     } catch (IOException ignored) {
@@ -4586,6 +4746,49 @@ public final class ApiServlet {
     // 3. Legacy fallback: public-key.pem matching
     java.util.List<PublicKey> pks = loadConfiguredPublicKeysOrThrow();
     return selectCertificateForPublicKeys(ks, pks);
+  }
+
+  /**
+   * Logs exactly what was configured/uploaded vs what the token actually
+   * enumerates, so a "Registered certificate was not found in the token"
+   * failure can be diagnosed from the log instead of guessed at.
+   */
+  private void logCertificateSelectionMiss(
+      String configuredSource, java.util.List<X509Certificate> configured, KeyStore ks) {
+    try {
+      StringBuilder configuredDesc = new StringBuilder();
+      for (X509Certificate c : configured) {
+        configuredDesc.append("\n  serial=").append(c.getSerialNumber().toString(16))
+            .append(" thumbprint=").append(TokenCertificateSelector.thumbprint(c))
+            .append(" subject=").append(c.getSubjectX500Principal().getName());
+      }
+      StringBuilder tokenDesc = new StringBuilder();
+      int certCount = 0;
+      for (Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
+        String alias = e.nextElement();
+        Certificate cert = ks.getCertificate(alias);
+        if (!(cert instanceof X509Certificate x509)) {
+          continue;
+        }
+        certCount++;
+        boolean keyEntry;
+        try {
+          keyEntry = ks.isKeyEntry(alias);
+        } catch (Exception e2) {
+          keyEntry = false;
+        }
+        tokenDesc.append("\n  alias=").append(alias)
+            .append(" isKeyEntry=").append(keyEntry)
+            .append(" serial=").append(x509.getSerialNumber().toString(16))
+            .append(" thumbprint=").append(TokenCertificateSelector.thumbprint(x509))
+            .append(" subject=").append(x509.getSubjectX500Principal().getName());
+      }
+      LOG.warn(
+          "No token certificate matched signer from {}. Configured certificate(s):{}\nToken certificate(s) ({} total):{}",
+          configuredSource, configuredDesc, certCount, tokenDesc);
+    } catch (Exception logFailure) {
+      LOG.warn("Failed to log certificate selection diagnostics: {}", safeMsg(logFailure));
+    }
   }
 
   /**
