@@ -218,3 +218,10 @@ Stress your new metrics endpoint:
 ./scripts/load-test.sh --url http://127.0.0.1:80/pki/health/performance --requests 500 --concurrency 50
 Test token validation endpoint:
 ./scripts/load-test.sh --url http://127.0.0.1:80/pki/validate-token --method POST --requests 200 --concurrency 20
+
+
+curl -X POST http://localhost:<port>/pki/map-certificate \
+  -F "serialNumber=1a2b3c4d..." \
+  -F "tokenPin=87654321" \
+  -F "hsmPin=87654321" \
+  -F "truststorePassword=changeit"
