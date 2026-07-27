@@ -384,7 +384,7 @@ public final class LtvEnabler {
       VriData perSigOrNull,
       String logCtx) {
     try {
-      byte[] ocsp = OcspClient.fetchOcspResponse(cert, issuer, cfg.ocspConnectTimeoutMs(), cfg.ocspReadTimeoutMs());
+      byte[] ocsp = RevocationCache.ocsp(cert, issuer, cfg.ocspConnectTimeoutMs(), cfg.ocspReadTimeoutMs());
       String k = java.util.Base64.getEncoder().encodeToString(ocsp);
       if (ocspDedup.add(k)) ocsps.add(ocsp);
       if (perSigOrNull != null) perSigOrNull.ocsps.add(ocsp);
@@ -393,7 +393,7 @@ public final class LtvEnabler {
       LOG.warn("{} OCSP fetch failed: {}", logCtx, e.getMessage());
     }
     try {
-      byte[] crl = CrlFetcher.fetchCrl(cert, issuer, cfg.crlConnectTimeoutMs(), cfg.crlReadTimeoutMs());
+      byte[] crl = RevocationCache.crl(cert, issuer, cfg.crlConnectTimeoutMs(), cfg.crlReadTimeoutMs());
       String k = java.util.Base64.getEncoder().encodeToString(crl);
       if (crlDedup.add(k)) crls.add(crl);
       if (perSigOrNull != null) perSigOrNull.crls.add(crl);
