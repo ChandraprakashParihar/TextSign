@@ -115,6 +115,12 @@ public final class LtvEnabler {
         X509Certificate signer = new org.bouncycastle.cert.jcajce.JcaX509CertificateConverter().getCertificate(signerHolder);
 
         List<X509Certificate> chain = buildLikelyChain(certStore, signer);
+        LOG.info("LTV: chain resolved from signed PDF's CMS certificates for signer '{}': {} cert(s): {}",
+            signer.getSubjectX500Principal().getName(),
+            chain.size(),
+            chain.stream()
+                .map(c -> c.getSubjectX500Principal().getName())
+                .collect(java.util.stream.Collectors.joining(" -> ")));
         for (X509Certificate c : chain) {
           byte[] cBytes = c.getEncoded();
           String key = java.util.Base64.getEncoder().encodeToString(cBytes);
@@ -129,10 +135,14 @@ public final class LtvEnabler {
           X509Certificate cert = chain.get(i);
           // Stop at self-signed (root).
           if (cert.getSubjectX500Principal().equals(cert.getIssuerX500Principal())) {
+            LOG.info("LTV: stopping chain walk at index {} (self-signed root: '{}')",
+                i, cert.getSubjectX500Principal().getName());
             break;
           }
           X509Certificate issuer = findIssuer(chain, cert);
           if (issuer == null) {
+            LOG.info("LTV: stopping chain walk at index {} — no issuer for '{}' found among the {} resolved cert(s)",
+                i, cert.getSubjectX500Principal().getName(), chain.size());
             break;
           }
           String ctx = i == 0 ? "Document signer" : "Document chain";
@@ -344,6 +354,20 @@ public final class LtvEnabler {
     List<X509Certificate> out = new ArrayList<>();
     out.add(signer);
     var all = store.getMatches(null);
+    LOG.info("LTV: CMS certificate store has {} cert(s) total (signer='{}', signer issuer='{}'): [{}]",
+        all.size(),
+        signer.getSubjectX500Principal().getName(),
+        signer.getIssuerX500Principal().getName(),
+        all.stream()
+            .map(h -> {
+              try {
+                X509Certificate c = new org.bouncycastle.cert.jcajce.JcaX509CertificateConverter().getCertificate(h);
+                return "subject='" + c.getSubjectX500Principal().getName() + "'";
+              } catch (Exception e) {
+                return "<unreadable: " + e.getMessage() + ">";
+              }
+            })
+            .collect(java.util.stream.Collectors.joining(", ")));
     boolean progressed;
     do {
       progressed = false;

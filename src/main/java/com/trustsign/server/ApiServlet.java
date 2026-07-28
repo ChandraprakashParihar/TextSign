@@ -3996,9 +3996,13 @@ public final class ApiServlet {
 
     writePublicKeyPem(publicKeyPath, leaf.getPublicKey());
     // Also write signing-certificate.pem (full certificate chain) for thumbprint
-    // matching
+    // matching. Use the resolved chain (signer + AIA-completed issuers), not the
+    // raw input — when mapping by serialNumber against a token that only exposes
+    // the leaf certificate, "certificates" here is a single-element list, and
+    // writing that instead of the resolved chain would leave signing-certificate.pem
+    // without any issuer for LtvEnabler to fetch OCSP/CRL evidence against later.
     Path signingCertPath = configDir.resolve("signing-certificate.pem").normalize();
-    writeSigningCertificatePem(signingCertPath, certificates);
+    writeSigningCertificatePem(signingCertPath, aliasesFromCer.chain());
     java.util.List<String> aliases = importCertificatesToTruststore(
         truststorePath,
         normalizedStoreType,
@@ -4102,7 +4106,13 @@ public final class ApiServlet {
       X509Certificate signer,
       X509Certificate subca,
       X509Certificate ca,
-      X509Certificate cca) {
+      X509Certificate cca,
+      // The actual resolved [signer, issuer1, issuer2, ..., root] chain, including
+      // any issuers fetched via AIA — NOT just the raw input certificates. When
+      // mapping by serialNumber against a token that only exposes the leaf (e.g.
+      // Proxkey), the raw input is a single certificate; this is what must be
+      // written to signing-certificate.pem so signing later embeds the full chain.
+      List<X509Certificate> chain) {
   }
 
   private static DerivedChainAliases deriveChainAliases(List<X509Certificate> certificates) {
@@ -4151,7 +4161,7 @@ public final class ApiServlet {
     X509Certificate root = chain.get(last);
     X509Certificate subca = chain.size() > 1 ? chain.get(1) : root;
     X509Certificate ca = chain.size() > 2 ? chain.get(chain.size() - 2) : root;
-    return new DerivedChainAliases(signer, subca, ca, root);
+    return new DerivedChainAliases(signer, subca, ca, root, chain);
   }
 
   private static void ensureIssuerChainFromAia(List<X509Certificate> available, X509Certificate start, int maxDepth) {
