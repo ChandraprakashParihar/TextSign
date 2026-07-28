@@ -107,6 +107,15 @@
 -keepclassmembers class com.trustsign.core.AgentConfig$** { *; }
 -keepclassmembers class com.trustsign.core.LicenceToken   { *; }
 
+# Pkcs11Token.CertItem is returned directly (as a List) in GET /pki/certificates'
+# JSON body — Jackson must reflect its record components to serialize it.
+-keepclassmembers class com.trustsign.core.Pkcs11Token$CertItem { *; }
+
+# SignedFileAnalyzer.Result (and the VerifiedMatch/Attempt records nested inside
+# its List fields) is returned directly as the JSON body of the debug-analysis
+# endpoint.
+-keepclassmembers class com.trustsign.core.SignedFileAnalyzer$** { *; }
+
 # ── 8. Public cross-package API ───────────────────────────────────────────────
 # These are concrete methods called from obfuscated code in other packages.
 # ProGuard updates references consistently, but the member signatures must

@@ -4705,6 +4705,30 @@ public final class ApiServlet {
   }
 
   /**
+   * Some token drivers (e.g. Proxkey) only expose the leaf certificate via
+   * {@code KeyStore.getCertificateChain()}, not the issuing SubCA/CA/root.
+   * Signing with just the leaf leaves {@code LtvEnabler} nothing to build a
+   * revocation chain from (no issuer to fetch OCSP/CRL against), so LTV
+   * silently embeds nothing even though it's enabled.
+   * {@code config/signing-certificate.pem} was already resolved to the
+   * complete chain at {@code /map-certificate} time (including AIA-fetched
+   * issuers) — prefer it whenever the token's own chain is shorter. Safe to
+   * substitute wholesale here because {@code configured} is only reached
+   * after the certificate was already matched against it by thumbprint.
+   */
+  private static Certificate[] preferConfiguredChainIfFuller(
+      Certificate[] tokenChain, String alias, java.util.List<X509Certificate> configured) {
+    if (tokenChain != null && tokenChain.length >= configured.size()) {
+      return tokenChain;
+    }
+    LOG.info(
+        "Token getCertificateChain() returned {} cert(s) for alias '{}'; using the {} cert(s) "
+            + "from config/signing-certificate.pem instead so LTV has the full chain to work with.",
+        tokenChain == null ? 0 : tokenChain.length, alias, configured.size());
+    return configured.toArray(new Certificate[0]);
+  }
+
+  /**
    * Unified certificate selection using thumbprint matching.
    *
    * Priority:
@@ -4734,7 +4758,8 @@ public final class ApiServlet {
       if (configured != null && !configured.isEmpty()) {
         TokenCertificateSelector.Selection sel = TokenCertificateSelector.selectBySignerCertificates(ks, configured);
         if (sel != null) {
-          return new CertificateSelection(sel.alias(), sel.certificate(), sel.chain());
+          Certificate[] chain = preferConfiguredChainIfFuller(sel.chain(), sel.alias(), configured);
+          return new CertificateSelection(sel.alias(), sel.certificate(), chain);
         }
         logCertificateSelectionMiss("config/signing-certificate.pem", configured, ks);
         return null;
@@ -4915,15 +4940,36 @@ public final class ApiServlet {
     }
 
     LOG.info("/validate-token step=certificateExtraction start");
-    CertificateSelection selection;
-    String selectionMode;
+    CertificateSelection selection = null;
+    String selectionMode = null;
     try {
-      List<PublicKey> configured = loadConfiguredPublicKeysOrThrow();
-      selection = selectCertificateForPublicKeys(loaded.keyStore(), configured);
-      selectionMode = "public-key-match";
+      // Prefer the certificate mapped via /map-certificate, same as the actual
+      // signing endpoints (selectCertificateFromToken) — this is both a more
+      // intentional match than a bare public-key scan, and (via
+      // preferConfiguredChainIfFuller) reports the true, complete chain even
+      // when the token's own getCertificateChain() only exposes the leaf.
+      try {
+        List<X509Certificate> configuredCerts = loadConfiguredSigningCertificates();
+        if (configuredCerts != null && !configuredCerts.isEmpty()) {
+          TokenCertificateSelector.Selection sel =
+              TokenCertificateSelector.selectBySignerCertificates(loaded.keyStore(), configuredCerts);
+          if (sel != null) {
+            Certificate[] chain = preferConfiguredChainIfFuller(sel.chain(), sel.alias(), configuredCerts);
+            selection = new CertificateSelection(sel.alias(), sel.certificate(), chain);
+            selectionMode = "configured-signing-cert";
+          }
+        }
+      } catch (IOException ignored) {
+        // No signing-certificate.pem yet (cert never mapped) — fall through below.
+      }
       if (selection == null) {
-        selection = selectBestSigningCertificate(loaded.keyStore());
-        selectionMode = "best-signing-cert";
+        List<PublicKey> configured = loadConfiguredPublicKeysOrThrow();
+        selection = selectCertificateForPublicKeys(loaded.keyStore(), configured);
+        selectionMode = "public-key-match";
+        if (selection == null) {
+          selection = selectBestSigningCertificate(loaded.keyStore());
+          selectionMode = "best-signing-cert";
+        }
       }
     } catch (Exception e) {
       return validationFailure(body, steps, "certificateExtraction",
