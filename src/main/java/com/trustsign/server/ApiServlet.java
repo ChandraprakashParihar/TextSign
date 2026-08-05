@@ -22,6 +22,12 @@ import com.trustsign.core.PdfLtvInspector;
 import com.trustsign.core.TsaClient;
 import com.trustsign.core.TextSignerService;
 import com.trustsign.core.TextVerifyService;
+import com.trustsign.core.CmsVerifyService;
+import com.trustsign.core.CmsTaggedFile;
+import com.trustsign.core.XmlSignerService;
+import com.trustsign.core.XmlVerifyService;
+import com.trustsign.core.ExcelSignerService;
+import com.trustsign.core.ExcelVerifyService;
 import com.trustsign.core.CertificateValidator;
 import com.trustsign.core.LicenceEnforcer;
 import com.trustsign.core.SigningCertificateParser;
@@ -47,6 +53,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.HexFormat;
@@ -2553,6 +2560,36 @@ public final class ApiServlet {
           return;
         }
 
+        case "/auto-sign-csv" -> {
+          handleCmsTaggedSign(req, resp, startMs, "/auto-sign-csv", "data.csv");
+          return;
+        }
+
+        case "/sign-csv" -> {
+          handleCmsTaggedSign(req, resp, startMs, "/sign-csv", "data.csv");
+          return;
+        }
+
+        case "/auto-sign-xml" -> {
+          handleXmlSign(req, resp, startMs, "/auto-sign-xml");
+          return;
+        }
+
+        case "/sign-xml" -> {
+          handleXmlSign(req, resp, startMs, "/sign-xml");
+          return;
+        }
+
+        case "/auto-sign-excel" -> {
+          handleExcelSign(req, resp, startMs, "/auto-sign-excel");
+          return;
+        }
+
+        case "/sign-excel" -> {
+          handleExcelSign(req, resp, startMs, "/sign-excel");
+          return;
+        }
+
         case "/sign-pdf" -> {
           // requireSession(req);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
@@ -3372,6 +3409,26 @@ public final class ApiServlet {
           }
 
           writeJson(resp, result.ok() ? 200 : 422, body);
+        }
+
+        case "/verify-csv" -> {
+          handleCmsTaggedVerify(req, resp);
+          return;
+        }
+
+        case "/verify-text-cms" -> {
+          handleCmsTaggedVerify(req, resp);
+          return;
+        }
+
+        case "/verify-xml" -> {
+          handleXmlVerify(req, resp);
+          return;
+        }
+
+        case "/verify-excel" -> {
+          handleExcelVerify(req, resp);
+          return;
         }
 
         // ── /debug-bytes — REMOVE BEFORE PRODUCTION
@@ -5133,6 +5190,600 @@ public final class ApiServlet {
       return;
     }
     CertificateValidator.validateStrictChainAgainstTrustStore(leaf, chain);
+  }
+
+  /**
+   * Signs the exact bytes of an uploaded file with a detached CMS/PKCS#7
+   * signature ({@link TextSignerService#signDetached}) and appends it as a
+   * {@code <START-CMS-SIGNATURE>} tag — the same convention already used by
+   * {@code /auto-sign-text-cms}. Unlike plain-text signing, this does NOT
+   * normalize line endings: byte-for-byte fidelity matters for CSV/data files,
+   * so whatever was uploaded is exactly what gets signed and re-emitted.
+   */
+  private void handleCmsTaggedSign(
+      HttpServletRequest req,
+      HttpServletResponse resp,
+      long startMs,
+      String endpointLabel,
+      String defaultFilename) throws Exception {
+    var mp = Multipart.read(req, multipartTextMaxBytes);
+    AgentConfig cfg = loadConfig(resp);
+    if (cfg == null) {
+      return;
+    }
+    OutputPreference outputPreference;
+    try {
+      outputPreference = parseOutputPreference(mp, cfg);
+    } catch (IllegalArgumentException e) {
+      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      return;
+    }
+    byte[] data = mp.file("file");
+    if (data == null || data.length == 0) {
+      writeJson(resp, 400, Map.of("error", "Missing file field: file"));
+      return;
+    }
+    if (isPdfUpload(data, mp.filename("file"))) {
+      writeJson(resp, 400,
+          Map.of("error", "PDF is not allowed on " + endpointLabel + ". Use /sign-pdf or /auto-sign-pdf."));
+      return;
+    }
+
+    File outDirFile = null;
+    if (outputPreference.includesFile()) {
+      String outputDir;
+      try {
+        outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+      } catch (IllegalArgumentException e) {
+        writeJson(resp, 400, Map.of("error", e.getMessage()));
+        return;
+      }
+      Path outputBase = null;
+      if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+        outputBase = Paths.get(cfg.outputBaseDir());
+        if (!outputBase.isAbsolute()) {
+          outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+        }
+      }
+      try {
+        outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+      } catch (SecurityException | IllegalArgumentException e) {
+        writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+        return;
+      }
+    }
+
+    char[] pin = resolvePin(cfg);
+    List<String> libs = resolvePkcs11Libraries(cfg);
+    if (libs.isEmpty()) {
+      writeJson(resp, 400, Map.of("error",
+          "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
+      return;
+    }
+
+    Pkcs11Token.Loaded loaded;
+    try {
+      loaded = Pkcs11Token.load(pin, libs);
+    } catch (RuntimeException e) {
+      String detail = buildTokenErrorDetail(e);
+      LOG.error("Token load failed ({}). tookMs={} details={}", endpointLabel,
+          System.currentTimeMillis() - startMs, detail);
+      writeJson(resp, 400, Map.of(
+          "error",
+          "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
+          "details", detail));
+      return;
+    }
+
+    KeyStore ks = loaded.keyStore();
+    byte[] cerBytes = readMultipartCerPayload(mp);
+    CertificateSelection selection;
+    try {
+      selection = selectCertificateFromToken(ks, cerBytes);
+    } catch (Exception e) {
+      writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
+      return;
+    }
+    if (selection == null || selection.chain == null || selection.chain.length == 0) {
+      writeJson(resp, 400, Map.of("error",
+          "Registered certificate was not found in the token. Please use correct token or check token driver."));
+      return;
+    }
+
+    String matchedAlias = selection.alias;
+    X509Certificate signingCert = selection.certificate;
+    Certificate[] chain = selection.chain;
+    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+    java.util.Arrays.fill(pin, '\0');
+    if (key == null) {
+      writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
+      return;
+    }
+
+    X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
+        ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c)
+            .toArray(X509Certificate[]::new)
+        : null;
+    CertificateValidator.validateForSigning(signingCert, x509Chain);
+
+    byte[] cmsBytes = TextSignerService.signDetached(data, key, chain, loaded.provider());
+    byte[] signedBytes = CmsTaggedFile.append(data, cmsBytes);
+
+    String inputFilename = mp.filename("file");
+    if (inputFilename == null || inputFilename.isBlank()) {
+      inputFilename = defaultFilename;
+    }
+
+    String outputPath = null;
+    if (outputPreference.includesFile()) {
+      Path reservedOutPath;
+      try {
+        reservedOutPath = SignedPdfOutputPaths.reserveNextCmsSignedTextPath(
+            Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename, ApiServlet::sanitizeFilename);
+      } catch (IOException e) {
+        LOG.error("{}: failed to reserve output path: {}", endpointLabel, safeMsg(e));
+        writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+        return;
+      }
+      boolean outputWritten = false;
+      try {
+        Files.write(reservedOutPath, signedBytes, StandardOpenOption.TRUNCATE_EXISTING);
+        outputWritten = true;
+        outputPath = reservedOutPath.toAbsolutePath().toString();
+      } finally {
+        if (!outputWritten) {
+          try {
+            Files.deleteIfExists(reservedOutPath);
+          } catch (IOException e) {
+            LOG.error("{}: failed to delete reserved output: {}", endpointLabel, safeMsg(e));
+          }
+        }
+      }
+    }
+
+    Map<String, Object> responseBody = new LinkedHashMap<>();
+    responseBody.put("ok", true);
+    responseBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+    responseBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+    if (outputPreference.includesRaw()) {
+      responseBody.put("signedData", encodeForRawOutput(signedBytes, outputPreference.rawFormat()));
+      responseBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
+    }
+    if (outputPreference.includesFile()) {
+      responseBody.put("outputPath", outputPath);
+    }
+    writeJson(resp, 200, responseBody);
+  }
+
+  /**
+   * Verifies a file signed via the {@code <START-CMS-SIGNATURE>} convention
+   * (used by {@code /auto-sign-text-cms}, {@code /sign-csv}, {@code /auto-sign-csv}):
+   * the signed content is everything before the tag, verified as a detached
+   * CMS/PKCS#7 signature against the base64 payload inside the tag.
+   */
+  private void handleCmsTaggedVerify(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+    var mp = Multipart.read(req, multipartMediumMaxBytes);
+    byte[] signedFileBytes = mp.file("file");
+    if (signedFileBytes == null || signedFileBytes.length == 0) {
+      writeJson(resp, 400, Map.of("ok", false, "reason", "Missing file field: file"));
+      return;
+    }
+    CmsTaggedFile.Parsed parsed;
+    try {
+      parsed = CmsTaggedFile.parse(signedFileBytes);
+    } catch (IllegalArgumentException e) {
+      writeJson(resp, 422, Map.of("ok", false, "reason", safeMsg(e)));
+      return;
+    }
+    CmsVerifyService.Result result = CmsVerifyService.verify(parsed.content(), parsed.cmsBytes());
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("ok", result.ok());
+    body.put("reason", result.reason());
+    if (result.signerCert() != null) {
+      body.put("certificate", toCertificateJson(result.signerCert()));
+    }
+    writeJson(resp, result.ok() ? 200 : 422, body);
+  }
+
+  /**
+   * Signs an XML file with an enveloped XML-DSig signature (embedded
+   * {@code <Signature>} inside the document, {@link XmlSignerService}).
+   * Certificate selection and token handling mirror {@link #handleCmsTaggedSign};
+   * unlike CSV/text signing there is no separate "tag" to append — the signed
+   * output IS the document, with the signature embedded in place.
+   */
+  private void handleXmlSign(
+      HttpServletRequest req,
+      HttpServletResponse resp,
+      long startMs,
+      String endpointLabel) throws Exception {
+    var mp = Multipart.read(req, multipartTextMaxBytes);
+    AgentConfig cfg = loadConfig(resp);
+    if (cfg == null) {
+      return;
+    }
+    OutputPreference outputPreference;
+    try {
+      outputPreference = parseOutputPreference(mp, cfg);
+    } catch (IllegalArgumentException e) {
+      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      return;
+    }
+    byte[] data = mp.file("file");
+    if (data == null || data.length == 0) {
+      writeJson(resp, 400, Map.of("error", "Missing file field: file"));
+      return;
+    }
+    try {
+      XmlSignerService.validateWellFormed(data);
+    } catch (Exception e) {
+      writeJson(resp, 400, Map.of("error", "Uploaded file is not well-formed XML", "details", safeMsg(e)));
+      return;
+    }
+
+    File outDirFile = null;
+    if (outputPreference.includesFile()) {
+      String outputDir;
+      try {
+        outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+      } catch (IllegalArgumentException e) {
+        writeJson(resp, 400, Map.of("error", e.getMessage()));
+        return;
+      }
+      Path outputBase = null;
+      if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+        outputBase = Paths.get(cfg.outputBaseDir());
+        if (!outputBase.isAbsolute()) {
+          outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+        }
+      }
+      try {
+        outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+      } catch (SecurityException | IllegalArgumentException e) {
+        writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+        return;
+      }
+    }
+
+    char[] pin = resolvePin(cfg);
+    List<String> libs = resolvePkcs11Libraries(cfg);
+    if (libs.isEmpty()) {
+      writeJson(resp, 400, Map.of("error",
+          "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
+      return;
+    }
+
+    Pkcs11Token.Loaded loaded;
+    try {
+      loaded = Pkcs11Token.load(pin, libs);
+    } catch (RuntimeException e) {
+      String detail = buildTokenErrorDetail(e);
+      LOG.error("Token load failed ({}). tookMs={} details={}", endpointLabel,
+          System.currentTimeMillis() - startMs, detail);
+      writeJson(resp, 400, Map.of(
+          "error",
+          "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
+          "details", detail));
+      return;
+    }
+
+    KeyStore ks = loaded.keyStore();
+    byte[] cerBytes = readMultipartCerPayload(mp);
+    CertificateSelection selection;
+    try {
+      selection = selectCertificateFromToken(ks, cerBytes);
+    } catch (Exception e) {
+      writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
+      return;
+    }
+    if (selection == null || selection.chain == null || selection.chain.length == 0) {
+      writeJson(resp, 400, Map.of("error",
+          "Registered certificate was not found in the token. Please use correct token or check token driver."));
+      return;
+    }
+
+    String matchedAlias = selection.alias;
+    X509Certificate signingCert = selection.certificate;
+    Certificate[] chain = selection.chain;
+    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+    java.util.Arrays.fill(pin, '\0');
+    if (key == null) {
+      writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
+      return;
+    }
+
+    X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
+        ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c)
+            .toArray(X509Certificate[]::new)
+        : null;
+    CertificateValidator.validateForSigning(signingCert, x509Chain);
+
+    byte[] signedBytes;
+    try {
+      signedBytes = XmlSignerService.sign(data, key, chain, loaded.provider());
+    } catch (Exception e) {
+      LOG.error("{}: XML signing failed. alias={} err={}", endpointLabel, matchedAlias, safeMsg(e));
+      writeJson(resp, 500, Map.of("error", "Unable to sign the XML document", "details", safeMsg(e)));
+      return;
+    }
+
+    String inputFilename = mp.filename("file");
+    if (inputFilename == null || inputFilename.isBlank()) {
+      inputFilename = "document.xml";
+    }
+
+    String outputPath = null;
+    if (outputPreference.includesFile()) {
+      Path reservedOutPath;
+      try {
+        reservedOutPath = SignedPdfOutputPaths.reserveNextCmsSignedTextPath(
+            Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename, ApiServlet::sanitizeFilename);
+      } catch (IOException e) {
+        LOG.error("{}: failed to reserve output path: {}", endpointLabel, safeMsg(e));
+        writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+        return;
+      }
+      boolean outputWritten = false;
+      try {
+        Files.write(reservedOutPath, signedBytes, StandardOpenOption.TRUNCATE_EXISTING);
+        outputWritten = true;
+        outputPath = reservedOutPath.toAbsolutePath().toString();
+      } finally {
+        if (!outputWritten) {
+          try {
+            Files.deleteIfExists(reservedOutPath);
+          } catch (IOException e) {
+            LOG.error("{}: failed to delete reserved output: {}", endpointLabel, safeMsg(e));
+          }
+        }
+      }
+    }
+
+    Map<String, Object> responseBody = new LinkedHashMap<>();
+    responseBody.put("ok", true);
+    responseBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+    responseBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+    if (outputPreference.includesRaw()) {
+      responseBody.put("signedData", encodeForRawOutput(signedBytes, outputPreference.rawFormat()));
+      responseBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
+    }
+    if (outputPreference.includesFile()) {
+      responseBody.put("outputPath", outputPath);
+    }
+    writeJson(resp, 200, responseBody);
+  }
+
+  private void handleXmlVerify(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+    var mp = Multipart.read(req, multipartMediumMaxBytes);
+    byte[] signedFileBytes = mp.file("file");
+    if (signedFileBytes == null || signedFileBytes.length == 0) {
+      writeJson(resp, 400, Map.of("ok", false, "reason", "Missing file field: file"));
+      return;
+    }
+    XmlVerifyService.Result result = XmlVerifyService.verify(signedFileBytes);
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("ok", result.ok());
+    body.put("reason", result.reason());
+    body.put("signatureCount", result.signatureCount());
+    List<Map<String, Object>> signatures = new ArrayList<>();
+    for (XmlVerifyService.SignatureReport sr : result.signatures()) {
+      Map<String, Object> srMap = new LinkedHashMap<>();
+      srMap.put("ok", sr.ok());
+      srMap.put("reason", sr.reason());
+      if (sr.certificate() != null) {
+        Map<String, Object> certMap = new LinkedHashMap<>();
+        certMap.put("subject", sr.certificate().subject());
+        certMap.put("issuer", sr.certificate().issuer());
+        certMap.put("serialNumber", sr.certificate().serialNumber());
+        certMap.put("validFrom", sr.certificate().validFrom());
+        certMap.put("validTo", sr.certificate().validTo());
+        certMap.put("algorithm", sr.certificate().algorithm());
+        srMap.put("certificate", certMap);
+      }
+      signatures.add(srMap);
+    }
+    body.put("signatures", signatures);
+    writeJson(resp, result.ok() ? 200 : 422, body);
+  }
+
+  /**
+   * Signs an .xlsx file with a native OOXML digital signature
+   * ({@link ExcelSignerService}) — recognized by Excel itself, unlike a
+   * detached/appended signature. Certificate selection and token handling
+   * mirror {@link #handleXmlSign}.
+   */
+  private void handleExcelSign(
+      HttpServletRequest req,
+      HttpServletResponse resp,
+      long startMs,
+      String endpointLabel) throws Exception {
+    var mp = Multipart.read(req, multipartPdfMaxBytes);
+    AgentConfig cfg = loadConfig(resp);
+    if (cfg == null) {
+      return;
+    }
+    OutputPreference outputPreference;
+    try {
+      outputPreference = parseOutputPreference(mp, cfg);
+    } catch (IllegalArgumentException e) {
+      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      return;
+    }
+    byte[] data = mp.file("file");
+    if (data == null || data.length == 0) {
+      writeJson(resp, 400, Map.of("error", "Missing file field: file"));
+      return;
+    }
+    try {
+      ExcelSignerService.validateOpenable(data);
+    } catch (Exception e) {
+      writeJson(resp, 400, Map.of("error", safeMsg(e)));
+      return;
+    }
+
+    File outDirFile = null;
+    if (outputPreference.includesFile()) {
+      String outputDir;
+      try {
+        outputDir = requireAutoSignOutputDirForFileOutput(cfg);
+      } catch (IllegalArgumentException e) {
+        writeJson(resp, 400, Map.of("error", e.getMessage()));
+        return;
+      }
+      Path outputBase = null;
+      if (cfg.outputBaseDir() != null && !cfg.outputBaseDir().isBlank()) {
+        outputBase = Paths.get(cfg.outputBaseDir());
+        if (!outputBase.isAbsolute()) {
+          outputBase = Paths.get(System.getProperty("user.dir", ".")).resolve(outputBase).normalize();
+        }
+      }
+      try {
+        outDirFile = resolveSafeOutputDir(outputDir, outputBase);
+      } catch (SecurityException | IllegalArgumentException e) {
+        writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+        return;
+      }
+    }
+
+    char[] pin = resolvePin(cfg);
+    List<String> libs = resolvePkcs11Libraries(cfg);
+    if (libs.isEmpty()) {
+      writeJson(resp, 400, Map.of("error",
+          "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
+      return;
+    }
+
+    Pkcs11Token.Loaded loaded;
+    try {
+      loaded = Pkcs11Token.load(pin, libs);
+    } catch (RuntimeException e) {
+      String detail = buildTokenErrorDetail(e);
+      LOG.error("Token load failed ({}). tookMs={} details={}", endpointLabel,
+          System.currentTimeMillis() - startMs, detail);
+      writeJson(resp, 400, Map.of(
+          "error",
+          "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
+          "details", detail));
+      return;
+    }
+
+    KeyStore ks = loaded.keyStore();
+    byte[] cerBytes = readMultipartCerPayload(mp);
+    CertificateSelection selection;
+    try {
+      selection = selectCertificateFromToken(ks, cerBytes);
+    } catch (Exception e) {
+      writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
+      return;
+    }
+    if (selection == null || selection.chain == null || selection.chain.length == 0) {
+      writeJson(resp, 400, Map.of("error",
+          "Registered certificate was not found in the token. Please use correct token or check token driver."));
+      return;
+    }
+
+    String matchedAlias = selection.alias;
+    X509Certificate signingCert = selection.certificate;
+    Certificate[] chain = selection.chain;
+    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
+    java.util.Arrays.fill(pin, '\0');
+    if (key == null) {
+      writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
+      return;
+    }
+
+    X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
+        ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c)
+            .toArray(X509Certificate[]::new)
+        : null;
+    CertificateValidator.validateForSigning(signingCert, x509Chain);
+
+    byte[] signedBytes;
+    try {
+      signedBytes = ExcelSignerService.sign(data, key, chain, loaded.provider());
+    } catch (Exception e) {
+      LOG.error("{}: Excel signing failed. alias={} err={}", endpointLabel, matchedAlias, safeMsg(e));
+      writeJson(resp, 500, Map.of("error", "Unable to sign the Excel workbook", "details", safeMsg(e)));
+      return;
+    }
+
+    String inputFilename = mp.filename("file");
+    if (inputFilename == null || inputFilename.isBlank()) {
+      inputFilename = "workbook.xlsx";
+    }
+
+    String outputPath = null;
+    if (outputPreference.includesFile()) {
+      Path reservedOutPath;
+      try {
+        reservedOutPath = SignedPdfOutputPaths.reserveNextCmsSignedTextPath(
+            Objects.requireNonNull(outDirFile, "outDirFile").toPath(), inputFilename, ApiServlet::sanitizeFilename);
+      } catch (IOException e) {
+        LOG.error("{}: failed to reserve output path: {}", endpointLabel, safeMsg(e));
+        writeJson(resp, 500, Map.of("error", "Could not reserve output file", "details", safeMsg(e)));
+        return;
+      }
+      boolean outputWritten = false;
+      try {
+        Files.write(reservedOutPath, signedBytes, StandardOpenOption.TRUNCATE_EXISTING);
+        outputWritten = true;
+        outputPath = reservedOutPath.toAbsolutePath().toString();
+      } finally {
+        if (!outputWritten) {
+          try {
+            Files.deleteIfExists(reservedOutPath);
+          } catch (IOException e) {
+            LOG.error("{}: failed to delete reserved output: {}", endpointLabel, safeMsg(e));
+          }
+        }
+      }
+    }
+
+    Map<String, Object> responseBody = new LinkedHashMap<>();
+    responseBody.put("ok", true);
+    responseBody.put("subjectDn", signingCert.getSubjectX500Principal().getName());
+    responseBody.put("serialNumber", signingCert.getSerialNumber().toString(16));
+    if (outputPreference.includesRaw()) {
+      responseBody.put("signedData", encodeForRawOutput(signedBytes, outputPreference.rawFormat()));
+      responseBody.put("outputFormat", outputPreference.rawFormat().name().toLowerCase(java.util.Locale.ROOT));
+    }
+    if (outputPreference.includesFile()) {
+      responseBody.put("outputPath", outputPath);
+    }
+    writeJson(resp, 200, responseBody);
+  }
+
+  private void handleExcelVerify(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+    var mp = Multipart.read(req, multipartPdfMaxBytes);
+    byte[] signedFileBytes = mp.file("file");
+    if (signedFileBytes == null || signedFileBytes.length == 0) {
+      writeJson(resp, 400, Map.of("ok", false, "reason", "Missing file field: file"));
+      return;
+    }
+    ExcelVerifyService.Result result = ExcelVerifyService.verify(signedFileBytes);
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("ok", result.ok());
+    body.put("reason", result.reason());
+    body.put("signatureCount", result.signatureCount());
+    List<Map<String, Object>> signatures = new ArrayList<>();
+    for (ExcelVerifyService.SignatureReport sr : result.signatures()) {
+      Map<String, Object> srMap = new LinkedHashMap<>();
+      srMap.put("ok", sr.ok());
+      srMap.put("reason", sr.reason());
+      if (sr.certificate() != null) {
+        Map<String, Object> certMap = new LinkedHashMap<>();
+        certMap.put("subject", sr.certificate().subject());
+        certMap.put("issuer", sr.certificate().issuer());
+        certMap.put("serialNumber", sr.certificate().serialNumber());
+        certMap.put("validFrom", sr.certificate().validFrom());
+        certMap.put("validTo", sr.certificate().validTo());
+        certMap.put("algorithm", sr.certificate().algorithm());
+        srMap.put("certificate", certMap);
+      }
+      signatures.add(srMap);
+    }
+    body.put("signatures", signatures);
+    writeJson(resp, result.ok() ? 200 : 422, body);
   }
 
   private static Map<String, Object> toCertificateJson(X509Certificate cert) {

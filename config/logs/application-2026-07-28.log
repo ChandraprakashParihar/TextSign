@@ -1,0 +1,128 @@
+2026-07-28 16:14:28.956 [main] INFO  [txnId=na] [ip=na] c.t.server.LoggingInitializer - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-07-28 16:14:28.957 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-28 16:14:29.329 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Starting Main using Java 25.0.3 with PID 25267 (/Users/jainnibha/chandra-workspace/trustsign/build/classes/java/main started by jainnibha in /Users/jainnibha/chandra-workspace/trustsign)
+2026-07-28 16:14:29.329 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - No active profile set, falling back to 1 default profile: "default"
+2026-07-28 16:14:29.711 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-07-28 16:14:29.747 [main] INFO  [txnId=na] [ip=na] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 395 ms
+2026-07-28 16:14:29.960 [main] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/'
+2026-07-28 16:14:29.964 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Started Main in 0.757 seconds (process running for 1.31)
+2026-07-28 16:14:29.966 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - TrustSign API at http://0.0.0.0:8080/pki — Spring Boot MVC
+2026-07-28 16:14:58.013 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-07-28 16:14:58.015 [http-nio-8080-exec-1] INFO  [txnId=na] [ip=na] o.s.web.servlet.DispatcherServlet - Completed initialization in 0 ms
+2026-07-28 16:14:58.035 [http-nio-8080-exec-1] INFO  [txnId=9930ea13b7ea49609420d50e164c30e0] [ip=0:0:0:0:0:0:0:1] com.trustsign.server.ApiServlet - Reloaded config from disk: /Users/jainnibha/chandra-workspace/trustsign/config/config.json
+2026-07-28 16:15:00.575 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=tokenPresence start
+2026-07-28 16:15:03.884 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=tokenPresence ok library=/usr/local/lib/libcastle_v2.1.0.0.dylib
+2026-07-28 16:15:03.884 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateExtraction start
+2026-07-28 16:15:03.886 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Loaded signing certificate: thumbprint=484888c16e2262f5193a381c66970a6c98808453 subject='CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN'
+2026-07-28 16:15:03.886 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Loaded signing certificate: thumbprint=47193b47b0f6b8d5d39072579aaf4134cec9faee subject='CN=XtraTrust Sub CA 2022,2.5.4.51=#13045a2d3234,STREET=Zone-1\, M.P. Nagar\, Bhopal,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=Certifying Authority,O=XtraTrust DigiSign Private Limited,C=IN'
+2026-07-28 16:15:03.886 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Loaded signing certificate: thumbprint=8b16954de8ffef1deb9eba1461cf310ceff82059 subject='CN=XtraTrust CA 2022,2.5.4.51=#13045a2d3234,STREET=Zone-1\, M.P. Nagar\, Bhopal,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=Certifying Authority,O=XtraTrust DigiSign Private Limited,C=IN'
+2026-07-28 16:15:03.886 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Loaded signing certificate: thumbprint=a79e41380bab3ed7f5188d9a5209cefcb3ca6991 subject='CN=CCA India 2022,O=India PKI,C=IN'
+2026-07-28 16:15:03.886 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateExtraction ok alias=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4's XtraTrust Sub CA 2022 ID mode=configured-signing-cert
+2026-07-28 16:15:03.887 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateValidity start alias=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4's XtraTrust Sub CA 2022 ID
+2026-07-28 16:15:03.887 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateValidity ok
+2026-07-28 16:15:03.887 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateChainValidation start
+2026-07-28 16:15:03.898 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] c.t.core.CertificateValidator - Reloaded truststore from disk: /Users/jainnibha/chandra-workspace/trustsign/config/truststore.jks
+2026-07-28 16:15:03.908 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] c.t.core.CertificateValidator - Strict certificate chain validation successful: subject='CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN', chainLength=4, root='CN=CCA India 2022,O=India PKI,C=IN'
+2026-07-28 16:15:03.908 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=certificateChainValidation ok chainLength=4
+2026-07-28 16:15:03.908 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=revocationCheck start
+2026-07-28 16:15:04.051 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=revocationCheck ok source=ocsp
+2026-07-28 16:15:04.052 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=signatureCapability start
+2026-07-28 16:15:04.052 [http-nio-8080-exec-3] INFO  [txnId=62b78e20af5c408ea4116c1d4e81eaf4] [ip=127.0.0.1] com.trustsign.server.ApiServlet - /validate-token step=signatureCapability ok
+2026-07-28 16:16:22.670 [http-nio-8080-exec-6] INFO  [txnId=23ad1047c4ea42da8c1b909f49c535c7] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Auto-signing PDF request received
+2026-07-28 16:16:23.701 [http-nio-8080-exec-6] INFO  [txnId=23ad1047c4ea42da8c1b909f49c535c7] [ip=127.0.0.1] c.t.core.CertificateValidator - Strict certificate chain validation successful: subject='CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN', chainLength=4, root='CN=CCA India 2022,O=India PKI,C=IN'
+2026-07-28 16:16:23.711 [http-nio-8080-exec-6] INFO  [txnId=23ad1047c4ea42da8c1b909f49c535c7] [ip=127.0.0.1] com.trustsign.core.PdfSignerService - Starting PDF signing. pages=1, finalVersion=false, tsaEnabled=false
+2026-07-28 16:16:23.763 [http-nio-8080-exec-6] INFO  [txnId=23ad1047c4ea42da8c1b909f49c535c7] [ip=127.0.0.1] com.trustsign.core.PdfSignerService - Signature placement page=1 mode=default-bottom-right requested=[x=null, y=null] rect=[x=395.0, y=24.0, w=190.0, h=63.08] page=[w=609.0, h=841.0]
+2026-07-28 16:16:23.831 [http-nio-8080-exec-6] WARN  [txnId=23ad1047c4ea42da8c1b909f49c535c7] [ip=127.0.0.1] com.trustsign.core.PdfSignerService - Signature image path does not exist or is not a file: /Users/jainnibha/chandra-workspace/trustsign/greentickrbg.png
+2026-07-28 16:16:23.899 [http-nio-8080-exec-6] WARN  [txnId=23ad1047c4ea42da8c1b909f49c535c7] [ip=127.0.0.1] c.itextpdf.pdfa.checker.PdfAChecker - Catalog dictionary should contain lang entry
+2026-07-28 16:16:23.901 [http-nio-8080-exec-6] ERROR [txnId=23ad1047c4ea42da8c1b909f49c535c7] [ip=127.0.0.1] com.trustsign.server.ApiServlet - PDF signing failed. alias=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4's XtraTrust Sub CA 2022 ID tookMs=1248 err=PKCS#11 signing failed: All the fonts must be embedded. This one is not: Helvetica
+com.trustsign.core.PdfSignerService$CryptoSigningException: PKCS#11 signing failed: All the fonts must be embedded. This one is not: Helvetica
+	at com.trustsign.core.PdfSignerService.signDetachedWithIText(PdfSignerService.java:716)
+	at com.trustsign.core.PdfSignerService.signPdf(PdfSignerService.java:551)
+	at com.trustsign.core.PdfSignerService.signPdf(PdfSignerService.java:377)
+	at com.trustsign.server.ApiServlet.handlePost(ApiServlet.java:1775)
+	at com.trustsign.server.TSController.autoSignPdf(TSController.java:68)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at org.springframework.web.method.support.InvocableHandlerMethod.doInvoke(InvocableHandlerMethod.java:255)
+	at org.springframework.web.method.support.InvocableHandlerMethod.invokeForRequest(InvocableHandlerMethod.java:188)
+	at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:118)
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod(RequestMappingHandlerAdapter.java:926)
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal(RequestMappingHandlerAdapter.java:831)
+	at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle(AbstractHandlerMethodAdapter.java:87)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doPost(FrameworkServlet.java:914)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:590)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:195)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at com.trustsign.server.SigningConcurrencyFilter.doFilter(SigningConcurrencyFilter.java:45)
+	at jakarta.servlet.http.HttpFilter.doFilter(HttpFilter.java:53)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at com.trustsign.server.RequestTracingFilter.doFilterInternal(RequestTracingFilter.java:30)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at com.trustsign.server.PrivateNetworkAccessFilter.doFilterInternal(PrivateNetworkAccessFilter.java:45)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:483)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:384)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:905)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1741)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1190)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+Caused by: com.itextpdf.pdfa.exceptions.PdfAConformanceException: All the fonts must be embedded. This one is not: Helvetica
+	at com.itextpdf.pdfa.checker.PdfA1Checker.checkFont(PdfA1Checker.java:305)
+	at com.itextpdf.pdfa.PdfADocument.flushFonts(PdfADocument.java:329)
+	at com.itextpdf.kernel.pdf.PdfDocument.close(PdfDocument.java:913)
+	at com.itextpdf.signatures.PdfSigner.preClose(PdfSigner.java:906)
+	at com.itextpdf.signatures.PdfSigner.signDetached(PdfSigner.java:603)
+	at com.itextpdf.signatures.PdfSigner.signDetached(PdfSigner.java:505)
+	at com.trustsign.core.PdfSignerService.runDetachedSign(PdfSignerService.java:1067)
+	at com.trustsign.core.PdfSignerService.lambda$signDetachedWithIText$0(PdfSignerService.java:664)
+	at com.trustsign.core.PdfSignerService.withRetry(PdfSignerService.java:961)
+	at com.trustsign.core.PdfSignerService.signDetachedWithIText(PdfSignerService.java:662)
+	... 64 common frames omitted
+2026-07-28 16:16:40.140 [http-nio-8080-exec-7] INFO  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] com.trustsign.server.ApiServlet - Auto-signing PDF request received
+2026-07-28 16:16:42.725 [http-nio-8080-exec-7] INFO  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] c.t.core.CertificateValidator - Strict certificate chain validation successful: subject='CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN', chainLength=4, root='CN=CCA India 2022,O=India PKI,C=IN'
+2026-07-28 16:16:42.726 [http-nio-8080-exec-7] INFO  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] com.trustsign.core.PdfSignerService - Starting PDF signing. pages=1, finalVersion=false, tsaEnabled=false
+2026-07-28 16:16:42.733 [http-nio-8080-exec-7] INFO  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] com.trustsign.core.PdfSignerService - Signature placement page=1 mode=default-bottom-right requested=[x=null, y=null] rect=[x=381.2, y=24.0, w=190.0, h=63.13] page=[w=595.2, h=841.68]
+2026-07-28 16:16:42.734 [http-nio-8080-exec-7] WARN  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] com.trustsign.core.PdfSignerService - Signature image path does not exist or is not a file: /Users/jainnibha/chandra-workspace/trustsign/greentickrbg.png
+2026-07-28 16:16:43.147 [http-nio-8080-exec-7] INFO  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] com.trustsign.core.LtvEnabler - LTV: CMS certificate store has 4 cert(s) total (signer='CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN', signer issuer='CN=XtraTrust Sub CA 2022,2.5.4.51=#13045a2d3234,STREET=Zone-1\, M.P. Nagar\, Bhopal,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=Certifying Authority,O=XtraTrust DigiSign Private Limited,C=IN'): [subject='CN=CCA India 2022,O=India PKI,C=IN', subject='CN=XtraTrust Sub CA 2022,2.5.4.51=#13045a2d3234,STREET=Zone-1\, M.P. Nagar\, Bhopal,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=Certifying Authority,O=XtraTrust DigiSign Private Limited,C=IN', subject='CN=XtraTrust CA 2022,2.5.4.51=#13045a2d3234,STREET=Zone-1\, M.P. Nagar\, Bhopal,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=Certifying Authority,O=XtraTrust DigiSign Private Limited,C=IN', subject='CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN']
+2026-07-28 16:16:43.148 [http-nio-8080-exec-7] INFO  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] com.trustsign.core.LtvEnabler - LTV: chain resolved from signed PDF's CMS certificates for signer 'CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN': 4 cert(s): CN=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4,2.5.4.5=#134064383336633133666638633538313737393566393339306432383462323035636163333939363363383561646132636639653736343031643637656139393438,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=operations,O=XTRATRUST DIGISIGN PRIVATE LIMITED,C=IN -> CN=XtraTrust Sub CA 2022,2.5.4.51=#13045a2d3234,STREET=Zone-1\, M.P. Nagar\, Bhopal,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=Certifying Authority,O=XtraTrust DigiSign Private Limited,C=IN -> CN=XtraTrust CA 2022,2.5.4.51=#13045a2d3234,STREET=Zone-1\, M.P. Nagar\, Bhopal,ST=Madhya Pradesh,2.5.4.17=#1306343632303131,OU=Certifying Authority,O=XtraTrust DigiSign Private Limited,C=IN -> CN=CCA India 2022,O=India PKI,C=IN
+2026-07-28 16:16:43.578 [http-nio-8080-exec-7] WARN  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] com.trustsign.core.LtvEnabler - Document chain OCSP fetch failed: OCSP fetch failed for all endpoints: [http://ocvs.gov.in]
+2026-07-28 16:16:43.788 [http-nio-8080-exec-7] INFO  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] com.trustsign.core.LtvEnabler - LTV: stopping chain walk at index 3 (self-signed root: 'CN=CCA India 2022,O=India PKI,C=IN')
+2026-07-28 16:16:43.797 [http-nio-8080-exec-7] INFO  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] com.trustsign.core.PdfSignerService - PDF signing completed in 1071 ms. timestamped=false, tsaFallback=false
+2026-07-28 16:16:43.797 [http-nio-8080-exec-7] INFO  [txnId=931bfe5f9d884eb58ad3dfb939b46087] [ip=127.0.0.1] com.trustsign.server.ApiServlet - PDF signed. alias=DS XTRATRUST DIGISIGN PRIVATE LIMITED 4's XtraTrust Sub CA 2022 ID pages=1 timestamped=false tookMs=1071
+2026-07-28 16:17:40.420 [SpringApplicationShutdownHook] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Commencing graceful shutdown. Waiting for active requests to complete
+2026-07-28 16:17:40.423 [tomcat-shutdown] INFO  [txnId=na] [ip=na] o.s.b.w.e.tomcat.GracefulShutdown - Graceful shutdown complete

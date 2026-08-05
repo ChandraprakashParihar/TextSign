@@ -36,6 +36,18 @@ dependencies {
   implementation("com.itextpdf:sign:7.2.5")
   implementation("org.slf4j:slf4j-api:2.0.13")
 
+  // Native OOXML (.xlsx) digital signatures. poi-ooxml's dsig classes
+  // (SignatureInfo/SignatureConfig) require org.apache.santuario:xmlsec on
+  // the runtime classpath — it is NOT a transitive dependency of poi-ooxml,
+  // must be declared explicitly.
+  implementation("org.apache.poi:poi-ooxml:5.5.1")
+  // Pinned to exactly what poi-ooxml:5.5.1 itself declares (optional, compile
+  // scope) — newer xmlsec majors are binary-incompatible with the internal
+  // org.apache.jcp.xml.dsig.internal.dom.* classes POI's dsig module uses
+  // (confirmed: 4.0.4 throws InstantiationError on
+  // org.apache.xml.security.signature.XMLSignatureInput at sign time).
+  implementation("org.apache.santuario:xmlsec:3.0.6")
+
   testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
   testImplementation("org.springframework.boot:spring-boot-starter-test:3.3.5")
   testRuntimeOnly("org.junit.platform:junit-platform-launcher")

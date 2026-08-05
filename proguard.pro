@@ -116,6 +116,20 @@
 # endpoint.
 -keepclassmembers class com.trustsign.core.SignedFileAnalyzer$** { *; }
 
+# PdfVerifyService.Result (and its nested SignatureReport/CertificateDetails
+# records) is returned directly as the JSON body of /verify-pdf. Pre-existing
+# gap found and fixed alongside adding verify-xml/verify-excel, which follow
+# the same direct-serialization pattern.
+-keepclassmembers class com.trustsign.core.PdfVerifyService$** { *; }
+
+# XmlVerifyService.Result / SignatureReport / CertificateDetails: same
+# direct-Jackson-serialization pattern for /verify-xml.
+-keepclassmembers class com.trustsign.core.XmlVerifyService$** { *; }
+
+# ExcelVerifyService.Result / SignatureReport / CertificateDetails: same
+# direct-Jackson-serialization pattern for /verify-excel.
+-keepclassmembers class com.trustsign.core.ExcelVerifyService$** { *; }
+
 # ── 8. Public cross-package API ───────────────────────────────────────────────
 # These are concrete methods called from obfuscated code in other packages.
 # ProGuard updates references consistently, but the member signatures must

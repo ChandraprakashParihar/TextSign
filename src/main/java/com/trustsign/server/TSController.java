@@ -118,6 +118,56 @@ public class TSController {
     api.handlePost(req, resp, "/verify-text");
   }
 
+  @PostMapping("/verify-text-cms")
+  public void verifyTextCms(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/verify-text-cms");
+  }
+
+  @PostMapping("/auto-sign-csv")
+  public void autoSignCsv(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/auto-sign-csv");
+  }
+
+  @PostMapping("/sign-csv")
+  public void signCsv(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/sign-csv");
+  }
+
+  @PostMapping("/verify-csv")
+  public void verifyCsv(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/verify-csv");
+  }
+
+  @PostMapping("/auto-sign-xml")
+  public void autoSignXml(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/auto-sign-xml");
+  }
+
+  @PostMapping("/sign-xml")
+  public void signXml(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/sign-xml");
+  }
+
+  @PostMapping("/verify-xml")
+  public void verifyXml(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/verify-xml");
+  }
+
+  @PostMapping("/auto-sign-excel")
+  public void autoSignExcel(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/auto-sign-excel");
+  }
+
+  @PostMapping("/sign-excel")
+  public void signExcel(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/sign-excel");
+  }
+
+  @PostMapping("/verify-excel")
+  public void verifyExcel(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/verify-excel");
+  }
+
   @PostMapping("/validate-token")
   public void validateToken(HttpServletRequest req, HttpServletResponse resp) throws IOException {
     api.handlePost(req, resp, "/validate-token");
