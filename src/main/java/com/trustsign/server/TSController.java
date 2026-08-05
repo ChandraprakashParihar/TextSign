@@ -168,6 +168,36 @@ public class TSController {
     api.handlePost(req, resp, "/verify-excel");
   }
 
+  @PostMapping("/auto-sign-word")
+  public void autoSignWord(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/auto-sign-word");
+  }
+
+  @PostMapping("/sign-word")
+  public void signWord(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/sign-word");
+  }
+
+  @PostMapping("/verify-word")
+  public void verifyWord(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/verify-word");
+  }
+
+  @PostMapping("/auto-sign-ppt")
+  public void autoSignPpt(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/auto-sign-ppt");
+  }
+
+  @PostMapping("/sign-ppt")
+  public void signPpt(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/sign-ppt");
+  }
+
+  @PostMapping("/verify-ppt")
+  public void verifyPpt(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/verify-ppt");
+  }
+
   @PostMapping("/validate-token")
   public void validateToken(HttpServletRequest req, HttpServletResponse resp) throws IOException {
     api.handlePost(req, resp, "/validate-token");

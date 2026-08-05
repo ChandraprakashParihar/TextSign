@@ -30,6 +30,10 @@ public final class SigningConcurrencyFilter extends HttpFilter {
       "/sign-xml",
       "/auto-sign-excel",
       "/sign-excel",
+      "/auto-sign-word",
+      "/sign-word",
+      "/auto-sign-ppt",
+      "/sign-ppt",
       "/validate-token");   // also opens PKCS#11 — must be throttled like signing ops
 
   private static final Set<String> GET_TOKEN_PATHS = Set.of(

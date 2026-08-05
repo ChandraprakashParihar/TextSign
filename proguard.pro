@@ -126,9 +126,11 @@
 # direct-Jackson-serialization pattern for /verify-xml.
 -keepclassmembers class com.trustsign.core.XmlVerifyService$** { *; }
 
-# ExcelVerifyService.Result / SignatureReport / CertificateDetails: same
-# direct-Jackson-serialization pattern for /verify-excel.
--keepclassmembers class com.trustsign.core.ExcelVerifyService$** { *; }
+# OoxmlVerifyService.Result / SignatureReport / CertificateDetails: same
+# direct-Jackson-serialization pattern for /verify-excel, /verify-word,
+# /verify-ppt (OOXML digital-signature verification is format-agnostic, so
+# one service backs all three — see OoxmlVerifyService's class Javadoc).
+-keepclassmembers class com.trustsign.core.OoxmlVerifyService$** { *; }
 
 # ── 8. Public cross-package API ───────────────────────────────────────────────
 # These are concrete methods called from obfuscated code in other packages.

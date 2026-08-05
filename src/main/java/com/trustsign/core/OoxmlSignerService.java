@@ -3,6 +3,8 @@ package com.trustsign.core;
 import org.apache.poi.EncryptedDocumentException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.openxml4j.opc.PackageAccess;
+import org.apache.poi.openxml4j.opc.PackagePartName;
+import org.apache.poi.openxml4j.opc.PackagingURIHelper;
 import org.apache.poi.poifs.crypt.dsig.SignatureConfig;
 import org.apache.poi.poifs.crypt.dsig.SignatureInfo;
 import org.apache.poi.poifs.crypt.dsig.facets.KeyInfoSignatureFacet;
@@ -39,28 +41,67 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Adds a real, native OOXML digital signature to an .xlsx package (Apache POI)
- * — recognized by Excel itself (File &gt; Info &gt; View Signatures), unlike a
- * detached/appended signature.
+ * Adds a real, native OOXML digital signature to any OOXML package — .xlsx
+ * (Excel), .docx (Word), or .pptx (PowerPoint) — recognized by Office itself
+ * (File &gt; Info &gt; View Signatures), unlike a detached/appended
+ * signature. The OOXML digital-signature mechanism (Open Packaging
+ * Conventions + Apache POI's {@code poifs.crypt.dsig}) is entirely
+ * format-agnostic: it operates on the {@link OPCPackage} container that
+ * underlies all three formats, not on spreadsheet/document/presentation
+ * content, so one implementation serves all three.
  */
-public final class ExcelSignerService {
+public final class OoxmlSignerService {
 
-  private static final Logger LOG = LoggerFactory.getLogger(ExcelSignerService.class);
+  private static final Logger LOG = LoggerFactory.getLogger(OoxmlSignerService.class);
+
+  /**
+   * The OOXML formats this service supports, plus the per-format metadata
+   * needed for user-facing messages and to sanity-check that an upload
+   * actually is what the caller claims (e.g. reject a .pptx posted to the
+   * Word endpoint) via presence of that format's well-known main part.
+   */
+  public enum OoxmlFormat {
+    XLSX("Excel workbook", "workbook.xlsx", "/xl/workbook.xml"),
+    DOCX("Word document", "document.docx", "/word/document.xml"),
+    PPTX("PowerPoint presentation", "presentation.pptx", "/ppt/presentation.xml");
+
+    private final String label;
+    private final String defaultFilename;
+    private final String mainPartName;
+
+    OoxmlFormat(String label, String defaultFilename, String mainPartName) {
+      this.label = label;
+      this.defaultFilename = defaultFilename;
+      this.mainPartName = mainPartName;
+    }
+
+    public String label() {
+      return label;
+    }
+
+    public String defaultFilename() {
+      return defaultFilename;
+    }
+  }
 
   /**
    * Serializes registration/teardown of the temporary narrow signature
-   * provider below across concurrent Excel-signing calls — see
-   * {@link #withNarrowSignatureProvider}.
+   * provider below across concurrent OOXML-signing calls — see
+   * {@link #withShimmedSunRsaSign}.
    */
   private static final Object PROVIDER_ELEVATION_LOCK = new Object();
 
   public static byte[] sign(
-      byte[] xlsxBytes,
+      byte[] ooxmlBytes,
+      OoxmlFormat format,
       PrivateKey privateKey,
       Certificate[] chain,
       Provider p11Provider) throws Exception {
-    if (xlsxBytes == null || xlsxBytes.length == 0) {
-      throw new IllegalArgumentException("xlsxBytes is empty");
+    if (ooxmlBytes == null || ooxmlBytes.length == 0) {
+      throw new IllegalArgumentException("file bytes are empty");
+    }
+    if (format == null) {
+      throw new IllegalArgumentException("format is null");
     }
     if (privateKey == null) {
       throw new IllegalArgumentException("privateKey is null");
@@ -84,29 +125,33 @@ public final class ExcelSignerService {
 
     X509Certificate signer = certChain.get(0);
     long start = System.currentTimeMillis();
-    LOG.info("Starting Excel signing. workbookBytes={}, signerSubject={}, signerSerial={}",
-        xlsxBytes.length, signer.getSubjectX500Principal().getName(), signer.getSerialNumber().toString(16));
+    LOG.info("Starting {} signing. fileBytes={}, signerSubject={}, signerSerial={}",
+        format.label(), ooxmlBytes.length, signer.getSubjectX500Principal().getName(),
+        signer.getSerialNumber().toString(16));
 
     // OPCPackage.open(InputStream) is read-only; modifying + saving a package
     // requires opening it from a File with READ_WRITE access, so the uploaded
     // bytes are staged to a temp file for the duration of signing.
     Path tempFile = createRestrictedTempFile();
     try {
-      Files.write(tempFile, xlsxBytes);
-      try (OPCPackage pkg = openForSigning(tempFile)) {
+      Files.write(tempFile, ooxmlBytes);
+      try (OPCPackage pkg = openForSigning(tempFile, format)) {
         SignatureConfig sigConfig = new SignatureConfig();
         sigConfig.setKey(privateKey);
         sigConfig.setSigningCertificateChain(certChain);
         // POI's default facet list (OOXMLSignatureFacet, KeyInfoSignatureFacet,
         // XAdESSignatureFacet, Office2010SignatureFacet) produces a valid
         // signature that POI's own validator accepts, but real Microsoft
-        // Excel's native signature reader does not understand the extra
+        // Office's native signature reader does not understand the extra
         // objects it adds — confirmed by diffing against a signature from a
-        // different tool (System.IO.Packaging-based) that Excel DOES accept:
-        // that file has only a Manifest + KeyInfo, nothing else. Excel's
+        // different tool (System.IO.Packaging-based) that Office DOES accept:
+        // that file has only a Manifest + KeyInfo, nothing else. Office's
         // "Unknown signer" / "01-01-1601" (the Windows FILETIME epoch, i.e. a
-        // failed date parse) are exactly the symptoms of Excel choking on a
-        // SigningTime/date field it doesn't expect.
+        // failed date parse) are exactly the symptoms of Office choking on a
+        // SigningTime/date field it doesn't expect. This was diagnosed against
+        // Excel specifically, but the signature mechanism (and therefore the
+        // fix) is shared by Word/PowerPoint — same OPC container, same POI
+        // signing code path.
         //
         // Dropping XAdESSignatureFacet/Office2010SignatureFacet from the list
         // isn't enough on its own: OOXMLSignatureFacet.preSign unconditionally
@@ -125,6 +170,27 @@ public final class ExcelSignerService {
         // Relying parties are expected to build the rest of the chain via the
         // leaf cert's AIA extension, same as this codebase's PDF signing does.
         sigConfig.setIncludeEntireCertificateChain(false);
+        // Apache Santuario 3.0.6 (the XML-DSig engine POI/SignatureConfig
+        // delegates to) hardcodes a cap of 30 <Reference> elements per
+        // <Manifest> whenever secure validation is on (POI's default) —
+        // confirmed by decompiling DOMManifest.class, not documented in any
+        // config option. A real OOXML package routinely exceeds this: even a
+        // minimal single-slide .pptx (theme + slide master + default slide
+        // layouts + the one slide) needs more than 30 manifest references,
+        // so this isn't a corner case — it reproducibly breaks PowerPoint
+        // signing (and would break Word/Excel files with enough parts too)
+        // with "MarshalException: A maximum of 30 references per Manifest
+        // are allowed with secure validation" during self-verification.
+        // There is no narrower POI/Santuario knob to just raise the limit —
+        // secure validation is a single on/off switch. Disabling it here is
+        // an accepted trade-off given the endpoint's context: uploads are
+        // already bounded by this server's multipart size limit, which
+        // already caps how many parts (and therefore references) a package
+        // can plausibly contain, and this is an authenticated internal
+        // signing service, not a public endpoint processing arbitrary
+        // untrusted XML at scale — the DoS scenario secure validation
+        // defends against.
+        sigConfig.setSecureValidation(false);
 
         SignatureInfo signatureInfo = new SignatureInfo();
         signatureInfo.setOpcPackage(pkg);
@@ -167,27 +233,27 @@ public final class ExcelSignerService {
         byte[] signedBytes = out.toByteArray();
 
         // Never hand back a signature we can prove is broken: re-validate
-        // immediately, server-side, with the same logic /verify-excel uses.
-        // This also makes the failure mode loud and diagnosable (which
-        // specific signature POI itself considers invalid, and why) instead
-        // of only surfacing when a client opens the file in Excel.
+        // immediately, server-side, with the same logic /verify-* uses. This
+        // also makes the failure mode loud and diagnosable (which specific
+        // signature POI itself considers invalid, and why) instead of only
+        // surfacing when a client opens the file in Office.
         long verifyStart = System.currentTimeMillis();
-        ExcelVerifyService.Result selfCheck = ExcelVerifyService.verify(signedBytes);
+        OoxmlVerifyService.Result selfCheck = OoxmlVerifyService.verify(signedBytes);
         long verifyMs = System.currentTimeMillis() - verifyStart;
         if (!selfCheck.ok()) {
-          LOG.warn("Excel self-verification failed after signing in {} ms: {}", verifyMs, selfCheck.reason());
+          LOG.warn("{} self-verification failed after signing in {} ms: {}", format.label(), verifyMs, selfCheck.reason());
           throw new IllegalStateException(
               "Produced signature failed self-verification: " + selfCheck.reason()
                   + (selfCheck.signatures().isEmpty() ? "" : " (" + selfCheck.signatures().get(0).reason() + ")"));
         }
 
-        LOG.info("Excel signing completed in {} ms (self-verification {} ms).",
-            System.currentTimeMillis() - start, verifyMs);
+        LOG.info("{} signing completed in {} ms (self-verification {} ms).",
+            format.label(), System.currentTimeMillis() - start, verifyMs);
         return signedBytes;
       }
     } catch (Exception e) {
-      LOG.warn("Excel signing failed after {} ms for signerSerial={}: {}",
-          System.currentTimeMillis() - start, signer.getSerialNumber().toString(16), safeMsg(e));
+      LOG.warn("{} signing failed after {} ms for signerSerial={}: {}",
+          format.label(), System.currentTimeMillis() - start, signer.getSerialNumber().toString(16), safeMsg(e));
       throw e;
     } finally {
       Files.deleteIfExists(tempFile);
@@ -204,7 +270,7 @@ public final class ExcelSignerService {
    * skips the finally block (e.g. System.exit from unrelated code), though
    * neither this nor any other in-process mechanism can run on a hard kill
    * (SIGKILL/OOM-killer/power loss); a periodic ops-level sweep of the temp
-   * directory for orphaned "trustsign-xlsx-*" files is the correct backstop
+   * directory for orphaned "trustsign-ooxml-*" files is the correct backstop
    * for that case, not application code.
    */
   private static Path createRestrictedTempFile() throws java.io.IOException {
@@ -213,9 +279,9 @@ public final class ExcelSignerService {
     if (posix) {
       Set<PosixFilePermission> ownerOnly = EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
       FileAttribute<Set<PosixFilePermission>> attr = PosixFilePermissions.asFileAttribute(ownerOnly);
-      tempFile = Files.createTempFile("trustsign-xlsx-", ".xlsx", attr);
+      tempFile = Files.createTempFile("trustsign-ooxml-", ".ooxml", attr);
     } else {
-      tempFile = Files.createTempFile("trustsign-xlsx-", ".xlsx");
+      tempFile = Files.createTempFile("trustsign-ooxml-", ".ooxml");
     }
     tempFile.toFile().deleteOnExit();
     return tempFile;
@@ -224,7 +290,7 @@ public final class ExcelSignerService {
   /**
    * Same as {@link OOXMLSignatureFacet} except it omits the Microsoft
    * "idOfficeObject"/SignatureInfoV1 object — see the comment where this is
-   * used in {@link #sign} for why: Excel's own signature reader doesn't
+   * used in {@link #sign} for why: Office's own signature reader doesn't
    * recognize it and rejects the whole signature as a result.
    */
   private static final class MinimalOOXMLSignatureFacet extends OOXMLSignatureFacet {
@@ -246,7 +312,7 @@ public final class ExcelSignerService {
    * the exact provider name POI's SignatureOutputStream hardcodes for any
    * non-MSCAPI key — with a shim scoped to {@code expectedKey}, for the
    * duration of {@code action}. Restores the real provider afterward, even if
-   * {@code action} throws. Synchronized so overlapping Excel-signing calls
+   * {@code action} throws. Synchronized so overlapping OOXML-signing calls
    * can't interleave their own shim/restore steps.
    *
    * <p>This mutates JVM-global JCA state, which is a real and deliberate
@@ -452,17 +518,30 @@ public final class ExcelSignerService {
   }
 
   /**
-   * Confirms {@code xlsxBytes} is a readable, non-encrypted OOXML package
-   * before any token/certificate work is done, so a bad upload fails fast
-   * with a clear error instead of after touching the PKCS#11 token.
+   * Confirms {@code ooxmlBytes} is a readable, non-encrypted OOXML package
+   * that actually looks like {@code expectedFormat} — checked via presence of
+   * that format's well-known main part (e.g. {@code /xl/workbook.xml} for
+   * Excel) — before any token/certificate work is done. Catches both "not a
+   * valid OOXML file at all" and "valid OOXML but the wrong kind, e.g. a
+   * .pptx posted to the Word endpoint" with a clear 400 instead of a cryptic
+   * POI exception or a silently mislabeled but "successful" signature.
    */
-  public static void validateOpenable(byte[] xlsxBytes) throws Exception {
-    try (OPCPackage ignored = OPCPackage.open(new ByteArrayInputStream(xlsxBytes))) {
-      // Opened successfully — nothing further to do.
+  public static void validateOpenable(byte[] ooxmlBytes, OoxmlFormat expectedFormat) throws Exception {
+    try (OPCPackage pkg = OPCPackage.open(new ByteArrayInputStream(ooxmlBytes))) {
+      PackagePartName mainPart = PackagingURIHelper.createPartName(expectedFormat.mainPartName);
+      if (pkg.getPart(mainPart) == null) {
+        throw new IllegalArgumentException(
+            "Uploaded file does not look like a " + expectedFormat.label()
+                + " (missing " + expectedFormat.mainPartName + "). Wrong endpoint, or wrong file?");
+      }
     } catch (EncryptedDocumentException e) {
-      throw new IllegalArgumentException("Workbook is password-protected/encrypted and cannot be signed", e);
+      throw new IllegalArgumentException(
+          expectedFormat.label() + " is password-protected/encrypted and cannot be signed", e);
+    } catch (IllegalArgumentException e) {
+      throw e;
     } catch (Exception e) {
-      throw new IllegalArgumentException("Uploaded file is not a valid .xlsx (OOXML) package: " + safeMsg(e), e);
+      throw new IllegalArgumentException(
+          "Uploaded file is not a valid " + expectedFormat.label() + " (OOXML) package: " + safeMsg(e), e);
     }
   }
 
@@ -471,13 +550,14 @@ public final class ExcelSignerService {
    * "this isn't a valid/encrypted OOXML package" failures into a clear error
    * instead of a raw POI exception.
    */
-  private static OPCPackage openForSigning(Path tempFile) throws Exception {
+  private static OPCPackage openForSigning(Path tempFile, OoxmlFormat format) throws Exception {
     try {
       return OPCPackage.open(tempFile.toFile(), PackageAccess.READ_WRITE);
     } catch (EncryptedDocumentException e) {
-      throw new IllegalArgumentException("Workbook is password-protected/encrypted and cannot be signed", e);
+      throw new IllegalArgumentException(format.label() + " is password-protected/encrypted and cannot be signed", e);
     } catch (Exception e) {
-      throw new IllegalArgumentException("Uploaded file is not a valid .xlsx (OOXML) package: " + safeMsg(e), e);
+      throw new IllegalArgumentException(
+          "Uploaded file is not a valid " + format.label() + " (OOXML) package: " + safeMsg(e), e);
     }
   }
 
@@ -486,5 +566,5 @@ public final class ExcelSignerService {
     return (m != null && !m.isBlank()) ? m : t.getClass().getSimpleName();
   }
 
-  private ExcelSignerService() {}
+  private OoxmlSignerService() {}
 }

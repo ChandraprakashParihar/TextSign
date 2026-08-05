@@ -12,10 +12,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Validates native OOXML digital signature(s) in an .xlsx package, produced
- * by {@link ExcelSignerService} or by Excel/Office itself.
+ * Validates native OOXML digital signature(s) in a signed OOXML package —
+ * .xlsx (Excel), .docx (Word), or .pptx (PowerPoint) — produced by
+ * {@link OoxmlSignerService} or by Office itself. Format-agnostic: OOXML
+ * digital signatures are a property of the Open Packaging Conventions
+ * container, not of spreadsheet/document/presentation content, so this needs
+ * no format parameter at all.
  */
-public final class ExcelVerifyService {
+public final class OoxmlVerifyService {
 
   public record CertificateDetails(
       String subject,
@@ -29,12 +33,18 @@ public final class ExcelVerifyService {
 
   public record Result(boolean ok, String reason, int signatureCount, List<SignatureReport> signatures) {}
 
-  public static Result verify(byte[] signedXlsxBytes) {
-    if (signedXlsxBytes == null || signedXlsxBytes.length == 0) {
-      return new Result(false, "signedXlsxBytes is empty", 0, List.of());
+  public static Result verify(byte[] signedOoxmlBytes) {
+    if (signedOoxmlBytes == null || signedOoxmlBytes.length == 0) {
+      return new Result(false, "signedOoxmlBytes is empty", 0, List.of());
     }
-    try (OPCPackage pkg = OPCPackage.open(new ByteArrayInputStream(signedXlsxBytes))) {
+    try (OPCPackage pkg = OPCPackage.open(new ByteArrayInputStream(signedOoxmlBytes))) {
       SignatureConfig sigConfig = new SignatureConfig();
+      // See the matching comment in OoxmlSignerService.sign() — Apache
+      // Santuario hardcodes a 30-reference-per-Manifest cap under secure
+      // validation that a real OOXML package routinely exceeds. Must be
+      // disabled here too: this verify path is what both the self-check
+      // during signing and the standalone /verify-* endpoints use.
+      sigConfig.setSecureValidation(false);
       SignatureInfo signatureInfo = new SignatureInfo();
       signatureInfo.setOpcPackage(pkg);
       signatureInfo.setSignatureConfig(sigConfig);
@@ -61,7 +71,7 @@ public final class ExcelVerifyService {
         }
       }
       if (!any) {
-        return new Result(false, "No OOXML digital signature found in workbook", 0, List.of());
+        return new Result(false, "No OOXML digital signature found in file", 0, List.of());
       }
       return new Result(
           allOk,
@@ -89,5 +99,5 @@ public final class ExcelVerifyService {
     return (m != null && !m.isBlank()) ? m : t.getClass().getSimpleName();
   }
 
-  private ExcelVerifyService() {}
+  private OoxmlVerifyService() {}
 }

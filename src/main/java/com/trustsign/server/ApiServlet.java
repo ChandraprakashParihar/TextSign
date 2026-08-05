@@ -26,8 +26,8 @@ import com.trustsign.core.CmsVerifyService;
 import com.trustsign.core.CmsTaggedFile;
 import com.trustsign.core.XmlSignerService;
 import com.trustsign.core.XmlVerifyService;
-import com.trustsign.core.ExcelSignerService;
-import com.trustsign.core.ExcelVerifyService;
+import com.trustsign.core.OoxmlSignerService;
+import com.trustsign.core.OoxmlVerifyService;
 import com.trustsign.core.CertificateValidator;
 import com.trustsign.core.LicenceEnforcer;
 import com.trustsign.core.SigningCertificateParser;
@@ -2590,6 +2590,26 @@ public final class ApiServlet {
           return;
         }
 
+        case "/auto-sign-word" -> {
+          handleWordSign(req, resp, startMs, "/auto-sign-word");
+          return;
+        }
+
+        case "/sign-word" -> {
+          handleWordSign(req, resp, startMs, "/sign-word");
+          return;
+        }
+
+        case "/auto-sign-ppt" -> {
+          handlePptSign(req, resp, startMs, "/auto-sign-ppt");
+          return;
+        }
+
+        case "/sign-ppt" -> {
+          handlePptSign(req, resp, startMs, "/sign-ppt");
+          return;
+        }
+
         case "/sign-pdf" -> {
           // requireSession(req);
           var mp = Multipart.read(req, multipartPdfMaxBytes);
@@ -3427,7 +3447,17 @@ public final class ApiServlet {
         }
 
         case "/verify-excel" -> {
-          handleExcelVerify(req, resp);
+          handleOoxmlVerify(req, resp);
+          return;
+        }
+
+        case "/verify-word" -> {
+          handleOoxmlVerify(req, resp);
+          return;
+        }
+
+        case "/verify-ppt" -> {
+          handleOoxmlVerify(req, resp);
           return;
         }
 
@@ -5587,16 +5617,40 @@ public final class ApiServlet {
   }
 
   /**
-   * Signs an .xlsx file with a native OOXML digital signature
-   * ({@link ExcelSignerService}) — recognized by Excel itself, unlike a
+   * Signs an .xlsx file with a native OOXML digital signature — a thin
+   * wrapper around {@link #handleOoxmlSign}, which also serves the Word and
+   * PowerPoint endpoints below since the OOXML digital-signature mechanism is
+   * format-agnostic (see {@link OoxmlSignerService}'s class Javadoc).
+   */
+  private void handleExcelSign(
+      HttpServletRequest req, HttpServletResponse resp, long startMs, String endpointLabel) throws Exception {
+    handleOoxmlSign(req, resp, startMs, endpointLabel, OoxmlSignerService.OoxmlFormat.XLSX);
+  }
+
+  /** Signs a .docx file with a native OOXML digital signature — see {@link #handleExcelSign}. */
+  private void handleWordSign(
+      HttpServletRequest req, HttpServletResponse resp, long startMs, String endpointLabel) throws Exception {
+    handleOoxmlSign(req, resp, startMs, endpointLabel, OoxmlSignerService.OoxmlFormat.DOCX);
+  }
+
+  /** Signs a .pptx file with a native OOXML digital signature — see {@link #handleExcelSign}. */
+  private void handlePptSign(
+      HttpServletRequest req, HttpServletResponse resp, long startMs, String endpointLabel) throws Exception {
+    handleOoxmlSign(req, resp, startMs, endpointLabel, OoxmlSignerService.OoxmlFormat.PPTX);
+  }
+
+  /**
+   * Signs an OOXML file (.xlsx/.docx/.pptx) with a native digital signature
+   * ({@link OoxmlSignerService}) — recognized by Office itself, unlike a
    * detached/appended signature. Certificate selection and token handling
    * mirror {@link #handleXmlSign}.
    */
-  private void handleExcelSign(
+  private void handleOoxmlSign(
       HttpServletRequest req,
       HttpServletResponse resp,
       long startMs,
-      String endpointLabel) throws Exception {
+      String endpointLabel,
+      OoxmlSignerService.OoxmlFormat format) throws Exception {
     var mp = Multipart.read(req, multipartPdfMaxBytes);
     AgentConfig cfg = loadConfig(resp);
     if (cfg == null) {
@@ -5615,7 +5669,7 @@ public final class ApiServlet {
       return;
     }
     try {
-      ExcelSignerService.validateOpenable(data);
+      OoxmlSignerService.validateOpenable(data, format);
     } catch (Exception e) {
       writeJson(resp, 400, Map.of("error", safeMsg(e)));
       return;
@@ -5700,16 +5754,16 @@ public final class ApiServlet {
 
     byte[] signedBytes;
     try {
-      signedBytes = ExcelSignerService.sign(data, key, chain, loaded.provider());
+      signedBytes = OoxmlSignerService.sign(data, format, key, chain, loaded.provider());
     } catch (Exception e) {
-      LOG.error("{}: Excel signing failed. alias={} err={}", endpointLabel, matchedAlias, safeMsg(e));
-      writeJson(resp, 500, Map.of("error", "Unable to sign the Excel workbook", "details", safeMsg(e)));
+      LOG.error("{}: {} signing failed. alias={} err={}", endpointLabel, format.label(), matchedAlias, safeMsg(e));
+      writeJson(resp, 500, Map.of("error", "Unable to sign the " + format.label(), "details", safeMsg(e)));
       return;
     }
 
     String inputFilename = mp.filename("file");
     if (inputFilename == null || inputFilename.isBlank()) {
-      inputFilename = "workbook.xlsx";
+      inputFilename = format.defaultFilename();
     }
 
     String outputPath = null;
@@ -5753,20 +5807,26 @@ public final class ApiServlet {
     writeJson(resp, 200, responseBody);
   }
 
-  private void handleExcelVerify(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+  /**
+   * Verifies OOXML digital signature(s) in an uploaded .xlsx/.docx/.pptx
+   * file. Shared by the Excel, Word, and PowerPoint verify endpoints since
+   * verification is entirely format-agnostic (see
+   * {@link OoxmlVerifyService}'s class Javadoc).
+   */
+  private void handleOoxmlVerify(HttpServletRequest req, HttpServletResponse resp) throws Exception {
     var mp = Multipart.read(req, multipartPdfMaxBytes);
     byte[] signedFileBytes = mp.file("file");
     if (signedFileBytes == null || signedFileBytes.length == 0) {
       writeJson(resp, 400, Map.of("ok", false, "reason", "Missing file field: file"));
       return;
     }
-    ExcelVerifyService.Result result = ExcelVerifyService.verify(signedFileBytes);
+    OoxmlVerifyService.Result result = OoxmlVerifyService.verify(signedFileBytes);
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("ok", result.ok());
     body.put("reason", result.reason());
     body.put("signatureCount", result.signatureCount());
     List<Map<String, Object>> signatures = new ArrayList<>();
-    for (ExcelVerifyService.SignatureReport sr : result.signatures()) {
+    for (OoxmlVerifyService.SignatureReport sr : result.signatures()) {
       Map<String, Object> srMap = new LinkedHashMap<>();
       srMap.put("ok", sr.ok());
       srMap.put("reason", sr.reason());
