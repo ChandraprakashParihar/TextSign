@@ -43,6 +43,7 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.security.KeyStore;
 import java.security.PrivateKey;
+import java.security.Provider;
 import java.security.PublicKey;
 import java.security.KeyFactory;
 import java.security.cert.Certificate;
@@ -1447,29 +1448,17 @@ public final class ApiServlet {
             }
           }
 
-          char[] pin = resolvePin(cfg);
-          List<String> libs = resolvePkcs11Libraries(cfg);
-          if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error",
-                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
-            return;
-          }
-
-          Pkcs11Token.Loaded loaded;
+          KeySource src;
           try {
-            loaded = Pkcs11Token.load(pin, libs);
-          } catch (RuntimeException e) {
-            String detail = buildTokenErrorDetail(e);
-            LOG.error("Token load failed (auto-sign-text). tookMs={} details={}",
-                System.currentTimeMillis() - startMs, detail);
-            writeJson(resp, 400, Map.of(
-                "error",
-                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
-                "details", detail));
+            src = resolveKeySource(cfg);
+          } catch (KeySourceException e) {
+            LOG.error("Key source resolution failed (auto-sign-text). tookMs={} pfx={} details={}",
+                System.currentTimeMillis() - startMs, e.pfx, e.getMessage());
+            writeKeySourceError(resp, e);
             return;
           }
 
-          KeyStore ks = loaded.keyStore();
+          KeyStore ks = src.keyStore();
 
           byte[] cerBytes = readMultipartCerPayload(mp);
           CertificateSelection selection;
@@ -1494,8 +1483,8 @@ public final class ApiServlet {
           X509Certificate matchedCert = selection.certificate;
           Certificate[] chain = selection.chain;
 
-          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
-          java.util.Arrays.fill(pin, '\0');
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+          java.util.Arrays.fill(src.keyPassword(), '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -1523,7 +1512,7 @@ public final class ApiServlet {
               contentToSign[normBytes.length] = '\n';
           }
           // SHA256withRSA only (Bouncy Castle / PKCS#11).
-          byte[] sigBytes = TextSignerService.signRawSha256WithRsa(contentToSign, key, loaded.provider());
+          byte[] sigBytes = TextSignerService.signRawSha256WithRsa(contentToSign, key, src.provider());
 
           String sigB64 = Base64.getEncoder().encodeToString(sigBytes);
 
@@ -1689,29 +1678,17 @@ public final class ApiServlet {
             }
           }
 
-          char[] pin = resolvePin(cfg);
-          List<String> libs = resolvePkcs11Libraries(cfg);
-          if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error",
-                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
-            return;
-          }
-
-          Pkcs11Token.Loaded loaded;
+          KeySource src;
           try {
-            loaded = Pkcs11Token.load(pin, libs);
-          } catch (RuntimeException e) {
-            String detail = buildTokenErrorDetail(e);
-            LOG.error("Token load failed (auto-sign-pdf). tookMs={} details={}",
-                System.currentTimeMillis() - startMs, detail);
-            writeJson(resp, 400, Map.of(
-                "error",
-                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
-                "details", detail));
+            src = resolveKeySource(cfg);
+          } catch (KeySourceException e) {
+            LOG.error("Key source resolution failed (auto-sign-pdf). tookMs={} pfx={} details={}",
+                System.currentTimeMillis() - startMs, e.pfx, e.getMessage());
+            writeKeySourceError(resp, e);
             return;
           }
 
-          KeyStore ks = loaded.keyStore();
+          KeyStore ks = src.keyStore();
 
           byte[] cerBytes = readMultipartCerPayload(mp);
           CertificateSelection selection;
@@ -1736,8 +1713,8 @@ public final class ApiServlet {
           X509Certificate matchedCert = selection.certificate;
           Certificate[] chain = selection.chain;
 
-          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
-          java.util.Arrays.fill(pin, '\0');
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+          java.util.Arrays.fill(src.keyPassword(), '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -1783,7 +1760,7 @@ public final class ApiServlet {
                   pdfToSign,
                   key,
                   chain,
-                  loaded.provider(),
+                  src.provider(),
                   signingCert,
                   reason,
                   location,
@@ -1947,29 +1924,17 @@ public final class ApiServlet {
             }
           }
 
-          char[] pin = resolvePin(cfg);
-          List<String> libs = resolvePkcs11Libraries(cfg);
-          if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error",
-                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
-            return;
-          }
-
-          Pkcs11Token.Loaded loaded;
+          KeySource src;
           try {
-            loaded = Pkcs11Token.load(pin, libs);
-          } catch (RuntimeException e) {
-            String detail = buildTokenErrorDetail(e);
-            LOG.error("Token load failed (auto-sign-pdf). tookMs={} details={}",
-                System.currentTimeMillis() - startMs, detail);
-            writeJson(resp, 400, Map.of(
-                "error",
-                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
-                "details", detail));
+            src = resolveKeySource(cfg);
+          } catch (KeySourceException e) {
+            LOG.error("Key source resolution failed (auto-sign-pdf-blob). tookMs={} pfx={} details={}",
+                System.currentTimeMillis() - startMs, e.pfx, e.getMessage());
+            writeKeySourceError(resp, e);
             return;
           }
 
-          KeyStore ks = loaded.keyStore();
+          KeyStore ks = src.keyStore();
 
           byte[] cerBytes = readMultipartCerPayload(mp);
           CertificateSelection selection;
@@ -1994,8 +1959,8 @@ public final class ApiServlet {
           X509Certificate matchedCert = selection.certificate;
           Certificate[] chain = selection.chain;
 
-          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
-          java.util.Arrays.fill(pin, '\0');
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+          java.util.Arrays.fill(src.keyPassword(), '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -2041,7 +2006,7 @@ public final class ApiServlet {
                   pdfToSign,
                   key,
                   chain,
-                  loaded.provider(),
+                  src.provider(),
                   signingCert,
                   reason,
                   location,
@@ -2218,24 +2183,14 @@ public final class ApiServlet {
             return;
           }
           PdfSignerService.SignatureFieldInfo selectedFieldInfo = detectedFields.get(signIndex - 1);
-          char[] pin = resolvePin(cfg);
-          List<String> libs = resolvePkcs11Libraries(cfg);
-          if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error",
-                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
-            return;
-          }
-          Pkcs11Token.Loaded loaded;
+          KeySource src;
           try {
-            loaded = Pkcs11Token.load(pin, libs);
-          } catch (RuntimeException e) {
-            String detail = buildTokenErrorDetail(e);
-            writeJson(resp, 400, Map.of("error",
-                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
-                "details", detail));
+            src = resolveKeySource(cfg);
+          } catch (KeySourceException e) {
+            writeKeySourceError(resp, e);
             return;
           }
-          KeyStore ks = loaded.keyStore();
+          KeyStore ks = src.keyStore();
           byte[] cerBytes = readMultipartCerPayload(mp);
           CertificateSelection selection;
           try {
@@ -2256,8 +2211,8 @@ public final class ApiServlet {
           String matchedAlias = selection.alias;
           X509Certificate matchedCert = selection.certificate;
           Certificate[] chain = selection.chain;
-          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
-          java.util.Arrays.fill(pin, '\0');
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+          java.util.Arrays.fill(src.keyPassword(), '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -2312,7 +2267,7 @@ public final class ApiServlet {
                   pdfToSign,
                   key,
                   chain,
-                  loaded.provider(),
+                  src.provider(),
                   signingCert,
                   reason,
                   location,
@@ -2443,26 +2398,16 @@ public final class ApiServlet {
               return;
             }
           }
-          char[] pin = resolvePin(cfg);
-          List<String> libs = resolvePkcs11Libraries(cfg);
-          if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error",
-                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
-            return;
-          }
-          Pkcs11Token.Loaded loaded;
+          KeySource src;
           try {
-            loaded = Pkcs11Token.load(pin, libs);
-          } catch (RuntimeException e) {
-            String detail = buildTokenErrorDetail(e);
-            LOG.error("Token load failed (auto-sign-text-cms). tookMs={} details={}",
-                System.currentTimeMillis() - startMs, detail);
-            writeJson(resp, 400, Map.of("error",
-                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
-                "details", detail));
+            src = resolveKeySource(cfg);
+          } catch (KeySourceException e) {
+            LOG.error("Key source resolution failed (auto-sign-text-cms). tookMs={} pfx={} details={}",
+                System.currentTimeMillis() - startMs, e.pfx, e.getMessage());
+            writeKeySourceError(resp, e);
             return;
           }
-          KeyStore ks = loaded.keyStore();
+          KeyStore ks = src.keyStore();
           byte[] cerBytes = readMultipartCerPayload(mp);
           CertificateSelection selection;
           try {
@@ -2483,8 +2428,8 @@ public final class ApiServlet {
           String matchedAlias = selection.alias;
           X509Certificate matchedCert = selection.certificate;
           Certificate[] chain = selection.chain;
-          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
-          java.util.Arrays.fill(pin, '\0');
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+          java.util.Arrays.fill(src.keyPassword(), '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -2497,7 +2442,7 @@ public final class ApiServlet {
                   normalizedText.getBytes(StandardCharsets.UTF_8).length + 1);
           if (!normalizedText.endsWith("\n"))
             contentToSign[normalizedText.getBytes(StandardCharsets.UTF_8).length] = '\n';
-          byte[] cmsBytes = TextSignerService.signDetached(contentToSign, key, chain, loaded.provider());
+          byte[] cmsBytes = TextSignerService.signDetached(contentToSign, key, chain, src.provider());
           String cmsB64 = Base64.getEncoder().encodeToString(cmsBytes);
           X509Certificate signingCert = matchedCert;
           X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
@@ -2660,26 +2605,15 @@ public final class ApiServlet {
             return;
           }
 
-          char[] pin = resolvePin(cfg);
-          List<String> libs = resolvePkcs11Libraries(cfg);
-          if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error",
-                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
-            return;
-          }
-
-          Pkcs11Token.Loaded loaded;
+          KeySource src;
           try {
-            loaded = Pkcs11Token.load(pin, libs);
-          } catch (RuntimeException e) {
-            String detail = buildTokenErrorDetail(e);
-            writeJson(resp, 400, Map.of("error",
-                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
-                "details", detail));
+            src = resolveKeySource(cfg);
+          } catch (KeySourceException e) {
+            writeKeySourceError(resp, e);
             return;
           }
 
-          KeyStore ks = loaded.keyStore();
+          KeyStore ks = src.keyStore();
           byte[] cerBytes = readMultipartCerPayload(mp);
           CertificateSelection selection;
           try {
@@ -2701,8 +2635,8 @@ public final class ApiServlet {
           String matchedAlias = selection.alias;
           X509Certificate matchedCert = selection.certificate;
           Certificate[] chain = selection.chain;
-          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
-          java.util.Arrays.fill(pin, '\0');
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+          java.util.Arrays.fill(src.keyPassword(), '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -2721,7 +2655,7 @@ public final class ApiServlet {
                 data,
                 key,
                 chain,
-                loaded.provider(),
+                src.provider(),
                 signingCert,
                 reason,
                 location,
@@ -3227,28 +3161,17 @@ public final class ApiServlet {
             return;
           }
 
-          char[] pin = resolvePin(cfg);
-          List<String> libs = resolvePkcs11Libraries(cfg);
-          if (libs.isEmpty()) {
-            writeJson(resp, 400, Map.of("error",
-                "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
-            return;
-          }
-
-          Pkcs11Token.Loaded loaded;
+          KeySource src;
           try {
-            loaded = Pkcs11Token.load(pin, libs);
-          } catch (RuntimeException e) {
-            String detail = buildTokenErrorDetail(e);
-            LOG.error("Token load failed (sign-text). tookMs={} details={}",
-                System.currentTimeMillis() - startMs, detail);
-            writeJson(resp, 400, Map.of("error",
-                "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
-                "details", detail));
+            src = resolveKeySource(cfg);
+          } catch (KeySourceException e) {
+            LOG.error("Key source resolution failed (sign-text). tookMs={} pfx={} details={}",
+                System.currentTimeMillis() - startMs, e.pfx, e.getMessage());
+            writeKeySourceError(resp, e);
             return;
           }
 
-          KeyStore ks = loaded.keyStore();
+          KeyStore ks = src.keyStore();
           byte[] cerBytes = readMultipartCerPayload(mp);
           CertificateSelection selection;
           try {
@@ -3272,8 +3195,8 @@ public final class ApiServlet {
           X509Certificate matchedCert = selection.certificate;
           Certificate[] chain = selection.chain;
 
-          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
-          java.util.Arrays.fill(pin, '\0');
+          PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+          java.util.Arrays.fill(src.keyPassword(), '\0');
           if (key == null) {
             writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
             return;
@@ -3296,7 +3219,7 @@ public final class ApiServlet {
             if (!normalizedText.endsWith("\n"))
               contentToSign[normBytes.length] = '\n';
           }
-          byte[] sigBytes = TextSignerService.signRawSha256WithRsa(contentToSign, key, loaded.provider());
+          byte[] sigBytes = TextSignerService.signRawSha256WithRsa(contentToSign, key, src.provider());
           String sigB64 = Base64.getEncoder().encodeToString(sigBytes);
 
           X509Certificate signingCert = matchedCert;
@@ -5283,29 +5206,17 @@ public final class ApiServlet {
       }
     }
 
-    char[] pin = resolvePin(cfg);
-    List<String> libs = resolvePkcs11Libraries(cfg);
-    if (libs.isEmpty()) {
-      writeJson(resp, 400, Map.of("error",
-          "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
-      return;
-    }
-
-    Pkcs11Token.Loaded loaded;
+    KeySource src;
     try {
-      loaded = Pkcs11Token.load(pin, libs);
-    } catch (RuntimeException e) {
-      String detail = buildTokenErrorDetail(e);
-      LOG.error("Token load failed ({}). tookMs={} details={}", endpointLabel,
-          System.currentTimeMillis() - startMs, detail);
-      writeJson(resp, 400, Map.of(
-          "error",
-          "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
-          "details", detail));
+      src = resolveKeySource(cfg);
+    } catch (KeySourceException e) {
+      LOG.error("Key source resolution failed ({}). tookMs={} pfx={} details={}", endpointLabel,
+          System.currentTimeMillis() - startMs, e.pfx, e.getMessage());
+      writeKeySourceError(resp, e);
       return;
     }
 
-    KeyStore ks = loaded.keyStore();
+    KeyStore ks = src.keyStore();
     byte[] cerBytes = readMultipartCerPayload(mp);
     CertificateSelection selection;
     try {
@@ -5323,8 +5234,8 @@ public final class ApiServlet {
     String matchedAlias = selection.alias;
     X509Certificate signingCert = selection.certificate;
     Certificate[] chain = selection.chain;
-    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
-    java.util.Arrays.fill(pin, '\0');
+    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+    java.util.Arrays.fill(src.keyPassword(), '\0');
     if (key == null) {
       writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
       return;
@@ -5336,7 +5247,7 @@ public final class ApiServlet {
         : null;
     CertificateValidator.validateForSigning(signingCert, x509Chain);
 
-    byte[] cmsBytes = TextSignerService.signDetached(data, key, chain, loaded.provider());
+    byte[] cmsBytes = TextSignerService.signDetached(data, key, chain, src.provider());
     byte[] signedBytes = CmsTaggedFile.append(data, cmsBytes);
 
     String inputFilename = mp.filename("file");
@@ -5475,29 +5386,17 @@ public final class ApiServlet {
       }
     }
 
-    char[] pin = resolvePin(cfg);
-    List<String> libs = resolvePkcs11Libraries(cfg);
-    if (libs.isEmpty()) {
-      writeJson(resp, 400, Map.of("error",
-          "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
-      return;
-    }
-
-    Pkcs11Token.Loaded loaded;
+    KeySource src;
     try {
-      loaded = Pkcs11Token.load(pin, libs);
-    } catch (RuntimeException e) {
-      String detail = buildTokenErrorDetail(e);
-      LOG.error("Token load failed ({}). tookMs={} details={}", endpointLabel,
-          System.currentTimeMillis() - startMs, detail);
-      writeJson(resp, 400, Map.of(
-          "error",
-          "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
-          "details", detail));
+      src = resolveKeySource(cfg);
+    } catch (KeySourceException e) {
+      LOG.error("Key source resolution failed ({}). tookMs={} pfx={} details={}", endpointLabel,
+          System.currentTimeMillis() - startMs, e.pfx, e.getMessage());
+      writeKeySourceError(resp, e);
       return;
     }
 
-    KeyStore ks = loaded.keyStore();
+    KeyStore ks = src.keyStore();
     byte[] cerBytes = readMultipartCerPayload(mp);
     CertificateSelection selection;
     try {
@@ -5515,8 +5414,8 @@ public final class ApiServlet {
     String matchedAlias = selection.alias;
     X509Certificate signingCert = selection.certificate;
     Certificate[] chain = selection.chain;
-    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
-    java.util.Arrays.fill(pin, '\0');
+    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+    java.util.Arrays.fill(src.keyPassword(), '\0');
     if (key == null) {
       writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
       return;
@@ -5530,7 +5429,7 @@ public final class ApiServlet {
 
     byte[] signedBytes;
     try {
-      signedBytes = XmlSignerService.sign(data, key, chain, loaded.provider());
+      signedBytes = XmlSignerService.sign(data, key, chain, src.provider());
     } catch (Exception e) {
       LOG.error("{}: XML signing failed. alias={} err={}", endpointLabel, matchedAlias, safeMsg(e));
       writeJson(resp, 500, Map.of("error", "Unable to sign the XML document", "details", safeMsg(e)));
@@ -5699,29 +5598,17 @@ public final class ApiServlet {
       }
     }
 
-    char[] pin = resolvePin(cfg);
-    List<String> libs = resolvePkcs11Libraries(cfg);
-    if (libs.isEmpty()) {
-      writeJson(resp, 400, Map.of("error",
-          "The required security library is not configured for this operating system. Please contact Xtratrust Support Team."));
-      return;
-    }
-
-    Pkcs11Token.Loaded loaded;
+    KeySource src;
     try {
-      loaded = Pkcs11Token.load(pin, libs);
-    } catch (RuntimeException e) {
-      String detail = buildTokenErrorDetail(e);
-      LOG.error("Token load failed ({}). tookMs={} details={}", endpointLabel,
-          System.currentTimeMillis() - startMs, detail);
-      writeJson(resp, 400, Map.of(
-          "error",
-          "Unable to access the security token. Please verify that the token is connected and your token pin is correct.",
-          "details", detail));
+      src = resolveKeySource(cfg);
+    } catch (KeySourceException e) {
+      LOG.error("Key source resolution failed ({}). tookMs={} pfx={} details={}", endpointLabel,
+          System.currentTimeMillis() - startMs, e.pfx, e.getMessage());
+      writeKeySourceError(resp, e);
       return;
     }
 
-    KeyStore ks = loaded.keyStore();
+    KeyStore ks = src.keyStore();
     byte[] cerBytes = readMultipartCerPayload(mp);
     CertificateSelection selection;
     try {
@@ -5739,8 +5626,8 @@ public final class ApiServlet {
     String matchedAlias = selection.alias;
     X509Certificate signingCert = selection.certificate;
     Certificate[] chain = selection.chain;
-    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, pin);
-    java.util.Arrays.fill(pin, '\0');
+    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+    java.util.Arrays.fill(src.keyPassword(), '\0');
     if (key == null) {
       writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
       return;
@@ -5754,7 +5641,7 @@ public final class ApiServlet {
 
     byte[] signedBytes;
     try {
-      signedBytes = OoxmlSignerService.sign(data, format, key, chain, loaded.provider());
+      signedBytes = OoxmlSignerService.sign(data, format, key, chain, src.provider());
     } catch (Exception e) {
       LOG.error("{}: {} signing failed. alias={} err={}", endpointLabel, format.label(), matchedAlias, safeMsg(e));
       writeJson(resp, 500, Map.of("error", "Unable to sign the " + format.label(), "details", safeMsg(e)));
@@ -6004,6 +5891,74 @@ public final class ApiServlet {
     if (cfg.pkcs11() == null)
       return List.of();
     return OsPkcs11Resolver.candidates(cfg);
+  }
+
+  /**
+   * A resolved signing credential source: either a configured PFX file or
+   * the PKCS#11 hardware token, normalized to the same
+   * (KeyStore, Provider, keyPassword) shape either way so every downstream
+   * caller — certificate selection, {@code KeyStore.getKey}, the various
+   * {@code *SignerService.sign(...)} calls — is completely unaware of which
+   * one it's talking to.
+   */
+  private record KeySource(KeyStore keyStore, Provider provider, char[] keyPassword) {}
+
+  /** Distinguishes a PFX-config failure from a PKCS#11-token failure so callers can word the 400 response accordingly. */
+  private static final class KeySourceException extends RuntimeException {
+    final boolean pfx;
+
+    KeySourceException(boolean pfx, String message, Throwable cause) {
+      super(message, cause);
+      this.pfx = pfx;
+    }
+  }
+
+  /**
+   * Resolves the signing credential source for this request: a configured
+   * PFX file ({@code cfg.pfx().path()} non-blank) takes precedence over the
+   * PKCS#11 hardware token. This is the single place that branches on
+   * credential source — every {@code handle*Sign} method calls this once
+   * and then proceeds identically regardless of which path was taken.
+   */
+  private KeySource resolveKeySource(AgentConfig cfg) {
+    AgentConfig.PfxConfig pfxCfg = cfg.pfx();
+    if (pfxCfg != null && pfxCfg.path() != null && !pfxCfg.path().isBlank()) {
+      try {
+        String rawPassword = pfxCfg.password() == null ? "" : pfxCfg.password();
+        char[] password = com.trustsign.core.ConfigDecryptor.decryptIfEncrypted(rawPassword).toCharArray();
+        com.trustsign.core.PfxKeyMaterial.Loaded loaded = com.trustsign.core.PfxKeyMaterial.load(pfxCfg.path(), password);
+        return new KeySource(loaded.keyStore(), loaded.provider(), password);
+      } catch (Exception e) {
+        throw new KeySourceException(true, safeMsg(e), e);
+      }
+    }
+
+    char[] pin = resolvePin(cfg);
+    List<String> libs;
+    try {
+      libs = resolvePkcs11Libraries(cfg);
+    } catch (IOException e) {
+      throw new KeySourceException(false, safeMsg(e), e);
+    }
+    if (libs.isEmpty()) {
+      throw new KeySourceException(false,
+          "The required security library is not configured for this operating system. Please contact Xtratrust Support Team.",
+          null);
+    }
+    try {
+      Pkcs11Token.Loaded loaded = Pkcs11Token.load(pin, libs);
+      return new KeySource(loaded.keyStore(), loaded.provider(), pin);
+    } catch (RuntimeException e) {
+      throw new KeySourceException(false, buildTokenErrorDetail(e), e);
+    }
+  }
+
+  /** Standard 400 response for a {@link KeySourceException}, worded per credential source. */
+  private void writeKeySourceError(HttpServletResponse resp, KeySourceException e) throws IOException {
+    String error = e.pfx
+        ? "Unable to access the configured PFX signing credentials. Please verify the PFX file path and password are correct."
+        : "Unable to access the security token. Please verify that the token is connected and your token pin is correct.";
+    writeJson(resp, 400, Map.of("error", error, "details", e.getMessage() == null ? "" : e.getMessage()));
   }
 
   private String safeMsg(Exception e) {

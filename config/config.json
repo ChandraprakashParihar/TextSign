@@ -39,6 +39,10 @@
     "enableClassValidation" : false,
     "allowedCertificatePolicyOids" : ""
   },
+  "pfx":{
+    "path" : "config/XtraTrust_DS.pfx",
+    "password" : "123"
+  },
   "pkcs11" : {
     "preferredLibrary" : null,
     "pin" : "12345678",

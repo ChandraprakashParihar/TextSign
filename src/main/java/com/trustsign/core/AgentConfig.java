@@ -8,6 +8,15 @@ public record AgentConfig(
     List<String> allowedOrigins,
     Integer port,
     Pkcs11Config pkcs11,
+    /**
+     * Optional. When set (non-blank path), signing uses this PKCS#12
+     * (.pfx/.p12) file as the credential source instead of the PKCS#11
+     * hardware token — the software-key equivalent of {@link Pkcs11Config}.
+     * Applies to all standard /auto-sign-*, /sign-* endpoints; does NOT
+     * apply to /hsm/sign-pdf or /hsm/auto-sign-pdf, which always use the
+     * separate HSM token by design (see {@link HsmConfig}).
+     */
+    @JsonProperty(required = false) PfxConfig pfx,
     /** Optional. Shortcut for logging.filePath. Absolute or relative to config dir. */
     @JsonProperty(required = false) String logFilePath,
     /** Optional. Logging configuration (file/console, levels, strictness). */
@@ -79,6 +88,20 @@ public record AgentConfig(
       List<String> macCandidates,
       List<String> linuxCandidates,
       String pin
+  ) {}
+
+  /**
+   * File-based (PKCS#12) signing credential — an alternative to
+   * {@link Pkcs11Config} for deployments without a hardware token. Unlike a
+   * PKCS#11 key, a PKCS#12 private key is fully extractable, so signing with
+   * it needs none of the special provider-binding handling PKCS#11 keys
+   * require.
+   */
+  public record PfxConfig(
+      /** Path to the .pfx/.p12 file. Absolute or relative to the working directory. */
+      String path,
+      /** Optional. Plaintext or wrapped in ENC(...) like {@link Pkcs11Config#pin()}. */
+      @JsonProperty(required = false) String password
   ) {}
 
   /**
