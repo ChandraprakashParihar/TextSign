@@ -7,6 +7,8 @@ import org.apache.poi.poifs.crypt.dsig.SignatureConfig;
 import org.apache.poi.poifs.crypt.dsig.SignatureInfo;
 import org.apache.poi.poifs.crypt.dsig.facets.KeyInfoSignatureFacet;
 import org.apache.poi.poifs.crypt.dsig.facets.OOXMLSignatureFacet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 
 import javax.xml.crypto.dsig.Reference;
@@ -14,8 +16,12 @@ import javax.xml.crypto.dsig.XMLObject;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.GeneralSecurityException;
 import java.security.InvalidKeyException;
 import java.security.PrivateKey;
@@ -28,7 +34,9 @@ import java.security.SignatureSpi;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Adds a real, native OOXML digital signature to an .xlsx package (Apache POI)
@@ -36,6 +44,8 @@ import java.util.List;
  * detached/appended signature.
  */
 public final class ExcelSignerService {
+
+  private static final Logger LOG = LoggerFactory.getLogger(ExcelSignerService.class);
 
   /**
    * Serializes registration/teardown of the temporary narrow signature
@@ -72,10 +82,15 @@ public final class ExcelSignerService {
       throw new IllegalArgumentException("certificate chain does not contain X509Certificate entries");
     }
 
+    X509Certificate signer = certChain.get(0);
+    long start = System.currentTimeMillis();
+    LOG.info("Starting Excel signing. workbookBytes={}, signerSubject={}, signerSerial={}",
+        xlsxBytes.length, signer.getSubjectX500Principal().getName(), signer.getSerialNumber().toString(16));
+
     // OPCPackage.open(InputStream) is read-only; modifying + saving a package
     // requires opening it from a File with READ_WRITE access, so the uploaded
     // bytes are staged to a temp file for the duration of signing.
-    Path tempFile = Files.createTempFile("trustsign-xlsx-", ".xlsx");
+    Path tempFile = createRestrictedTempFile();
     try {
       Files.write(tempFile, xlsxBytes);
       try (OPCPackage pkg = openForSigning(tempFile)) {
@@ -156,18 +171,54 @@ public final class ExcelSignerService {
         // This also makes the failure mode loud and diagnosable (which
         // specific signature POI itself considers invalid, and why) instead
         // of only surfacing when a client opens the file in Excel.
+        long verifyStart = System.currentTimeMillis();
         ExcelVerifyService.Result selfCheck = ExcelVerifyService.verify(signedBytes);
+        long verifyMs = System.currentTimeMillis() - verifyStart;
         if (!selfCheck.ok()) {
+          LOG.warn("Excel self-verification failed after signing in {} ms: {}", verifyMs, selfCheck.reason());
           throw new IllegalStateException(
               "Produced signature failed self-verification: " + selfCheck.reason()
                   + (selfCheck.signatures().isEmpty() ? "" : " (" + selfCheck.signatures().get(0).reason() + ")"));
         }
 
+        LOG.info("Excel signing completed in {} ms (self-verification {} ms).",
+            System.currentTimeMillis() - start, verifyMs);
         return signedBytes;
       }
+    } catch (Exception e) {
+      LOG.warn("Excel signing failed after {} ms for signerSerial={}: {}",
+          System.currentTimeMillis() - start, signer.getSerialNumber().toString(16), safeMsg(e));
+      throw e;
     } finally {
       Files.deleteIfExists(tempFile);
     }
+  }
+
+  /**
+   * Creates the staging temp file with owner-only access where the platform
+   * supports POSIX permissions (Files.createTempFile already restricts to the
+   * owner by default per its javadoc, but this makes the intent explicit and
+   * defends against a platform where that default doesn't hold). Also
+   * registers {@code deleteOnExit()} as a second line of defense alongside
+   * the caller's finally-block delete — covers a normal JVM shutdown that
+   * skips the finally block (e.g. System.exit from unrelated code), though
+   * neither this nor any other in-process mechanism can run on a hard kill
+   * (SIGKILL/OOM-killer/power loss); a periodic ops-level sweep of the temp
+   * directory for orphaned "trustsign-xlsx-*" files is the correct backstop
+   * for that case, not application code.
+   */
+  private static Path createRestrictedTempFile() throws java.io.IOException {
+    boolean posix = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+    Path tempFile;
+    if (posix) {
+      Set<PosixFilePermission> ownerOnly = EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+      FileAttribute<Set<PosixFilePermission>> attr = PosixFilePermissions.asFileAttribute(ownerOnly);
+      tempFile = Files.createTempFile("trustsign-xlsx-", ".xlsx", attr);
+    } else {
+      tempFile = Files.createTempFile("trustsign-xlsx-", ".xlsx");
+    }
+    tempFile.toFile().deleteOnExit();
+    return tempFile;
   }
 
   /**
@@ -197,6 +248,33 @@ public final class ExcelSignerService {
    * duration of {@code action}. Restores the real provider afterward, even if
    * {@code action} throws. Synchronized so overlapping Excel-signing calls
    * can't interleave their own shim/restore steps.
+   *
+   * <p>This mutates JVM-global JCA state, which is a real and deliberate
+   * trade-off, not an oversight: {@code Signature.getInstance(alg, "SunRsaSign")}
+   * is a name-qualified lookup, and the JCA API has no way to intercept a
+   * name-qualified lookup other than controlling what is registered under
+   * that exact name — there is no "scoped" or "thread-local" provider
+   * registry. Concretely:
+   * <ul>
+   *   <li><b>Concurrent unrelated signing (JWT/TLS/other PDF signing, etc.)
+   *   is not broken by this.</b> Any code elsewhere in the JVM that resolves
+   *   "SunRsaSign" while this shim is installed gets a {@link Provider.Service}
+   *   whose {@code newInstance} always returns a working {@link Signature}; the
+   *   shim only special-cases the exact {@code expectedKey} instance (by
+   *   reference) inside {@code engineInitSign} — every other key, from any
+   *   other concurrent caller, is forwarded unchanged to the real, original
+   *   "SunRsaSign" provider object.
+   *   <li><b>The remaining, unavoidable risk</b> is the brief gap between
+   *   {@code Security.removeProvider(SUN_RSA_SIGN)} and the following
+   *   {@code Security.insertProviderAt(...)}: for those two back-to-back JVM
+   *   calls (no I/O or blocking between them), the name "SunRsaSign" resolves
+   *   to nothing. Unrelated code that happens to call
+   *   {@code Signature.getInstance(alg, "SunRsaSign")} in that exact window
+   *   would get a transient {@code NoSuchProviderException} — the JCA API
+   *   offers no atomic "replace" operation to close this gap. This is a
+   *   correctness-neutral (no wrong output, no security exposure), narrow,
+   *   accepted trade-off given POI leaves no other integration point.
+   * </ul>
    */
   private static void withShimmedSunRsaSign(
       PrivateKey expectedKey, Provider p11Provider, ThrowingAction action) throws Exception {
@@ -273,6 +351,20 @@ public final class ExcelSignerService {
    * original "SunRsaSign"). Only ever reached via {@link #keyAwareShim}'s
    * {@code newInstance} override, never instantiated by JCA's normal no-arg
    * reflection path.
+   *
+   * <p>Reference equality is safe against the current POI 5.5.1 call chain —
+   * verified directly from POI's own source, not assumed:
+   * {@code SignatureInfo.confirmSignature()} reads {@code signatureConfig.getKey()}
+   * once into a local {@code key} variable (SignatureInfo.java:256), and that
+   * exact reference is what reaches {@code SignatureOutputStream}'s
+   * constructor (SignatureInfo.java:287) and ultimately
+   * {@code signature.initSign(key)} inside {@code SignatureOutputStream.init()}
+   * — no wrapping or copying anywhere in between. If a future POI version
+   * changes that (e.g. wraps the key), this check fails closed, not open: a
+   * key that doesn't match {@code expectedKey} by reference falls back to
+   * {@code fallbackProvider}, reproducing the original, loud
+   * {@code InvalidKeyException: Missing key encoding} rather than silently
+   * misrouting anything.
    */
   private static final class KeyAwareSignatureSpi extends SignatureSpi {
     private final String algorithm;
