@@ -53,7 +53,7 @@ class BulkPdfSignerServiceTest {
         listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), "test reason", "test location", null, PdfSignerService.PdfSigningOptions.DEFAULT,
-        null, name -> name, null);
+        null, name -> name, false, null);
 
     assertTrue(result.ok());
     assertEquals(3, result.totalFiles());
@@ -80,7 +80,7 @@ class BulkPdfSignerServiceTest {
         listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
-        null, name -> name, progressEvents::add);
+        null, name -> name, false, progressEvents::add);
 
     assertEquals(2, progressEvents.size());
     assertTrue(progressEvents.stream().allMatch(fr -> fr.status().equals("signed")));
@@ -99,7 +99,7 @@ class BulkPdfSignerServiceTest {
         listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
-        null, name -> name, null);
+        null, name -> name, false, null);
 
     assertTrue(result.ok());
     assertEquals(2, result.totalFiles());
@@ -121,7 +121,7 @@ class BulkPdfSignerServiceTest {
         listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
-        null, name -> name, null);
+        null, name -> name, false, null);
 
     // "fake.pdf" passes the extension filter but fails PDF header sniffing,
     // so it must be recorded as skipped rather than crash the batch.
@@ -163,7 +163,7 @@ class BulkPdfSignerServiceTest {
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
         (signResult, signedPdf) -> "simulated TSA failure",
-        name -> name, null);
+        name -> name, false, null);
 
     assertFalse(result.ok());
     assertEquals(2, result.totalFiles());
@@ -186,7 +186,7 @@ class BulkPdfSignerServiceTest {
         listing1.pdfFiles(), listing1.skippedByName(), dir.toFile(),
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
-        null, name -> name, null);
+        null, name -> name, false, null);
     assertEquals(1, first.succeeded());
     String firstOutput = first.results().get(0).outputPath();
     assertTrue(firstOutput.endsWith("doc-signed.pdf"));
@@ -199,7 +199,7 @@ class BulkPdfSignerServiceTest {
         listing2.pdfFiles(), listing2.skippedByName(), dir.toFile(),
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
-        null, name -> name, null);
+        null, name -> name, false, null);
     assertEquals(2, second.totalFiles());
     assertEquals(2, second.succeeded());
     List<String> outputs = second.results().stream().map(BulkPdfSignerService.FileResult::outputPath).toList();
@@ -224,7 +224,7 @@ class BulkPdfSignerServiceTest {
         listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), "bulk reason", "bulk location", null, PdfSignerService.PdfSigningOptions.DEFAULT,
-        null, name -> name, 4, null);
+        null, name -> name, 4, false, null);
 
     assertTrue(result.ok());
     assertEquals(fileCount, result.totalFiles());
@@ -264,7 +264,7 @@ class BulkPdfSignerServiceTest {
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
         (signResult, signedPdf) -> counter.incrementAndGet() % 2 == 0 ? "simulated failure" : null,
-        name -> name, 4, null);
+        name -> name, 4, false, null);
 
     assertEquals(fileCount, result.totalFiles());
     assertEquals(fileCount, result.succeeded() + result.failed());
@@ -293,7 +293,7 @@ class BulkPdfSignerServiceTest {
         listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
-        null, name -> name, 64, null);
+        null, name -> name, 64, false, null);
 
     assertEquals(1, result.succeeded());
   }
@@ -314,8 +314,127 @@ class BulkPdfSignerServiceTest {
         listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
         material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
         material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
-        null, name -> name, 4, progressEvents::add);
+        null, name -> name, 4, false, progressEvents::add);
 
     assertEquals(fileCount, progressEvents.size());
+  }
+
+  @Test
+  void signDirectory_deletesSourceOnSuccess_whenRequested() throws Exception {
+    Path sourceDir = Files.createTempDirectory("bulk-del-src-");
+    Path destDir = Files.createTempDirectory("bulk-del-dest-");
+    writeFile(sourceDir, "a.pdf", buildTestPdf());
+    writeFile(sourceDir, "b.pdf", buildTestPdf());
+
+    TestKeyMaterial.Material material = TestKeyMaterial.selfSigned("Bulk Delete Test Signer");
+    BulkPdfSignerService.Listing listing = BulkPdfSignerService.listPdfFiles(sourceDir.toFile(), 100);
+    BulkPdfSignerService.Result result = BulkPdfSignerService.signDirectory(
+        listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
+        material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
+        material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
+        null, name -> name, true, null);
+
+    assertEquals(2, result.succeeded());
+    for (BulkPdfSignerService.FileResult fr : result.results()) {
+      assertEquals("signed", fr.status());
+      assertEquals(null, fr.sourceDeleteError());
+    }
+    assertFalse(Files.exists(sourceDir.resolve("a.pdf")), "source file should be deleted after successful signing");
+    assertFalse(Files.exists(sourceDir.resolve("b.pdf")), "source file should be deleted after successful signing");
+    // The signed copies in destDir must be unaffected by deleting the sources.
+    assertTrue(Files.exists(destDir.resolve("a-signed.pdf")));
+    assertTrue(Files.exists(destDir.resolve("b-signed.pdf")));
+  }
+
+  @Test
+  void signDirectory_keepsSourceByDefault() throws Exception {
+    Path sourceDir = Files.createTempDirectory("bulk-del-src-");
+    Path destDir = Files.createTempDirectory("bulk-del-dest-");
+    writeFile(sourceDir, "a.pdf", buildTestPdf());
+
+    TestKeyMaterial.Material material = TestKeyMaterial.selfSigned("Bulk No Delete Test Signer");
+    BulkPdfSignerService.Listing listing = BulkPdfSignerService.listPdfFiles(sourceDir.toFile(), 100);
+    BulkPdfSignerService.signDirectory(
+        listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
+        material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
+        material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
+        null, name -> name, false, null);
+
+    assertTrue(Files.exists(sourceDir.resolve("a.pdf")), "source file must be left alone unless explicitly requested");
+  }
+
+  @Test
+  void signDirectory_neverDeletesSource_whenSigningFails() throws Exception {
+    Path sourceDir = Files.createTempDirectory("bulk-del-src-");
+    Path destDir = Files.createTempDirectory("bulk-del-dest-");
+    writeFile(sourceDir, "reject-me.pdf", buildTestPdf());
+
+    TestKeyMaterial.Material material = TestKeyMaterial.selfSigned("Bulk Delete On Fail Test Signer");
+    BulkPdfSignerService.Listing listing = BulkPdfSignerService.listPdfFiles(sourceDir.toFile(), 100);
+    BulkPdfSignerService.Result result = BulkPdfSignerService.signDirectory(
+        listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
+        material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
+        material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
+        (signResult, signedPdf) -> "forced failure", name -> name, true, null);
+
+    assertEquals(1, result.failed());
+    assertTrue(Files.exists(sourceDir.resolve("reject-me.pdf")),
+        "a failed signing attempt must never delete the source file, even with deleteSourceOnSuccess=true");
+  }
+
+  @Test
+  void signDirectory_neverDeletesSource_whenSkipped() throws Exception {
+    Path sourceDir = Files.createTempDirectory("bulk-del-src-");
+    Path destDir = Files.createTempDirectory("bulk-del-dest-");
+    writeFile(sourceDir, "fake.pdf", "not a real pdf".getBytes());
+
+    TestKeyMaterial.Material material = TestKeyMaterial.selfSigned("Bulk Delete On Skip Test Signer");
+    BulkPdfSignerService.Listing listing = BulkPdfSignerService.listPdfFiles(sourceDir.toFile(), 100);
+    BulkPdfSignerService.Result result = BulkPdfSignerService.signDirectory(
+        listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
+        material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
+        material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
+        null, name -> name, true, null);
+
+    assertEquals(1, result.skipped());
+    assertTrue(Files.exists(sourceDir.resolve("fake.pdf")),
+        "a skipped (not-a-real-PDF) file must never be deleted, even with deleteSourceOnSuccess=true");
+  }
+
+  @Test
+  void signDirectory_reportsSourceDeleteError_whenDeletionFails() throws Exception {
+    Path sourceDir = Files.createTempDirectory("bulk-del-src-");
+    Path destDir = Files.createTempDirectory("bulk-del-dest-");
+    writeFile(sourceDir, "a.pdf", buildTestPdf());
+
+    TestKeyMaterial.Material material = TestKeyMaterial.selfSigned("Bulk Delete Error Test Signer");
+    BulkPdfSignerService.Listing listing = BulkPdfSignerService.listPdfFiles(sourceDir.toFile(), 100);
+
+    // Removing write permission on the parent directory makes deleting a
+    // file inside it fail on POSIX filesystems, without needing to touch
+    // the file's own permissions.
+    File sourceDirFile = sourceDir.toFile();
+    boolean permissionChangeSupported = sourceDirFile.setWritable(false);
+    try {
+      BulkPdfSignerService.Result result = BulkPdfSignerService.signDirectory(
+          listing.pdfFiles(), listing.skippedByName(), destDir.toFile(),
+          material.privateKey(), new Certificate[] { material.certificate() }, Security.getProvider("BC"),
+          material.certificate(), null, null, null, PdfSignerService.PdfSigningOptions.DEFAULT,
+          null, name -> name, true, null);
+
+      BulkPdfSignerService.FileResult fr = result.results().get(0);
+      if (permissionChangeSupported && Files.exists(sourceDir.resolve("a.pdf"))) {
+        // Deletion genuinely failed as intended by this test setup.
+        assertEquals("signed", fr.status(), "signing itself must still succeed even if cleanup fails");
+        assertTrue(fr.sourceDeleteError() != null && fr.sourceDeleteError().contains("failed to delete"),
+            "expected a sourceDeleteError, got: " + fr.sourceDeleteError());
+      }
+      // If the platform/filesystem doesn't honor setWritable(false) for this
+      // user (e.g. running as root), deletion may still succeed — that's a
+      // property of the test environment, not of the code under test, so
+      // there's nothing further to assert in that branch.
+    } finally {
+      sourceDirFile.setWritable(true);
+    }
   }
 }

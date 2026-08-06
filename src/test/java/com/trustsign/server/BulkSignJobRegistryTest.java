@@ -14,11 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BulkSignJobRegistryTest {
 
   private static BulkPdfSignerService.FileResult signed(String name) {
-    return new BulkPdfSignerService.FileResult(name, "signed", "/out/" + name, null, true, 5L);
+    return new BulkPdfSignerService.FileResult(name, "signed", "/out/" + name, null, true, 5L, null);
   }
 
   private static BulkPdfSignerService.FileResult failedResult(String name) {
-    return new BulkPdfSignerService.FileResult(name, "failed", null, "boom", null, null);
+    return new BulkPdfSignerService.FileResult(name, "failed", null, "boom", null, null, null);
   }
 
   @Test

@@ -5647,6 +5647,7 @@ public final class ApiServlet {
     String reason = readMultipartString(mp, "reason", true);
     String location = readMultipartString(mp, "location", true);
     boolean finalVersion = parseFinalVersionMultipart(mp);
+    boolean deleteSourceOnSuccess = parseBooleanLoose(readMultipartString(mp, "deleteSourceOnSuccess", true));
     PdfSigningOptions pdfOpts;
     java.util.List<Integer> stampPages;
     try {
@@ -5738,7 +5739,7 @@ public final class ApiServlet {
                   }
                   return null;
                 },
-                ApiServlet::sanitizeFilename, progress);
+                ApiServlet::sanitizeFilename, deleteSourceOnSuccess, progress);
           } finally {
             permit.close();
           }
@@ -5768,6 +5769,9 @@ public final class ApiServlet {
     }
     if (fr.tookMs() != null) {
       m.put("tookMs", fr.tookMs());
+    }
+    if (fr.sourceDeleteError() != null) {
+      m.put("sourceDeleteError", fr.sourceDeleteError());
     }
     return m;
   }
@@ -5806,6 +5810,7 @@ public final class ApiServlet {
     String reason = readMultipartString(mp, "reason", true);
     String location = readMultipartString(mp, "location", true);
     boolean finalVersion = parseFinalVersionMultipart(mp);
+    boolean deleteSourceOnSuccess = parseBooleanLoose(readMultipartString(mp, "deleteSourceOnSuccess", true));
     PdfSigningOptions pdfOpts;
     java.util.List<Integer> stampPages;
     try {
@@ -5907,7 +5912,7 @@ public final class ApiServlet {
                   }
                   return null;
                 },
-                ApiServlet::sanitizeFilename, threads, progress);
+                ApiServlet::sanitizeFilename, threads, deleteSourceOnSuccess, progress);
           } finally {
             permit.close();
           }

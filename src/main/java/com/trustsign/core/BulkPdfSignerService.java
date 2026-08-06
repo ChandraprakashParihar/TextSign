@@ -62,18 +62,26 @@ public final class BulkPdfSignerService {
       String outputPath,
       String error,
       Boolean timestamped,
-      Long tookMs) {
+      Long tookMs,
+      /**
+       * Non-null only when {@code deleteSourceOnSuccess} was requested AND
+       * the source file's deletion failed — a delete failure never turns a
+       * successful signing into a "failed" result (the signed copy already
+       * exists safely in destDir by that point), but the caller still needs
+       * to know the original file is still sitting in sourceDir.
+       */
+      String sourceDeleteError) {
 
-    static FileResult signed(String file, String outputPath, boolean timestamped, long tookMs) {
-      return new FileResult(file, "signed", outputPath, null, timestamped, tookMs);
+    static FileResult signed(String file, String outputPath, boolean timestamped, long tookMs, String sourceDeleteError) {
+      return new FileResult(file, "signed", outputPath, null, timestamped, tookMs, sourceDeleteError);
     }
 
     static FileResult failed(String file, String error) {
-      return new FileResult(file, "failed", null, error, null, null);
+      return new FileResult(file, "failed", null, error, null, null, null);
     }
 
     static FileResult skipped(String file, String reason) {
-      return new FileResult(file, "skipped", null, reason, null, null);
+      return new FileResult(file, "skipped", null, reason, null, null, null);
     }
   }
 
@@ -163,6 +171,7 @@ public final class BulkPdfSignerService {
       PdfSignerService.PdfSigningOptions pdfOpts,
       PostSignCheck postSignCheck,
       UnaryOperator<String> sanitizeFilename,
+      boolean deleteSourceOnSuccess,
       Consumer<FileResult> progressListener) {
     List<FileResult> results = new ArrayList<>();
     int succeeded = 0;
@@ -172,7 +181,7 @@ public final class BulkPdfSignerService {
     for (File pdfFile : pdfFiles) {
       FileResult r = signOneFile(
           pdfFile, destDir, key, chain, provider, signingCert, reason, location, stampPages, pdfOpts,
-          postSignCheck, sanitizeFilename);
+          postSignCheck, sanitizeFilename, deleteSourceOnSuccess);
       results.add(r);
       if (progressListener != null) {
         progressListener.accept(r);
@@ -232,6 +241,7 @@ public final class BulkPdfSignerService {
       PostSignCheck postSignCheck,
       UnaryOperator<String> sanitizeFilename,
       int threadCount,
+      boolean deleteSourceOnSuccess,
       Consumer<FileResult> progressListener) throws InterruptedException {
     int effectiveThreads = Math.max(1, Math.min(threadCount, pdfFiles.size()));
     ExecutorService pool = Executors.newFixedThreadPool(effectiveThreads);
@@ -241,7 +251,7 @@ public final class BulkPdfSignerService {
         futures.add(pool.submit(() -> {
           FileResult r = signOneFile(
               pdfFile, destDir, key, chain, provider, signingCert, reason, location, stampPages, pdfOpts,
-              postSignCheck, sanitizeFilename);
+              postSignCheck, sanitizeFilename, deleteSourceOnSuccess);
           if (progressListener != null) {
             progressListener.accept(r);
           }
@@ -299,7 +309,8 @@ public final class BulkPdfSignerService {
       List<Integer> stampPages,
       PdfSignerService.PdfSigningOptions pdfOpts,
       PostSignCheck postSignCheck,
-      UnaryOperator<String> sanitizeFilename) {
+      UnaryOperator<String> sanitizeFilename,
+      boolean deleteSourceOnSuccess) {
     long fileStartMs = System.currentTimeMillis();
     try {
       byte[] data = Files.readAllBytes(pdfFile.toPath());
@@ -339,9 +350,24 @@ public final class BulkPdfSignerService {
         }
       }
 
+      // Only ever reached once the signed copy is confirmed written above —
+      // the source is never removed unless a complete, safe replacement
+      // already exists in destDir. A delete failure here does not turn this
+      // result into a "failed" one (the signing itself genuinely succeeded);
+      // it's surfaced via sourceDeleteError instead so the caller can notice
+      // the original file is still sitting in sourceDir.
+      String sourceDeleteError = null;
+      if (deleteSourceOnSuccess) {
+        try {
+          Files.delete(pdfFile.toPath());
+        } catch (Exception e) {
+          sourceDeleteError = "Signed successfully, but failed to delete source file: " + safeMsg(e);
+        }
+      }
+
       return FileResult.signed(
           pdfFile.getName(), reservedOutPath.toAbsolutePath().toString(),
-          signResult.isTimestamped(), System.currentTimeMillis() - fileStartMs);
+          signResult.isTimestamped(), System.currentTimeMillis() - fileStartMs, sourceDeleteError);
     } catch (Exception e) {
       return FileResult.failed(pdfFile.getName(), safeMsg(e));
     }
