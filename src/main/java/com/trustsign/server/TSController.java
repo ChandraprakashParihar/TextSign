@@ -78,6 +78,21 @@ public class TSController {
     api.handlePost(req, resp, "/auto-sign-pdf-at-field");
   }
 
+  @PostMapping("/auto-sign-pdf-bulk")
+  public void autoSignPdfBulk(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/auto-sign-pdf-bulk");
+  }
+
+  @PostMapping("/auto-sign-pdf-bulk-pfx")
+  public void autoSignPdfBulkPfx(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handlePost(req, resp, "/auto-sign-pdf-bulk-pfx");
+  }
+
+  @GetMapping("/auto-sign-pdf-bulk-status")
+  public void autoSignPdfBulkStatus(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    api.handleGet(req, resp, "/auto-sign-pdf-bulk-status");
+  }
+
   @PostMapping("/auto-sign-text-cms")
   public void autoSignTextCms(HttpServletRequest req, HttpServletResponse resp) throws IOException {
     api.handlePost(req, resp, "/auto-sign-text-cms");

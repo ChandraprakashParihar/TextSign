@@ -20,7 +20,10 @@
     "signingAcquireTimeoutMs" : 300000,
     "multipartPdfMaxFileMb" : 25,
     "multipartTextMaxFileMb" : 4,
-    "gracefulStopTimeoutMs" : 30000
+    "gracefulStopTimeoutMs" : 30000,
+    "bulkSignMaxFiles" : 1000,
+    "bulkSignPfxMaxFiles" : 20000,
+    "bulkSignPfxThreads" : 8
   },
   "autoSignOutputDir" : "output",
   "output" : "file",

@@ -26,6 +26,7 @@ import com.trustsign.core.CmsVerifyService;
 import com.trustsign.core.CmsTaggedFile;
 import com.trustsign.core.XmlSignerService;
 import com.trustsign.core.XmlVerifyService;
+import com.trustsign.core.BulkPdfSignerService;
 import com.trustsign.core.OoxmlSignerService;
 import com.trustsign.core.OoxmlVerifyService;
 import com.trustsign.core.CertificateValidator;
@@ -88,6 +89,8 @@ public final class ApiServlet {
   private final SessionManager sessions;
   private final LicenceEnforcer licenceEnforcer;
   private final SigningConcurrencyGate signingGate;
+  /** Tracks background bulk-PDF-signing jobs for /auto-sign-pdf-bulk[-pfx] + /auto-sign-pdf-bulk-status. No config dependency, so plain field rather than DI. */
+  private final BulkSignJobRegistry bulkSignJobs = new BulkSignJobRegistry();
   private final int multipartPdfMaxBytes;
   private final int multipartTextMaxBytes;
   /** Former 5 MiB cap for verify-text / debug; bounded by PDF limit. */
@@ -284,6 +287,55 @@ public final class ApiServlet {
       throw new IllegalArgumentException("outputDir is not writable: " + dir.getAbsolutePath());
     }
     return dir;
+  }
+
+  /**
+   * Same path-traversal/base-dir safety as {@link #resolveSafeOutputDir}, but
+   * for a directory that must already exist and be readable — used for the
+   * source directory in bulk PDF signing. Unlike an output dir, a missing or
+   * non-readable source directory is always a client error, never
+   * auto-created.
+   */
+  private static File resolveSafeInputDir(String inputDir, Path basePath) {
+    if (inputDir == null || inputDir.isBlank()) {
+      throw new IllegalArgumentException("sourceDir is required");
+    }
+    Path requested = Paths.get(inputDir.trim()).normalize();
+    if (requested.toString().contains("..")) {
+      throw new SecurityException("sourceDir must not contain '..'");
+    }
+    Path base = Paths.get(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+    Path resolved = requested.isAbsolute() ? requested.normalize().toAbsolutePath()
+        : base.resolve(requested).normalize().toAbsolutePath();
+    if (basePath != null) {
+      Path allowedBase = basePath.toAbsolutePath().normalize();
+      if (!resolved.startsWith(allowedBase)) {
+        throw new SecurityException("sourceDir must be under configured outputBaseDir (" + allowedBase + ")");
+      }
+    }
+    File dir = resolved.toFile();
+    if (!dir.exists()) {
+      throw new IllegalArgumentException("sourceDir does not exist: " + dir.getAbsolutePath());
+    }
+    if (!dir.isDirectory()) {
+      throw new IllegalArgumentException("sourceDir must be a directory (but is a file): " + dir.getAbsolutePath());
+    }
+    if (!dir.canRead()) {
+      throw new IllegalArgumentException("sourceDir is not readable: " + dir.getAbsolutePath());
+    }
+    return dir;
+  }
+
+  /** Shared {@code cfg.outputBaseDir()} resolution used by both source and destination directory validation. */
+  private static Path resolveOutputBaseDir(AgentConfig cfg) {
+    if (cfg.outputBaseDir() == null || cfg.outputBaseDir().isBlank()) {
+      return null;
+    }
+    Path base = Paths.get(cfg.outputBaseDir());
+    if (!base.isAbsolute()) {
+      base = Paths.get(System.getProperty("user.dir", ".")).resolve(base).normalize();
+    }
+    return base;
   }
 
   private static Path resolveConfiguredLogDirectory(AgentConfig cfg, File configFile) {
@@ -1183,6 +1235,11 @@ public final class ApiServlet {
           writeJson(resp, 200, body);
           return;
         }
+        case "/auto-sign-pdf-bulk-status" -> {
+          handleBulkSignStatus(req, resp);
+          return;
+        }
+
         case "/certificates" -> {
           // requireSession(req);
 
@@ -2349,6 +2406,16 @@ public final class ApiServlet {
               }
             }
           }
+          return;
+        }
+
+        case "/auto-sign-pdf-bulk" -> {
+          handleBulkPdfSign(req, resp, startMs);
+          return;
+        }
+
+        case "/auto-sign-pdf-bulk-pfx" -> {
+          handleBulkPdfSignPfx(req, resp, startMs);
           return;
         }
 
@@ -5539,6 +5606,368 @@ public final class ApiServlet {
   }
 
   /**
+   * Submits a background job that signs every PDF directly inside
+   * {@code sourceDir} (non-recursive) and writes each signed output into
+   * {@code destDir}, using ONE resolved credential (token or configured PFX
+   * — see {@link #resolveKeySource}) and ONE selected certificate for the
+   * whole batch, rather than re-loading the token per file. A single bad
+   * file (corrupt PDF, DocMDP-locked, LTV/TSA failure, etc.) is recorded as
+   * a per-file failure and does NOT abort the rest of the batch.
+   *
+   * <p>Everything up to and including certificate selection happens
+   * synchronously, so directory/credential/certificate errors are still
+   * reported in THIS response (400/500) — only the actual, potentially
+   * long-running per-file signing work is handed off to a background job.
+   * Returns 202 with a {@code jobId} immediately; poll
+   * {@code /auto-sign-pdf-bulk-status?jobId=...} for progress and, once
+   * {@code status} is {@code completed}/{@code failed}, the final per-file
+   * results.
+   */
+  private void handleBulkPdfSign(HttpServletRequest req, HttpServletResponse resp, long startMs) throws Exception {
+    var mp = Multipart.read(req, multipartPdfMaxBytes);
+    AgentConfig cfg = loadConfig(resp);
+    if (cfg == null) {
+      return;
+    }
+
+    String sourceDirParam = readMultipartString(mp, "sourceDir", true);
+    String destDirParam = readMultipartString(mp, "destDir", true);
+    Path outputBase = resolveOutputBaseDir(cfg);
+
+    File sourceDirFile;
+    File destDirFile;
+    try {
+      sourceDirFile = resolveSafeInputDir(sourceDirParam, outputBase);
+      destDirFile = resolveSafeOutputDir(destDirParam, outputBase);
+    } catch (SecurityException | IllegalArgumentException e) {
+      writeJson(resp, 400, Map.of("error", "Invalid sourceDir/destDir", "details", e.getMessage()));
+      return;
+    }
+
+    String reason = readMultipartString(mp, "reason", true);
+    String location = readMultipartString(mp, "location", true);
+    boolean finalVersion = parseFinalVersionMultipart(mp);
+    PdfSigningOptions pdfOpts;
+    java.util.List<Integer> stampPages;
+    try {
+      pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+      stampPages = resolvePdfStampPages(mp);
+    } catch (IllegalArgumentException e) {
+      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      return;
+    }
+
+    int maxFiles = AgentConfig.ServerConfig.bulkSignMaxFilesOrDefault(cfg.server());
+    BulkPdfSignerService.Listing listing;
+    try {
+      listing = BulkPdfSignerService.listPdfFiles(sourceDirFile, maxFiles);
+    } catch (IllegalArgumentException e) {
+      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      return;
+    }
+
+    KeySource src;
+    try {
+      src = resolveKeySource(cfg);
+    } catch (KeySourceException e) {
+      LOG.error("Key source resolution failed (auto-sign-pdf-bulk). tookMs={} pfx={} details={}",
+          System.currentTimeMillis() - startMs, e.pfx, e.getMessage());
+      writeKeySourceError(resp, e);
+      return;
+    }
+
+    KeyStore ks = src.keyStore();
+    byte[] cerBytes = readMultipartCerPayload(mp);
+    CertificateSelection selection;
+    try {
+      selection = selectCertificateFromToken(ks, cerBytes);
+    } catch (Exception e) {
+      writeJson(resp, 500, Map.of("error", "Failed to select certificate from token", "details", safeMsg(e)));
+      return;
+    }
+    if (selection == null || selection.chain == null || selection.chain.length == 0) {
+      writeJson(resp, 400, Map.of("error",
+          "Registered certificate was not found in the token. Please use correct token or check token driver."));
+      return;
+    }
+
+    String matchedAlias = selection.alias;
+    X509Certificate signingCert = selection.certificate;
+    Certificate[] chain = selection.chain;
+    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+    java.util.Arrays.fill(src.keyPassword(), '\0');
+    if (key == null) {
+      writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
+      return;
+    }
+
+    X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
+        ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c)
+            .toArray(X509Certificate[]::new)
+        : null;
+    CertificateValidator.validateForSigning(signingCert, x509Chain);
+
+    long signingAcquireTimeoutMs = AgentConfig.ServerConfig.signingAcquireTimeoutMsOrDefault(cfg.server());
+    LOG.info("Submitting bulk PDF signing job. sourceDir={} destDir={} alias={} totalFiles={}",
+        sourceDirFile.getAbsolutePath(), destDirFile.getAbsolutePath(), matchedAlias, listing.totalFiles());
+
+    String jobId = bulkSignJobs.submit(
+        sourceDirFile.getAbsolutePath(), destDirFile.getAbsolutePath(),
+        signingCert.getSubjectX500Principal().getName(), signingCert.getSerialNumber().toString(16),
+        listing.totalFiles(),
+        progress -> {
+          // The PKCS#11/PFX token permit is held for the ENTIRE background
+          // job, not just the initial request — SigningConcurrencyFilter
+          // only wraps synchronous request handling, so with the actual
+          // signing work now running after this handler already returned,
+          // gating has to happen here instead (see the removal of these two
+          // paths from SigningConcurrencyFilter.POST_SIGNING_PATHS).
+          AutoCloseable permit = signingGate.enter(signingAcquireTimeoutMs);
+          try {
+            BulkPdfSignerService.signDirectory(
+                listing.pdfFiles(), listing.skippedByName(), destDirFile, key, chain, src.provider(), signingCert,
+                reason, location, stampPages, pdfOpts,
+                (signResult, signedPdf) -> {
+                  String tsaError = validateTsaArtifactsIfConfigured(signResult, cfg);
+                  if (tsaError != null) {
+                    return "TSA validation failed: " + tsaError;
+                  }
+                  String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
+                  if (ltvError != null) {
+                    return "LTV validation failed: " + ltvError;
+                  }
+                  return null;
+                },
+                ApiServlet::sanitizeFilename, progress);
+          } finally {
+            permit.close();
+          }
+        });
+
+    writeJson(resp, 202, Map.of(
+        "jobId", jobId,
+        "status", "running",
+        "sourceDir", sourceDirFile.getAbsolutePath(),
+        "destDir", destDirFile.getAbsolutePath(),
+        "totalFiles", listing.totalFiles()));
+  }
+
+  /** Shared JSON shape for a single {@link BulkPdfSignerService.FileResult}, used by the bulk status endpoint. */
+  private static Map<String, Object> fileResultToMap(BulkPdfSignerService.FileResult fr) {
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("file", fr.file());
+    m.put("status", fr.status());
+    if (fr.outputPath() != null) {
+      m.put("outputPath", fr.outputPath());
+    }
+    if (fr.error() != null) {
+      m.put("error", fr.error());
+    }
+    if (fr.timestamped() != null) {
+      m.put("timestamped", fr.timestamped());
+    }
+    if (fr.tookMs() != null) {
+      m.put("tookMs", fr.tookMs());
+    }
+    return m;
+  }
+
+  /**
+   * Same as {@link #handleBulkPdfSign}, except the background job signs
+   * concurrently across a bounded thread pool
+   * ({@link BulkPdfSignerService#signDirectoryConcurrently}) for directories
+   * with very large numbers of PDFs, and REQUIRES a configured PFX
+   * credential — never falls back to the PKCS#11 token, since a token
+   * session is not safe under concurrent signing (see
+   * {@link #resolvePfxOnlyKeySource} and the Javadoc on
+   * {@code signDirectoryConcurrently}).
+   */
+  private void handleBulkPdfSignPfx(HttpServletRequest req, HttpServletResponse resp, long startMs) throws Exception {
+    var mp = Multipart.read(req, multipartPdfMaxBytes);
+    AgentConfig cfg = loadConfig(resp);
+    if (cfg == null) {
+      return;
+    }
+
+    String sourceDirParam = readMultipartString(mp, "sourceDir", true);
+    String destDirParam = readMultipartString(mp, "destDir", true);
+    Path outputBase = resolveOutputBaseDir(cfg);
+
+    File sourceDirFile;
+    File destDirFile;
+    try {
+      sourceDirFile = resolveSafeInputDir(sourceDirParam, outputBase);
+      destDirFile = resolveSafeOutputDir(destDirParam, outputBase);
+    } catch (SecurityException | IllegalArgumentException e) {
+      writeJson(resp, 400, Map.of("error", "Invalid sourceDir/destDir", "details", e.getMessage()));
+      return;
+    }
+
+    String reason = readMultipartString(mp, "reason", true);
+    String location = readMultipartString(mp, "location", true);
+    boolean finalVersion = parseFinalVersionMultipart(mp);
+    PdfSigningOptions pdfOpts;
+    java.util.List<Integer> stampPages;
+    try {
+      pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
+      stampPages = resolvePdfStampPages(mp);
+    } catch (IllegalArgumentException e) {
+      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      return;
+    }
+
+    int configuredThreads = AgentConfig.ServerConfig.bulkSignPfxThreadsOrDefault(cfg.server());
+    String threadsParam = readMultipartString(mp, "threads", true);
+    int parsedThreads = configuredThreads;
+    if (threadsParam != null && !threadsParam.isBlank()) {
+      try {
+        parsedThreads = Math.min(Math.max(Integer.parseInt(threadsParam.trim()), 1), 64);
+      } catch (NumberFormatException e) {
+        writeJson(resp, 400, Map.of("error", "threads must be a positive integer"));
+        return;
+      }
+    }
+    final int threads = parsedThreads;
+
+    int maxFiles = AgentConfig.ServerConfig.bulkSignPfxMaxFilesOrDefault(cfg.server());
+    BulkPdfSignerService.Listing listing;
+    try {
+      listing = BulkPdfSignerService.listPdfFiles(sourceDirFile, maxFiles);
+    } catch (IllegalArgumentException e) {
+      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      return;
+    }
+
+    KeySource src;
+    try {
+      src = resolvePfxOnlyKeySource(cfg);
+    } catch (KeySourceException e) {
+      LOG.error("Key source resolution failed (auto-sign-pdf-bulk-pfx). tookMs={} details={}",
+          System.currentTimeMillis() - startMs, e.getMessage());
+      writeKeySourceError(resp, e);
+      return;
+    }
+
+    KeyStore ks = src.keyStore();
+    byte[] cerBytes = readMultipartCerPayload(mp);
+    CertificateSelection selection;
+    try {
+      selection = selectCertificateFromToken(ks, cerBytes);
+    } catch (Exception e) {
+      writeJson(resp, 500, Map.of("error", "Failed to select certificate from PFX", "details", safeMsg(e)));
+      return;
+    }
+    if (selection == null || selection.chain == null || selection.chain.length == 0) {
+      writeJson(resp, 400, Map.of("error", "No matching certificate found in the configured PFX file."));
+      return;
+    }
+
+    String matchedAlias = selection.alias;
+    X509Certificate signingCert = selection.certificate;
+    Certificate[] chain = selection.chain;
+    PrivateKey key = (PrivateKey) ks.getKey(matchedAlias, src.keyPassword());
+    java.util.Arrays.fill(src.keyPassword(), '\0');
+    if (key == null) {
+      writeJson(resp, 400, Map.of("error", "No private key found for matching certificate"));
+      return;
+    }
+
+    X509Certificate[] x509Chain = chain != null && chain.length > 0 && chain[0] instanceof X509Certificate
+        ? java.util.Arrays.stream(chain).filter(c -> c instanceof X509Certificate).map(c -> (X509Certificate) c)
+            .toArray(X509Certificate[]::new)
+        : null;
+    CertificateValidator.validateForSigning(signingCert, x509Chain);
+
+    long signingAcquireTimeoutMs = AgentConfig.ServerConfig.signingAcquireTimeoutMsOrDefault(cfg.server());
+    LOG.info("Submitting concurrent bulk PDF signing job. sourceDir={} destDir={} alias={} totalFiles={} threads={}",
+        sourceDirFile.getAbsolutePath(), destDirFile.getAbsolutePath(), matchedAlias, listing.totalFiles(), threads);
+
+    String jobId = bulkSignJobs.submit(
+        sourceDirFile.getAbsolutePath(), destDirFile.getAbsolutePath(),
+        signingCert.getSubjectX500Principal().getName(), signingCert.getSerialNumber().toString(16),
+        listing.totalFiles(),
+        progress -> {
+          // A PFX key is safe under concurrent signing (see the Javadoc on
+          // signDirectoryConcurrently), but the gate is still held for the
+          // job's duration to respect server.maxConcurrentSigningOperations
+          // overall — same reasoning as handleBulkPdfSign.
+          AutoCloseable permit = signingGate.enter(signingAcquireTimeoutMs);
+          try {
+            BulkPdfSignerService.signDirectoryConcurrently(
+                listing.pdfFiles(), listing.skippedByName(), destDirFile, key, chain, src.provider(), signingCert,
+                reason, location, stampPages, pdfOpts,
+                (signResult, signedPdf) -> {
+                  String tsaError = validateTsaArtifactsIfConfigured(signResult, cfg);
+                  if (tsaError != null) {
+                    return "TSA validation failed: " + tsaError;
+                  }
+                  String ltvError = validateLtvArtifactsIfRequired(signedPdf, cfg);
+                  if (ltvError != null) {
+                    return "LTV validation failed: " + ltvError;
+                  }
+                  return null;
+                },
+                ApiServlet::sanitizeFilename, threads, progress);
+          } finally {
+            permit.close();
+          }
+        });
+
+    writeJson(resp, 202, Map.of(
+        "jobId", jobId,
+        "status", "running",
+        "sourceDir", sourceDirFile.getAbsolutePath(),
+        "destDir", destDirFile.getAbsolutePath(),
+        "totalFiles", listing.totalFiles(),
+        "threads", threads));
+  }
+
+  /**
+   * Reports progress/results for a job submitted by {@link #handleBulkPdfSign}
+   * or {@link #handleBulkPdfSignPfx}. 404 if {@code jobId} is missing, was
+   * never issued, or has aged out of the retention window (finished jobs are
+   * only kept visible for a limited time — see {@link BulkSignJobRegistry}).
+   */
+  private void handleBulkSignStatus(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    String jobId = req.getParameter("jobId");
+    if (jobId == null || jobId.isBlank()) {
+      writeJson(resp, 400, Map.of("error", "Missing required query parameter: jobId"));
+      return;
+    }
+    BulkSignJobRegistry.JobSnapshot snapshot = bulkSignJobs.getStatus(jobId.trim());
+    if (snapshot == null) {
+      writeJson(resp, 404, Map.of("error", "No such job (never existed, or its result has expired): " + jobId));
+      return;
+    }
+
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("jobId", snapshot.jobId());
+    body.put("status", snapshot.state().name().toLowerCase(java.util.Locale.ROOT));
+    body.put("sourceDir", snapshot.sourceDir());
+    body.put("destDir", snapshot.destDir());
+    body.put("subjectDn", snapshot.subjectDn());
+    body.put("serialNumber", snapshot.serialNumber());
+    body.put("totalFiles", snapshot.totalFiles());
+    body.put("processed", snapshot.processed());
+    body.put("succeeded", snapshot.succeeded());
+    body.put("failed", snapshot.failed());
+    body.put("skipped", snapshot.skipped());
+    if (snapshot.error() != null) {
+      body.put("error", snapshot.error());
+    }
+    body.put("startedAt", snapshot.startedAt());
+    if (snapshot.finishedAt() != null) {
+      body.put("finishedAt", snapshot.finishedAt());
+    }
+    java.util.List<Map<String, Object>> results = new java.util.ArrayList<>();
+    for (BulkPdfSignerService.FileResult fr : snapshot.results()) {
+      results.add(fileResultToMap(fr));
+    }
+    body.put("results", results);
+    writeJson(resp, 200, body);
+  }
+
+  /**
    * Signs an OOXML file (.xlsx/.docx/.pptx) with a native digital signature
    * ({@link OoxmlSignerService}) — recognized by Office itself, unlike a
    * detached/appended signature. Certificate selection and token handling
@@ -5923,14 +6352,7 @@ public final class ApiServlet {
   private KeySource resolveKeySource(AgentConfig cfg) {
     AgentConfig.PfxConfig pfxCfg = cfg.pfx();
     if (pfxCfg != null && pfxCfg.path() != null && !pfxCfg.path().isBlank()) {
-      try {
-        String rawPassword = pfxCfg.password() == null ? "" : pfxCfg.password();
-        char[] password = com.trustsign.core.ConfigDecryptor.decryptIfEncrypted(rawPassword).toCharArray();
-        com.trustsign.core.PfxKeyMaterial.Loaded loaded = com.trustsign.core.PfxKeyMaterial.load(pfxCfg.path(), password);
-        return new KeySource(loaded.keyStore(), loaded.provider(), password);
-      } catch (Exception e) {
-        throw new KeySourceException(true, safeMsg(e), e);
-      }
+      return loadPfxKeySource(pfxCfg);
     }
 
     char[] pin = resolvePin(cfg);
@@ -5950,6 +6372,37 @@ public final class ApiServlet {
       return new KeySource(loaded.keyStore(), loaded.provider(), pin);
     } catch (RuntimeException e) {
       throw new KeySourceException(false, buildTokenErrorDetail(e), e);
+    }
+  }
+
+  /**
+   * Same as {@link #resolveKeySource}, but requires a configured PFX and
+   * NEVER falls back to the PKCS#11 token — used by
+   * {@code /auto-sign-pdf-bulk-pfx}, which signs concurrently across a
+   * thread pool. That is only safe for an extractable software key; a
+   * PKCS#11 token session is not safe under concurrent use, so this endpoint
+   * must refuse to run against one rather than silently falling back to it.
+   */
+  private KeySource resolvePfxOnlyKeySource(AgentConfig cfg) {
+    AgentConfig.PfxConfig pfxCfg = cfg.pfx();
+    if (pfxCfg == null || pfxCfg.path() == null || pfxCfg.path().isBlank()) {
+      throw new KeySourceException(true,
+          "This endpoint requires a PFX credential configured (config.pfx.path) — PKCS#11 hardware tokens "
+              + "are not safe to sign with concurrently, so this endpoint never falls back to one. "
+              + "Use /auto-sign-pdf-bulk for token-based signing.",
+          null);
+    }
+    return loadPfxKeySource(pfxCfg);
+  }
+
+  private KeySource loadPfxKeySource(AgentConfig.PfxConfig pfxCfg) {
+    try {
+      String rawPassword = pfxCfg.password() == null ? "" : pfxCfg.password();
+      char[] password = com.trustsign.core.ConfigDecryptor.decryptIfEncrypted(rawPassword).toCharArray();
+      com.trustsign.core.PfxKeyMaterial.Loaded loaded = com.trustsign.core.PfxKeyMaterial.load(pfxCfg.path(), password);
+      return new KeySource(loaded.keyStore(), loaded.provider(), password);
+    } catch (Exception e) {
+      throw new KeySourceException(true, safeMsg(e), e);
     }
   }
 

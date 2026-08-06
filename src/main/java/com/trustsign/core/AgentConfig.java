@@ -194,7 +194,28 @@ public record AgentConfig(
       @JsonProperty(required = false) Integer multipartTextMaxFileMb,
       /** Max /session token issuances per IP per minute. */
       @JsonProperty(required = false) Integer sessionIssueRateLimitPerMinute,
-      @JsonProperty(required = false) Long gracefulStopTimeoutMs
+      @JsonProperty(required = false) Long gracefulStopTimeoutMs,
+      /**
+       * Max PDFs processed per /auto-sign-pdf-bulk request. Omitted defaults
+       * to 1000. Rejected upfront (400) rather than silently truncated when a
+       * source directory has more files than this, since silent truncation
+       * would leave some files unsigned without the caller realizing it.
+       */
+      @JsonProperty(required = false) Integer bulkSignMaxFiles,
+      /**
+       * Max PDFs processed per /auto-sign-pdf-bulk-pfx request. Omitted
+       * defaults to 20000 — much higher than {@link #bulkSignMaxFiles}, since
+       * that endpoint is specifically for very large directories and signs
+       * concurrently rather than one file at a time.
+       */
+      @JsonProperty(required = false) Integer bulkSignPfxMaxFiles,
+      /**
+       * Worker thread count for /auto-sign-pdf-bulk-pfx. Omitted defaults to
+       * min(8, availableProcessors). Only meaningful for that endpoint —
+       * /auto-sign-pdf-bulk always signs one file at a time regardless of
+       * this setting, since a PKCS#11 token is not safe under concurrent use.
+       */
+      @JsonProperty(required = false) Integer bulkSignPfxThreads
   ) {
 
     public static int maxThreadsOrDefault(ServerConfig c) {
@@ -283,6 +304,23 @@ public record AgentConfig(
     public static long gracefulStopTimeoutMsOrDefault(ServerConfig c) {
       long v = c == null || c.gracefulStopTimeoutMs() == null ? 30_000L : c.gracefulStopTimeoutMs();
       return Math.min(Math.max(v, 1000L), 300_000L);
+    }
+
+    public static int bulkSignMaxFilesOrDefault(ServerConfig c) {
+      int v = c == null || c.bulkSignMaxFiles() == null ? 1000 : c.bulkSignMaxFiles();
+      return Math.min(Math.max(v, 1), 100_000);
+    }
+
+    public static int bulkSignPfxMaxFilesOrDefault(ServerConfig c) {
+      int v = c == null || c.bulkSignPfxMaxFiles() == null ? 20_000 : c.bulkSignPfxMaxFiles();
+      return Math.min(Math.max(v, 1), 1_000_000);
+    }
+
+    public static int bulkSignPfxThreadsOrDefault(ServerConfig c) {
+      int v = c == null || c.bulkSignPfxThreads() == null
+          ? Math.min(8, Runtime.getRuntime().availableProcessors())
+          : c.bulkSignPfxThreads();
+      return Math.min(Math.max(v, 1), 64);
     }
   }
 }
