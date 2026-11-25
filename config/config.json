@@ -1,7 +1,7 @@
 {
   "port" : 8080,
   "allowedOrigins" : [ "http://localhost", "http://localhost:3000", "http://localhost:8080", "https://uat.xtratrust.com" ],
-  "allowedClientIps" : [ "127.0.0.1", "::1", "localhost", "0:0:0:0:0:0:0:1" ],
+  "allowedClientIps" : [ "127.0.0.1" ],
   "logging" : {
     "directory" : "logs",
     "consoleEnabled" : true,
@@ -18,21 +18,21 @@
     "maxConcurrentSigningOperations" : 24,
     "sessionIssueRateLimitPerMinute" : 30,
     "signingAcquireTimeoutMs" : 300000,
-    "multipartPdfMaxFileMb" : 25,
+    "multipartPdfMaxFileMb" : 50,
     "multipartTextMaxFileMb" : 4,
     "gracefulStopTimeoutMs" : 30000,
     "bulkSignMaxFiles" : 1000,
     "bulkSignPfxMaxFiles" : 20000,
     "bulkSignPfxThreads" : 8
   },
-  "autoSignOutputDir" : "output",
-  "output" : "file",
+  "autoSignOutputDir" : "",
+  "output" : "raw",
   "outputFormat" : "base64",
   "signerVersion" : "TrustSign_0.1.0",
   "signatureImagePath" : "greentickrbg.png",
   "truststore" : {
     "path" : "truststore.jks",
-    "password" : "ts_new",
+    "password" : "chandra-new",
     "type" : "PKCS12",
     "enablePathValidation" : true
   },
@@ -42,23 +42,23 @@
     "enableClassValidation" : false,
     "allowedCertificatePolicyOids" : ""
   },
-  "pfx":{
-    "path" : "config/XtraTrust_DS.pfx",
-    "password" : "123"
+  "pfx" : {
+    "path" : "",
+    "password" : ""
   },
   "pkcs11" : {
-    "preferredLibrary" : null,
     "pin" : "12345678",
-    "windowsCandidates" : [ "%SystemRoot%\\System32\\eps2003csp11v2.dll", "%SystemRoot%\\System32\\eps2003csp11v2_s.dll", "%SystemRoot%\\SysWOW64\\eps2003csp11v2.dll", "%SystemRoot%\\SysWOW64\\eps2003csp11v2_s.dll", "%ProgramFiles%\\HyperPKI\\bin\\pkcs11.dll", "%ProgramFiles%\\HyperPKI\\pkcs11.dll", "%ProgramFiles(x86)%\\HyperPKI\\bin\\pkcs11.dll", "%ProgramFiles(x86)%\\HyperPKI\\pkcs11.dll", "%ProgramFiles%\\ePass2003\\bin\\pkcs11.dll", "%ProgramFiles(x86)%\\ePass2003\\bin\\pkcs11.dll", "%ProgramFiles%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll", "%ProgramFiles(x86)%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll" ],
-    "macCandidates" : [ "/usr/local/lib/libcastle_v2.1.0.0.dylib" ],
-    "linuxCandidates" : [ ]
+    "preferredLibrary" : null,
+    "windowsCandidates" : [ "C:\\Windows\\System32\\SignatureP11.dll", "C:\\Windows\\System32\\CryptoIDA_pkcs11.dll", "C:\\Windows\\System32\\HYP2003csp11IND.dll", "C:\\Windows\\System32\\eps2003csp11v2.dll", "C:\\Windows\\System32\\InnaITPKCS11Driver.dll", "C:\\Windows\\System32\\eTPKCS11.dll", "C:\\Windows\\System32\\eToken.dll" ],
+    "macCandidates" : [ "/usr/local/lib/wdProxKeyUsbKeyTool/libwdpkcs_Proxkey.dylib", "/usr/local/lib/libcastle_v2.1.0.0.dylib", "/usr/local/lib/libeTPkcs11.dylib", "libIDPrimePKCS11.dylib", "libwdpkcs_*.dylib", "/usr/local/lib/libInnaITPKCS11.dylib" ],
+    "linuxCandidates" : [ "/usr/lib/WatchData/ProxKey/lib/libwdpkcs_SignatureP11.so", "libepsng_p11.so", "libcastle.so.1.0.0", "/usr/lib/libeToken.so", "libeTPkcs11.so", "libIDPrimePKCS11.so", "/usr/lib/WatchData/TRUSTKEY/lib/libwdpkcs_TRUSTKEY.so", "/usr/lib/libInnaITPKCS11.so", "/usr/lib/x86_64-linux-gnu/libInnaITPKCS11.so" ]
   },
   "hsm" : {
     "preferredLibrary" : null,
-    "windowsCandidates" : [ "%SystemRoot%\\System32\\eps2003csp11v2.dll", "%SystemRoot%\\System32\\eps2003csp11v2_s.dll", "%SystemRoot%\\SysWOW64\\eps2003csp11v2.dll", "%SystemRoot%\\SysWOW64\\eps2003csp11v2_s.dll", "%ProgramFiles%\\HyperPKI\\bin\\pkcs11.dll", "%ProgramFiles%\\HyperPKI\\pkcs11.dll", "%ProgramFiles(x86)%\\HyperPKI\\bin\\pkcs11.dll", "%ProgramFiles(x86)%\\HyperPKI\\pkcs11.dll", "%ProgramFiles%\\ePass2003\\bin\\pkcs11.dll", "%ProgramFiles(x86)%\\ePass2003\\bin\\pkcs11.dll", "%ProgramFiles%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll", "%ProgramFiles(x86)%\\Hypersecu\\HyperPKI\\bin\\pkcs11.dll" ],
-    "macCandidates" : [ "/usr/local/lib/libcastle_v2.1.0.0.dylib" ],
+    "windowsCandidates" : [ ],
+    "macCandidates" : [ ],
     "linuxCandidates" : [ ],
-    "pin" : "12345678",
+    "pin" : "",
     "slotProbeCount" : 8
   },
   "ltv" : {

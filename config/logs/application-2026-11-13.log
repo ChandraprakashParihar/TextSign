@@ -1,0 +1,2 @@
+2026-11-13 17:31:59.286 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.d - Logging to date-based files: /Users/jainnibha/chandra-workspace/trustsign/config/logs/application-%d{yyyy-MM-dd}.log
+2026-11-13 17:31:59.287 [main] INFO  [txnId=na] [ip=na] com.trustsign.server.Main - Using config: /Users/jainnibha/chandra-workspace/trustsign/config/config.json

@@ -42,3 +42,17 @@ keytool -importcert -alias sub-ca -file "$SUB_CA" -keystore "$KEYSTORE" -storepa
 
 echo "Created $KEYSTORE (password: $STORE_PASS, type: PKCS12)"
 echo "Add to config.json: \"truststore\": { \"path\": \"truststore.jks\", \"password\": \"$STORE_PASS\", \"type\": \"PKCS12\", \"enablePathValidation\": true }"
+
+# The server refuses to load a truststore without a matching .truststore-integrity
+# file next to it (HMAC-SHA256, same derivation as CertificateValidator and the
+# clientFolder task in build.gradle). Generate it here so a freshly created
+# truststore is usable straight away.
+INTEGRITY_FILE="$(dirname "$KEYSTORE")/.truststore-integrity"
+if command -v openssl >/dev/null 2>&1 && command -v xxd >/dev/null 2>&1; then
+  HMAC_KEY_HEX="$(printf '%s' 'TrustSign-TS-Integrity-V1-b7d4e2' | openssl dgst -sha256 -binary | xxd -p -c 256)"
+  openssl dgst -sha256 -mac HMAC -macopt "hexkey:$HMAC_KEY_HEX" -binary "$KEYSTORE" | xxd -p -c 256 > "$INTEGRITY_FILE"
+  echo "Wrote $INTEGRITY_FILE"
+else
+  echo "WARNING: openssl/xxd not found - $INTEGRITY_FILE was NOT written." >&2
+  echo "         The server will reject this truststore until it is generated (run ./gradlew clientFolder, or call /map-certificate)." >&2
+fi

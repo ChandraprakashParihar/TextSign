@@ -131,4 +131,58 @@ class BulkSignJobRegistryTest {
     }
     throw new AssertionError("job did not finish within timeout: " + jobId);
   }
+
+  @Test
+  void submit_rejectsSecondJobForSameSourceDirWhileFirstIsRunning() throws Exception {
+    BulkSignJobRegistry registry = new BulkSignJobRegistry();
+    CountDownLatch release = new CountDownLatch(1);
+    CountDownLatch finished = new CountDownLatch(1);
+
+    String first = registry.submit("/same-src", "/dest", "CN=Test", "abc123", 1, progress -> {
+      try {
+        release.await();
+      } finally {
+        finished.countDown();
+      }
+    });
+
+    BulkSignJobRegistry.DuplicateJobException dup = org.junit.jupiter.api.Assertions.assertThrows(
+        BulkSignJobRegistry.DuplicateJobException.class,
+        () -> registry.submit("/same-src", "/dest2", "CN=Test", "abc123", 1, progress -> {}));
+    assertEquals(first, dup.existingJobId());
+
+    // A different directory is unaffected.
+    assertNotNull(registry.submit("/other-src", "/dest", "CN=Test", "abc123", 1, progress -> {}));
+
+    release.countDown();
+    assertTrue(finished.await(2, TimeUnit.SECONDS));
+    awaitState(registry, first, BulkSignJobRegistry.JobState.COMPLETED);
+
+    // Once the first job is done the directory can be submitted again.
+    assertNotNull(registry.submit("/same-src", "/dest", "CN=Test", "abc123", 1, progress -> {}));
+  }
+
+  @Test
+  void submit_marksJobFailedWhenBodyThrowsAnError() throws Exception {
+    BulkSignJobRegistry registry = new BulkSignJobRegistry();
+    String jobId = registry.submit("/err-src", "/dest", "CN=Test", "abc123", 1, progress -> {
+      throw new OutOfMemoryError("simulated");
+    });
+
+    BulkSignJobRegistry.JobSnapshot snapshot = awaitState(registry, jobId, BulkSignJobRegistry.JobState.FAILED);
+    assertEquals("simulated", snapshot.error());
+    assertNotNull(snapshot.finishedAt());
+  }
+
+  private static BulkSignJobRegistry.JobSnapshot awaitState(
+      BulkSignJobRegistry registry, String jobId, BulkSignJobRegistry.JobState expected) throws Exception {
+    long deadline = System.currentTimeMillis() + 3000;
+    BulkSignJobRegistry.JobSnapshot snapshot = registry.getStatus(jobId);
+    while (snapshot.state() != expected && System.currentTimeMillis() < deadline) {
+      Thread.sleep(10);
+      snapshot = registry.getStatus(jobId);
+    }
+    assertEquals(expected, snapshot.state());
+    return snapshot;
+  }
 }

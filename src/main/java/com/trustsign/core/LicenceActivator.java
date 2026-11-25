@@ -39,18 +39,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * {@link LicenceEnforcer} — no network call is made.
  *
  * <h3>Encrypted file format (TRUSTSIGN-LICENCE-V2)</h3>
+ * 
  * <pre>
  *   Line 1: "TRUSTSIGN-LICENCE-V2"         (magic / version marker)
  *   Line 2: base64url(16-byte random salt)  (PBKDF2 salt for enc-key derivation)
  *   Line 3: base64url(12-byte-IV ‖ AES-GCM-ciphertext ‖ 16-byte-auth-tag)
  *   Line 4: hex-HMAC-SHA256(lines 1-3, hmac_key)
  * </pre>
+ * 
  * Where:
  * <ul>
- *   <li>enc_key  = PBKDF2-HMAC-SHA256(password = stable_fp ‖ APP_ENC_KDF_SUFFIX,
- *                                     salt = file_salt, 65536 iters, 256 bits)</li>
- *   <li>hmac_key = SHA-256(APP_HMAC_CONSTANT ‖ stable_fp)</li>
- *   <li>stable_fp = MachineFingerprint.computeStable() — SHA-256(hostname + OS)</li>
+ * <li>enc_key = PBKDF2-HMAC-SHA256(password = stable_fp ‖ APP_ENC_KDF_SUFFIX,
+ * salt = file_salt, 65536 iters, 256 bits)</li>
+ * <li>hmac_key = SHA-256(APP_HMAC_CONSTANT ‖ stable_fp)</li>
+ * <li>stable_fp = MachineFingerprint.computeStable() — SHA-256(hostname +
+ * OS)</li>
  * </ul>
  * Consequence: copying the file to a machine with a different hostname causes
  * HMAC failure before decryption is even attempted. Even if an attacker knows
@@ -62,26 +65,29 @@ public final class LicenceActivator {
     /** File in the config directory containing the one-time activation key. */
     public static final String ACTIVATION_KEY_FILE = "activation-key.txt";
     /** Encrypted licence token storage file written after first activation. */
-    public static final String LICENCE_DAT_FILE    = ".licence.dat";
+    public static final String LICENCE_DAT_FILE = ".licence.dat";
 
     /**
      * Default activation server URL. Override with system property
      * {@code trustsign.licence.server} (e.g. for staging/testing).
      */
-    public static final String DEFAULT_SERVER_URL =
-        "https://demo.xtranetindia.com/PKILic/rnd/LicenseActivation_comp";
+    public static final String SERVER_ACTIVATION_URL = "https://ekyc.xtratrust.com/trustsign/pkilic/LicenseActivation_comp";
+    public static final String SERVER_RENEWAL_URL = "https://ekyc.xtratrust.com/trustsign/pkilic/LicenseRenewal_comp";
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String PBKDF2_ALG = "PBKDF2WithHmacSHA256";
-    private static final int    PBKDF2_ITERATIONS = 65536;
-    /** Appended to the stable fingerprint before PBKDF2 — application domain separator. */
-    private static final byte[] APP_ENC_KDF_SUFFIX =
-        "TrustSign-Lic-ENC-V2".getBytes(StandardCharsets.UTF_8);
+    private static final int PBKDF2_ITERATIONS = 65536;
+    /**
+     * Appended to the stable fingerprint before PBKDF2 — application domain
+     * separator.
+     */
+    private static final byte[] APP_ENC_KDF_SUFFIX = "TrustSign-Lic-ENC-V2".getBytes(StandardCharsets.UTF_8);
     /** Mixed into HMAC key so the MAC cannot be forged by another application. */
     private static final String APP_HMAC_CONSTANT = "TrustSign-Lic-HMAC-V2-7f3a9b2c";
     private static final String FILE_MAGIC = "TRUSTSIGN-LICENCE-V2";
 
-    private LicenceActivator() {}
+    private LicenceActivator() {
+    }
 
     // =========================================================================
     // Public API
@@ -104,7 +110,7 @@ public final class LicenceActivator {
         }
         Files.createDirectories(configDir);
         Path activationKeyPath = configDir.resolve(ACTIVATION_KEY_FILE);
-        String serverUrl = System.getProperty("trustsign.licence.server", DEFAULT_SERVER_URL);
+        String serverUrl = System.getProperty("trustsign.licence.server", SERVER_ACTIVATION_URL);
 
         printActivationBanner();
 
@@ -126,8 +132,7 @@ public final class LicenceActivator {
         }
 
         // Interactive loop — retry until the server accepts the key or user aborts.
-        java.io.BufferedReader stdin =
-            new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+        java.io.BufferedReader stdin = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
         java.io.Console console = System.console();
 
         while (true) {
@@ -137,7 +142,7 @@ public final class LicenceActivator {
 
             if (key == null) {
                 throw new IOException(
-                    "Input stream closed. Run from an interactive terminal to enter the activation key.");
+                        "Input stream closed. Run from an interactive terminal to enter the activation key.");
             }
             if (key.isBlank()) {
                 System.err.println("  No key entered. Please try again.");
@@ -178,12 +183,13 @@ public final class LicenceActivator {
 
     /**
      * Encrypts {@code tokenString} with a key derived from the current machine's
-     * stable fingerprint and writes it to {@code path} in TRUSTSIGN-LICENCE-V2 format.
+     * stable fingerprint and writes it to {@code path} in TRUSTSIGN-LICENCE-V2
+     * format.
      */
     static void writeEncryptedToken(Path path, String tokenString) throws Exception {
         SecureRandom rng = new SecureRandom();
         byte[] salt = new byte[16];
-        byte[] iv   = new byte[12];
+        byte[] iv = new byte[12];
         rng.nextBytes(salt);
         rng.nextBytes(iv);
 
@@ -205,10 +211,11 @@ public final class LicenceActivator {
         String line4 = computeFileHmac(FILE_MAGIC + "\n" + line2 + "\n" + line3, stableFp);
 
         Path parent = path.getParent();
-        if (parent != null) Files.createDirectories(parent);
+        if (parent != null)
+            Files.createDirectories(parent);
         Files.writeString(path,
-            FILE_MAGIC + "\n" + line2 + "\n" + line3 + "\n" + line4 + "\n",
-            StandardCharsets.UTF_8);
+                FILE_MAGIC + "\n" + line2 + "\n" + line3 + "\n" + line4 + "\n",
+                StandardCharsets.UTF_8);
     }
 
     /**
@@ -242,12 +249,12 @@ public final class LicenceActivator {
                 expectedHmac.getBytes(StandardCharsets.UTF_8),
                 line4.getBytes(StandardCharsets.UTF_8))) {
             throw new IOException(
-                "Licence HMAC verification failed — the file may have been tampered with "
-                + "or copied from a different machine");
+                    "Licence HMAC verification failed — the file may have been tampered with "
+                            + "or copied from a different machine");
         }
 
         Base64.Decoder b64 = Base64.getUrlDecoder();
-        byte[] salt  = b64.decode(line2);
+        byte[] salt = b64.decode(line2);
         byte[] ivAndCt = b64.decode(line3);
 
         if (ivAndCt.length < 12 + 16) {
@@ -265,8 +272,8 @@ public final class LicenceActivator {
             return new String(plaintext, StandardCharsets.UTF_8);
         } catch (javax.crypto.AEADBadTagException e) {
             throw new IOException(
-                "Licence decryption failed — machine hardware fingerprint mismatch "
-                + "(hostname or OS changed, or licence file was copied from another machine)");
+                    "Licence decryption failed — machine hardware fingerprint mismatch "
+                            + "(hostname or OS changed, or licence file was copied from another machine)");
         }
     }
 
@@ -276,7 +283,8 @@ public final class LicenceActivator {
 
     /**
      * Contacts the licensing server to renew an expired token.
-     * Uses the {@code activationId} from the expired token — no activation key needed.
+     * Uses the {@code activationId} from the expired token — no activation key
+     * needed.
      * On success, overwrites {@code licenceDat} with the new encrypted token.
      *
      * @return true if renewal succeeded and the file was updated; false if the
@@ -285,8 +293,7 @@ public final class LicenceActivator {
      */
     public static boolean renewIfExpired(Path licenceDat, LicenceToken expiredToken) {
         try {
-            String baseUrl = System.getProperty("trustsign.licence.server", DEFAULT_SERVER_URL);
-            String renewUrl = baseUrl.replace("/activate", "/renew");
+            String renewUrl = SERVER_RENEWAL_URL;
             String newToken = requestRenewal(expiredToken.activationId(), renewUrl);
             writeEncryptedToken(licenceDat, newToken);
             System.out.println("[TrustSign] Licence renewed successfully.");
@@ -311,18 +318,17 @@ public final class LicenceActivator {
         body.put("requestedAt", ts);
 
         HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15))
-            .build();
+                .connectTimeout(Duration.ofSeconds(15))
+                .build();
         HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(renewUrl))
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)))
-            .timeout(Duration.ofSeconds(30))
-            .build();
+                .uri(URI.create(renewUrl))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)))
+                .timeout(Duration.ofSeconds(30))
+                .build();
 
-        HttpResponse<String> response =
-            client.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
             String detail = "";
@@ -331,15 +337,16 @@ public final class LicenceActivator {
                 if (err != null && err.has("message")) {
                     detail = ": " + err.get("message").asText();
                 }
-            } catch (com.fasterxml.jackson.core.JacksonException ignored) {}
+            } catch (com.fasterxml.jackson.core.JacksonException ignored) {
+            }
             throw new IOException(
-                "Renewal failed (HTTP " + response.statusCode() + ")" + detail);
+                    "Renewal failed (HTTP " + response.statusCode() + ")" + detail);
         }
 
         JsonNode resp = JSON.readTree(response.body());
         if (resp == null || !resp.has("token")) {
             throw new IOException(
-                "Renewal server returned an invalid response (missing 'token' field)");
+                    "Renewal server returned an invalid response (missing 'token' field)");
         }
         return resp.get("token").asText().strip();
     }
@@ -349,7 +356,7 @@ public final class LicenceActivator {
     // =========================================================================
 
     private static String requestActivation(String activationKey, String serverUrl)
-        throws Exception {
+            throws Exception {
         String fp3 = MachineFingerprint.computeStrict();
         String fp2 = MachineFingerprint.computeMedium();
         String hostname = resolveHostnameForRequest();
@@ -363,18 +370,17 @@ public final class LicenceActivator {
         body.put("requestedAt", ts);
 
         HttpClient client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15))
-            .build();
+                .connectTimeout(Duration.ofSeconds(15))
+                .build();
         HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create(serverUrl))
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)))
-            .timeout(Duration.ofSeconds(30))
-            .build();
+                .uri(URI.create(serverUrl))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)))
+                .timeout(Duration.ofSeconds(30))
+                .build();
 
-        HttpResponse<String> response =
-            client.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
             String detail = "";
@@ -383,15 +389,16 @@ public final class LicenceActivator {
                 if (err != null && err.has("message")) {
                     detail = ": " + err.get("message").asText();
                 }
-            } catch (com.fasterxml.jackson.core.JacksonException ignored) {}
+            } catch (com.fasterxml.jackson.core.JacksonException ignored) {
+            }
             throw new IOException(
-                "Activation failed (HTTP " + response.statusCode() + ")" + detail);
+                    "Activation failed (HTTP " + response.statusCode() + ")" + detail);
         }
 
         JsonNode resp = JSON.readTree(response.body());
         if (resp == null || !resp.has("token")) {
             throw new IOException(
-                "Activation server returned an invalid response (missing 'token' field)");
+                    "Activation server returned an invalid response (missing 'token' field)");
         }
         return resp.get("token").asText().strip();
     }
@@ -402,7 +409,7 @@ public final class LicenceActivator {
 
     private static SecretKey deriveEncKey(String stableFp, byte[] salt) throws Exception {
         byte[] fpBytes = stableFp.getBytes(StandardCharsets.UTF_8);
-        // password = stable_fp_bytes ‖ APP_ENC_KDF_SUFFIX  (domain separation)
+        // password = stable_fp_bytes ‖ APP_ENC_KDF_SUFFIX (domain separation)
         byte[] password = new byte[fpBytes.length + APP_ENC_KDF_SUFFIX.length];
         System.arraycopy(fpBytes, 0, password, 0, fpBytes.length);
         System.arraycopy(APP_ENC_KDF_SUFFIX, 0, password, fpBytes.length, APP_ENC_KDF_SUFFIX.length);
@@ -411,7 +418,7 @@ public final class LicenceActivator {
         PBEKeySpec spec = new PBEKeySpec(pwChars, salt, PBKDF2_ITERATIONS, 256);
         try {
             byte[] keyBytes = SecretKeyFactory.getInstance(PBKDF2_ALG)
-                .generateSecret(spec).getEncoded();
+                    .generateSecret(spec).getEncoded();
             return new SecretKeySpec(keyBytes, "AES");
         } finally {
             spec.clearPassword();
@@ -422,7 +429,7 @@ public final class LicenceActivator {
         // hmac_key = SHA-256(APP_HMAC_CONSTANT ‖ stable_fp)
         MessageDigest md = MessageDigest.getInstance("SHA-256");
         byte[] hmacKeyBytes = md.digest(
-            (APP_HMAC_CONSTANT + stableFp).getBytes(StandardCharsets.UTF_8));
+                (APP_HMAC_CONSTANT + stableFp).getBytes(StandardCharsets.UTF_8));
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(hmacKeyBytes, "HmacSHA256"));
         return HexFormat.of().formatHex(mac.doFinal(data.getBytes(StandardCharsets.UTF_8)));

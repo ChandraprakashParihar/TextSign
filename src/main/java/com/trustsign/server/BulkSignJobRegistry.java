@@ -30,7 +30,23 @@ public final class BulkSignJobRegistry {
 
   private static final long RETENTION_MS = 30 * 60 * 1000L; // keep finished jobs visible for 30 minutes
 
+  private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(BulkSignJobRegistry.class);
+
   public enum JobState { RUNNING, COMPLETED, FAILED }
+
+  /** Thrown by {@link #submit} when a job over the same source directory is still running. */
+  public static final class DuplicateJobException extends IllegalStateException {
+    private final String existingJobId;
+
+    DuplicateJobException(String existingJobId, String sourceDir) {
+      super("A bulk signing job is already running for sourceDir: " + sourceDir);
+      this.existingJobId = existingJobId;
+    }
+
+    public String existingJobId() {
+      return existingJobId;
+    }
+  }
 
   public record JobSnapshot(
       String jobId,
@@ -96,14 +112,22 @@ public final class BulkSignJobRegistry {
    * selection) BEFORE calling this, so those errors are still reported in
    * the initial HTTP response rather than hidden behind a poll.
    */
-  public String submit(
+  public synchronized String submit(
       String sourceDir, String destDir, String subjectDn, String serialNumber, int totalFiles, JobBody body) {
     sweepExpired();
+    // Two jobs over the same source directory would sign every file twice
+    // (and, with deleteSourceOnSuccess, race each other deleting the
+    // originals) — e.g. a client retrying a request whose 202 it never saw.
+    for (Job existing : jobs.values()) {
+      if (existing.state == JobState.RUNNING && existing.sourceDir != null && existing.sourceDir.equals(sourceDir)) {
+        throw new DuplicateJobException(existing.jobId, sourceDir);
+      }
+    }
     String jobId = UUID.randomUUID().toString();
     Job job = new Job(jobId, sourceDir, destDir, subjectDn, serialNumber, totalFiles);
     jobs.put(jobId, job);
 
-    jobExecutor.submit(() -> {
+    jobExecutor.execute(() -> {
       try {
         body.run(result -> {
           job.results.add(result);
@@ -113,12 +137,19 @@ public final class BulkSignJobRegistry {
             default -> job.failed.incrementAndGet();
           }
         });
-        job.state = JobState.COMPLETED;
-      } catch (Exception e) {
-        job.state = JobState.FAILED;
-        job.error = safeMsg(e);
-      } finally {
         job.finishedAtMs = System.currentTimeMillis();
+        job.state = JobState.COMPLETED;
+      } catch (Throwable t) {
+        // Throwable, not Exception: an Error (e.g. OutOfMemoryError on a huge
+        // PDF) must still mark the job FAILED — otherwise it would report
+        // RUNNING forever and block its sourceDir from being resubmitted.
+        if (t instanceof InterruptedException) {
+          Thread.currentThread().interrupt();
+        }
+        LOG.error("Bulk signing job {} failed: {}", jobId, safeMsg(t), t);
+        job.error = safeMsg(t);
+        job.finishedAtMs = System.currentTimeMillis();
+        job.state = JobState.FAILED;
       }
     });
 

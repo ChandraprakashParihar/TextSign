@@ -1316,7 +1316,7 @@ public final class ApiServlet {
         }
       }
     } catch (SecurityException se) {
-      writeJson(resp, 403, Map.of("error", se.getMessage()));
+      writeJson(resp, 403, Map.of("error", safeMsg(se)));
     } catch (Exception e) {
       LOG.error("GET error after {} ms: {}", System.currentTimeMillis() - startMs, safeMsg(e), e);
       writeJson(resp, 500, Map.of("error", "Internal error", "details", safeMsg(e)));
@@ -1448,7 +1448,7 @@ public final class ApiServlet {
             body.put("hsmPinUpdated", hsmPinUpdated);
             writeJson(resp, 200, body);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
           } catch (Exception e) {
             LOG.error("/map-certificate failed: {}", safeMsg(e), e);
             writeJson(resp, 500, Map.of("error", "Certificate mapping failed", "details", safeMsg(e)));
@@ -1466,7 +1466,7 @@ public final class ApiServlet {
           try {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           byte[] data = mp.file("file");
@@ -1487,7 +1487,7 @@ public final class ApiServlet {
             try {
               outputDir = requireAutoSignOutputDirForFileOutput(cfg);
             } catch (IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", safeMsg(e)));
               return;
             }
             Path outputBase = null;
@@ -1500,7 +1500,7 @@ public final class ApiServlet {
             try {
               outDirFile = resolveSafeOutputDir(outputDir, outputBase);
             } catch (SecurityException | IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
               return;
             }
           }
@@ -1664,7 +1664,7 @@ public final class ApiServlet {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
             LOG.error("Error parsing output preference: {}", e.getMessage());
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           byte[] data = mp.file("file");
@@ -1707,7 +1707,7 @@ public final class ApiServlet {
             pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
           } catch (IllegalArgumentException e) {
             LOG.error("Error parsing PDF signing options: {}", e.getMessage());
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
 
@@ -1717,7 +1717,7 @@ public final class ApiServlet {
             try {
               outputDir = requireAutoSignOutputDirForFileOutput(cfg);
             } catch (IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", safeMsg(e)));
               return;
             }
             Path outputBase = null;
@@ -1730,7 +1730,7 @@ public final class ApiServlet {
             try {
               outDirFile = resolveSafeOutputDir(outputDir, outputBase);
             } catch (SecurityException | IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
               return;
             }
           }
@@ -1827,7 +1827,7 @@ public final class ApiServlet {
                   matchedAlias, stampPages != null ? stampPages.size() : 0, signResult.isTimestamped(),
                   System.currentTimeMillis() - signStartMs);
             } catch (DocMdpNoChangesLockException e) {
-              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", safeMsg(e)));
               return;
             } catch (PdfSignerService.PdfSigningException e) {
               LOG.error("PDF signing failed. alias={} tookMs={} err={}",
@@ -1904,14 +1904,14 @@ public final class ApiServlet {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
             LOG.error("Error parsing output preference: {}", e.getMessage());
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           byte[] data;
           try {
             data = resolvePdfPayloadFromFileParam(mp);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           String reason = mp.field("reason");
@@ -1953,7 +1953,7 @@ public final class ApiServlet {
             pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
           } catch (IllegalArgumentException e) {
             LOG.error("Error parsing PDF signing options: {}", e.getMessage());
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
 
@@ -1963,7 +1963,7 @@ public final class ApiServlet {
             try {
               outputDir = requireAutoSignOutputDirForFileOutput(cfg);
             } catch (IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", safeMsg(e)));
               return;
             }
             Path outputBase = null;
@@ -1976,7 +1976,7 @@ public final class ApiServlet {
             try {
               outDirFile = resolveSafeOutputDir(outputDir, outputBase);
             } catch (SecurityException | IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
               return;
             }
           }
@@ -2073,7 +2073,7 @@ public final class ApiServlet {
                   matchedAlias, stampPages != null ? stampPages.size() : 0, signResult.isTimestamped(),
                   System.currentTimeMillis() - signStartMs);
             } catch (DocMdpNoChangesLockException e) {
-              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", safeMsg(e)));
               return;
             } catch (PdfSignerService.PdfSigningException e) {
               LOG.error("PDF signing failed. alias={} tookMs={} err={}",
@@ -2148,14 +2148,14 @@ public final class ApiServlet {
           try {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           byte[] data;
           try {
             data = resolvePdfPayloadFromFileParam(mp);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           String reason = mp.field("reason");
@@ -2192,7 +2192,7 @@ public final class ApiServlet {
           try {
             pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           File outDirFile = null;
@@ -2201,7 +2201,7 @@ public final class ApiServlet {
             try {
               outputDir = requireAutoSignOutputDirForFileOutput(cfg);
             } catch (IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", safeMsg(e)));
               return;
             }
             Path outputBase = null;
@@ -2214,7 +2214,7 @@ public final class ApiServlet {
             try {
               outDirFile = resolveSafeOutputDir(outputDir, outputBase);
             } catch (SecurityException | IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
               return;
             }
           }
@@ -2331,7 +2331,7 @@ public final class ApiServlet {
                   signIndex,
                   pdfOpts);
             } catch (DocMdpNoChangesLockException e) {
-              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", safeMsg(e)));
               return;
             } catch (PdfSignerService.PdfSigningException e) {
               LOG.error("PDF signing at field failed. alias={} tookMs={} err={}",
@@ -2410,12 +2410,20 @@ public final class ApiServlet {
         }
 
         case "/auto-sign-pdf-bulk" -> {
-          handleBulkPdfSign(req, resp, startMs);
+          try {
+            handleBulkPdfSign(req, resp, startMs);
+          } catch (BulkSignJobRegistry.DuplicateJobException e) {
+            writeJson(resp, 409, Map.of("error", safeMsg(e), "jobId", e.existingJobId()));
+          }
           return;
         }
 
         case "/auto-sign-pdf-bulk-pfx" -> {
-          handleBulkPdfSignPfx(req, resp, startMs);
+          try {
+            handleBulkPdfSignPfx(req, resp, startMs);
+          } catch (BulkSignJobRegistry.DuplicateJobException e) {
+            writeJson(resp, 409, Map.of("error", safeMsg(e), "jobId", e.existingJobId()));
+          }
           return;
         }
 
@@ -2429,7 +2437,7 @@ public final class ApiServlet {
           try {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           byte[] data = mp.file("file");
@@ -2448,7 +2456,7 @@ public final class ApiServlet {
             try {
               outputDir = requireAutoSignOutputDirForFileOutput(cfg);
             } catch (IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", safeMsg(e)));
               return;
             }
             Path outputBase = null;
@@ -2461,7 +2469,7 @@ public final class ApiServlet {
             try {
               outDirFile = resolveSafeOutputDir(outputDir, outputBase);
             } catch (SecurityException | IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
               return;
             }
           }
@@ -2632,7 +2640,7 @@ public final class ApiServlet {
           try {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           byte[] data = mp.file("file");
@@ -2668,7 +2676,7 @@ public final class ApiServlet {
           try {
             pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
 
@@ -2732,7 +2740,7 @@ public final class ApiServlet {
                 matchedAlias, stampPages != null ? stampPages.size() : 0, signResult.isTimestamped(),
                 System.currentTimeMillis() - signStartMs);
           } catch (DocMdpNoChangesLockException e) {
-            writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+            writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", safeMsg(e)));
             return;
           } catch (PdfSignerService.PdfSigningException e) {
             LOG.error("PDF signing failed. alias={} tookMs={} err={}",
@@ -2763,7 +2771,7 @@ public final class ApiServlet {
             try {
               outputDir = requireAutoSignOutputDirForFileOutput(cfg);
             } catch (IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", safeMsg(e)));
               return;
             }
             Path outputBase = null;
@@ -2777,7 +2785,7 @@ public final class ApiServlet {
             try {
               outDirFile = resolveSafeOutputDir(outputDir, outputBase);
             } catch (SecurityException | IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
               return;
             }
             String inputFilename = mp.filename("file");
@@ -2884,7 +2892,7 @@ public final class ApiServlet {
           try {
             pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
 
@@ -2917,7 +2925,7 @@ public final class ApiServlet {
             LOG.info("HSM PDF signed. pages={} tookMs={}",
                 stampPages != null ? stampPages.size() : 0, System.currentTimeMillis() - signStartMs);
           } catch (DocMdpNoChangesLockException e) {
-            writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+            writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", safeMsg(e)));
             return;
           } catch (IOException e) {
             LOG.error("HSM invalid PDF structure. tookMs={} err={}",
@@ -2971,7 +2979,7 @@ public final class ApiServlet {
           try {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           byte[] data = mp.file("file");
@@ -3022,7 +3030,7 @@ public final class ApiServlet {
           try {
             pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
 
@@ -3037,7 +3045,7 @@ public final class ApiServlet {
             try {
               outputDir = requireAutoSignOutputDirForFileOutput(cfg);
             } catch (IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", safeMsg(e)));
               return;
             }
             Path outputBase = null;
@@ -3050,7 +3058,7 @@ public final class ApiServlet {
             try {
               outDirFile = resolveSafeOutputDir(outputDir, outputBase);
             } catch (SecurityException | IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
               return;
             }
           }
@@ -3101,7 +3109,7 @@ public final class ApiServlet {
               LOG.info("HSM auto-sign PDF signed. pages={} tookMs={}",
                   stampPages != null ? stampPages.size() : 0, System.currentTimeMillis() - signStartMs);
             } catch (DocMdpNoChangesLockException e) {
-              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", e.getMessage()));
+              writeJson(resp, 409, Map.of("error", "DocMDP P=1 (document locked)", "details", safeMsg(e)));
               return;
             } catch (IOException e) {
               LOG.error("HSM auto-sign invalid PDF structure. tookMs={} err={}",
@@ -3215,7 +3223,7 @@ public final class ApiServlet {
           try {
             outputPreference = parseOutputPreference(mp, cfg);
           } catch (IllegalArgumentException e) {
-            writeJson(resp, 400, Map.of("error", e.getMessage()));
+            writeJson(resp, 400, Map.of("error", safeMsg(e)));
             return;
           }
           byte[] data = mp.file("file");
@@ -3316,7 +3324,7 @@ public final class ApiServlet {
             try {
               outputDir = requireAutoSignOutputDirForFileOutput(cfg);
             } catch (IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", safeMsg(e)));
               return;
             }
             Path outputBase = null;
@@ -3330,7 +3338,7 @@ public final class ApiServlet {
             try {
               outDirFile = resolveSafeOutputDir(outputDir, outputBase);
             } catch (SecurityException | IllegalArgumentException e) {
-              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+              writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
               return;
             }
             String inputFilename = mp.filename("file");
@@ -3496,7 +3504,7 @@ public final class ApiServlet {
         }
       }
     } catch (SecurityException se) {
-      writeJson(resp, 403, Map.of("error", se.getMessage()));
+      writeJson(resp, 403, Map.of("error", safeMsg(se)));
     } catch (Exception e) {
       LOG.warn("POST error after {} ms: {}", System.currentTimeMillis() - startMs, safeMsg(e), e);
       writeJson(resp, 500, Map.of("error", "Internal error", "details", safeMsg(e)));
@@ -4027,6 +4035,19 @@ public final class ApiServlet {
       String truststoreFile,
       String truststorePassword,
       String truststoreType) throws Exception {
+    // Truststore, PEM files and config.json are rewritten together; two
+    // overlapping mappings must not interleave those writes.
+    synchronized (CONFIG_WRITE_LOCK) {
+      return mapCertificateArtifactsLocked(configFile, certificates, truststoreFile, truststorePassword, truststoreType);
+    }
+  }
+
+  private MapCertificateResult mapCertificateArtifactsLocked(
+      File configFile,
+      List<X509Certificate> certificates,
+      String truststoreFile,
+      String truststorePassword,
+      String truststoreType) throws Exception {
     if (configFile == null) {
       throw new IllegalArgumentException("Config file is required");
     }
@@ -4308,16 +4329,39 @@ public final class ApiServlet {
     return null;
   }
 
+  private static final int MAX_AIA_DOWNLOAD_BYTES = 1024 * 1024;
+
   private static List<X509Certificate> downloadCertificates(String uri) {
+    java.net.HttpURLConnection http = null;
     try {
-      URLConnection conn = new URL(uri).openConnection();
-      conn.setConnectTimeout(8_000);
-      conn.setReadTimeout(12_000);
-      try (InputStream in = conn.getInputStream()) {
-        return parseX509Certificates(in.readAllBytes());
+      // The URI comes from a certificate extension, i.e. from the uploaded
+      // payload: only plain http(s) is acceptable — never file:, jar:, ftp:, etc.
+      String scheme = java.net.URI.create(uri.trim()).getScheme();
+      if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+        return List.of();
       }
-    } catch (Exception ignored) {
+      URLConnection conn = new URL(uri.trim()).openConnection();
+      if (!(conn instanceof java.net.HttpURLConnection h)) {
+        return List.of();
+      }
+      http = h;
+      http.setConnectTimeout(8_000);
+      http.setReadTimeout(12_000);
+      try (InputStream in = http.getInputStream()) {
+        byte[] body = in.readNBytes(MAX_AIA_DOWNLOAD_BYTES + 1);
+        if (body.length > MAX_AIA_DOWNLOAD_BYTES) {
+          LOG.warn("AIA issuer download exceeded {} bytes, ignoring: {}", MAX_AIA_DOWNLOAD_BYTES, uri);
+          return List.of();
+        }
+        return parseX509Certificates(body);
+      }
+    } catch (Exception e) {
+      LOG.warn("AIA issuer download failed for {}: {}", uri, safeMsg(e));
       return List.of();
+    } finally {
+      if (http != null) {
+        http.disconnect();
+      }
     }
   }
 
@@ -4467,6 +4511,7 @@ public final class ApiServlet {
       Path truststorePath,
       String truststorePassword,
       String truststoreType) throws IOException {
+    synchronized (CONFIG_WRITE_LOCK) {
     com.fasterxml.jackson.databind.JsonNode node = Json.MAPPER
         .readTree(Files.readString(configPath, StandardCharsets.UTF_8));
     if (!(node instanceof com.fasterxml.jackson.databind.node.ObjectNode root)) {
@@ -4492,12 +4537,8 @@ public final class ApiServlet {
       truststore.put("enablePathValidation", true);
     }
     String updated = Json.MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root);
-    Files.writeString(
-        configPath,
-        updated + "\n",
-        StandardCharsets.UTF_8,
-        StandardOpenOption.TRUNCATE_EXISTING,
-        StandardOpenOption.WRITE);
+    writeFileAtomically(configPath, (updated + "\n").getBytes(StandardCharsets.UTF_8));
+    }
   }
 
   /**
@@ -4505,6 +4546,7 @@ public final class ApiServlet {
    * "hsm"), creating the section if absent, preserving every other field.
    */
   private static void updateConfigPin(Path configPath, String section, String pin) throws IOException {
+    synchronized (CONFIG_WRITE_LOCK) {
     com.fasterxml.jackson.databind.JsonNode node = Json.MAPPER
         .readTree(Files.readString(configPath, StandardCharsets.UTF_8));
     if (!(node instanceof com.fasterxml.jackson.databind.node.ObjectNode root)) {
@@ -4520,12 +4562,34 @@ public final class ApiServlet {
     }
     sectionNode.put("pin", pin);
     String updated = Json.MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root);
-    Files.writeString(
-        configPath,
-        updated + "\n",
-        StandardCharsets.UTF_8,
-        StandardOpenOption.TRUNCATE_EXISTING,
-        StandardOpenOption.WRITE);
+    writeFileAtomically(configPath, (updated + "\n").getBytes(StandardCharsets.UTF_8));
+    }
+  }
+
+  /** Serialises read-modify-write cycles on config.json so concurrent /map-certificate calls cannot lose updates. */
+  private static final Object CONFIG_WRITE_LOCK = new Object();
+
+  /**
+   * Replaces {@code target} via a sibling temp file + atomic rename, so a
+   * crash or full disk mid-write can never leave a truncated config.json
+   * (which would stop the service from starting at all).
+   */
+  private static void writeFileAtomically(Path target, byte[] content) throws IOException {
+    Path absolute = target.toAbsolutePath();
+    Path dir = absolute.getParent();
+    Path tmp = dir.resolve("." + absolute.getFileName() + "-" + java.util.UUID.randomUUID() + ".tmp");
+    try {
+      Files.write(tmp, content, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+      try {
+        Files.move(tmp, absolute,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+      } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+        Files.move(tmp, absolute, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+      }
+    } finally {
+      Files.deleteIfExists(tmp);
+    }
   }
 
   private void resetCachesAfterCertificateMapping() {
@@ -5235,7 +5299,7 @@ public final class ApiServlet {
     try {
       outputPreference = parseOutputPreference(mp, cfg);
     } catch (IllegalArgumentException e) {
-      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      writeJson(resp, 400, Map.of("error", safeMsg(e)));
       return;
     }
     byte[] data = mp.file("file");
@@ -5255,7 +5319,7 @@ public final class ApiServlet {
       try {
         outputDir = requireAutoSignOutputDirForFileOutput(cfg);
       } catch (IllegalArgumentException e) {
-        writeJson(resp, 400, Map.of("error", e.getMessage()));
+        writeJson(resp, 400, Map.of("error", safeMsg(e)));
         return;
       }
       Path outputBase = null;
@@ -5268,7 +5332,7 @@ public final class ApiServlet {
       try {
         outDirFile = resolveSafeOutputDir(outputDir, outputBase);
       } catch (SecurityException | IllegalArgumentException e) {
-        writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+        writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
         return;
       }
     }
@@ -5414,7 +5478,7 @@ public final class ApiServlet {
     try {
       outputPreference = parseOutputPreference(mp, cfg);
     } catch (IllegalArgumentException e) {
-      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      writeJson(resp, 400, Map.of("error", safeMsg(e)));
       return;
     }
     byte[] data = mp.file("file");
@@ -5435,7 +5499,7 @@ public final class ApiServlet {
       try {
         outputDir = requireAutoSignOutputDirForFileOutput(cfg);
       } catch (IllegalArgumentException e) {
-        writeJson(resp, 400, Map.of("error", e.getMessage()));
+        writeJson(resp, 400, Map.of("error", safeMsg(e)));
         return;
       }
       Path outputBase = null;
@@ -5448,7 +5512,7 @@ public final class ApiServlet {
       try {
         outDirFile = resolveSafeOutputDir(outputDir, outputBase);
       } catch (SecurityException | IllegalArgumentException e) {
-        writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+        writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
         return;
       }
     }
@@ -5640,7 +5704,7 @@ public final class ApiServlet {
       sourceDirFile = resolveSafeInputDir(sourceDirParam, outputBase);
       destDirFile = resolveSafeOutputDir(destDirParam, outputBase);
     } catch (SecurityException | IllegalArgumentException e) {
-      writeJson(resp, 400, Map.of("error", "Invalid sourceDir/destDir", "details", e.getMessage()));
+      writeJson(resp, 400, Map.of("error", "Invalid sourceDir/destDir", "details", safeMsg(e)));
       return;
     }
 
@@ -5654,7 +5718,7 @@ public final class ApiServlet {
       pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
       stampPages = resolvePdfStampPages(mp);
     } catch (IllegalArgumentException e) {
-      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      writeJson(resp, 400, Map.of("error", safeMsg(e)));
       return;
     }
 
@@ -5663,7 +5727,7 @@ public final class ApiServlet {
     try {
       listing = BulkPdfSignerService.listPdfFiles(sourceDirFile, maxFiles);
     } catch (IllegalArgumentException e) {
-      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      writeJson(resp, 400, Map.of("error", safeMsg(e)));
       return;
     }
 
@@ -5803,7 +5867,7 @@ public final class ApiServlet {
       sourceDirFile = resolveSafeInputDir(sourceDirParam, outputBase);
       destDirFile = resolveSafeOutputDir(destDirParam, outputBase);
     } catch (SecurityException | IllegalArgumentException e) {
-      writeJson(resp, 400, Map.of("error", "Invalid sourceDir/destDir", "details", e.getMessage()));
+      writeJson(resp, 400, Map.of("error", "Invalid sourceDir/destDir", "details", safeMsg(e)));
       return;
     }
 
@@ -5817,7 +5881,7 @@ public final class ApiServlet {
       pdfOpts = pdfSigningOptionsFromMultipart(mp, finalVersion, cfg);
       stampPages = resolvePdfStampPages(mp);
     } catch (IllegalArgumentException e) {
-      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      writeJson(resp, 400, Map.of("error", safeMsg(e)));
       return;
     }
 
@@ -5839,7 +5903,7 @@ public final class ApiServlet {
     try {
       listing = BulkPdfSignerService.listPdfFiles(sourceDirFile, maxFiles);
     } catch (IllegalArgumentException e) {
-      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      writeJson(resp, 400, Map.of("error", safeMsg(e)));
       return;
     }
 
@@ -5993,7 +6057,7 @@ public final class ApiServlet {
     try {
       outputPreference = parseOutputPreference(mp, cfg);
     } catch (IllegalArgumentException e) {
-      writeJson(resp, 400, Map.of("error", e.getMessage()));
+      writeJson(resp, 400, Map.of("error", safeMsg(e)));
       return;
     }
     byte[] data = mp.file("file");
@@ -6014,7 +6078,7 @@ public final class ApiServlet {
       try {
         outputDir = requireAutoSignOutputDirForFileOutput(cfg);
       } catch (IllegalArgumentException e) {
-        writeJson(resp, 400, Map.of("error", e.getMessage()));
+        writeJson(resp, 400, Map.of("error", safeMsg(e)));
         return;
       }
       Path outputBase = null;
@@ -6027,7 +6091,7 @@ public final class ApiServlet {
       try {
         outDirFile = resolveSafeOutputDir(outputDir, outputBase);
       } catch (SecurityException | IllegalArgumentException e) {
-        writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", e.getMessage()));
+        writeJson(resp, 400, Map.of("error", "Invalid outputDir", "details", safeMsg(e)));
         return;
       }
     }
@@ -6419,7 +6483,7 @@ public final class ApiServlet {
     writeJson(resp, 400, Map.of("error", error, "details", e.getMessage() == null ? "" : e.getMessage()));
   }
 
-  private String safeMsg(Exception e) {
+  private static String safeMsg(Throwable e) {
     String msg = e.getMessage();
     if (msg == null || msg.isBlank())
       return e.getClass().getSimpleName();
@@ -6456,7 +6520,6 @@ public final class ApiServlet {
     String topMsg = e.getMessage();
     if (topMsg != null && !topMsg.isBlank())
       return topMsg;
-    System.out.println(topMsg);
     return "Connect your PKCS#11 token, check the library path and PIN, and try again.";
   }
 }

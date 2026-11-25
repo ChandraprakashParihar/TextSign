@@ -27,6 +27,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class OcspClient {
+  private static final int MAX_OCSP_BYTES = 1024 * 1024;
+
   static byte[] fetchOcspResponse(
       X509Certificate cert,
       X509Certificate issuer,
@@ -57,24 +59,24 @@ final class OcspClient {
     byte[] reqBytes = req.getEncoded();
 
     HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-    conn.setConnectTimeout(Math.max(1000, cto));
-    conn.setReadTimeout(Math.max(1000, rto));
-    conn.setRequestMethod("POST");
-    conn.setDoOutput(true);
-    conn.setRequestProperty("Content-Type", "application/ocsp-request");
-    conn.setRequestProperty("Accept", "application/ocsp-response");
-    try (OutputStream os = conn.getOutputStream()) {
-      os.write(reqBytes);
+    try {
+      conn.setConnectTimeout(Math.max(1000, cto));
+      conn.setReadTimeout(Math.max(1000, rto));
+      conn.setRequestMethod("POST");
+      conn.setDoOutput(true);
+      conn.setRequestProperty("Content-Type", "application/ocsp-request");
+      conn.setRequestProperty("Accept", "application/ocsp-response");
+      try (OutputStream os = conn.getOutputStream()) {
+        os.write(reqBytes);
+      }
+      int code = conn.getResponseCode();
+      if (code < 200 || code >= 300) throw new IllegalStateException("OCSP HTTP " + code);
+      try (InputStream in = conn.getInputStream()) {
+        return BoundedIo.readAtMost(in, MAX_OCSP_BYTES, "OCSP");
+      }
+    } finally {
+      conn.disconnect();
     }
-    int code = conn.getResponseCode();
-    InputStream is = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-    if (is == null) throw new IllegalStateException("OCSP HTTP " + code + " empty body");
-    byte[] resp;
-    try (InputStream in = is) {
-      resp = in.readAllBytes();
-    }
-    if (code < 200 || code >= 300) throw new IllegalStateException("OCSP HTTP " + code);
-    return resp;
   }
 
   private static void validate(byte[] ocspRespBytes, X509Certificate cert, X509Certificate issuer) throws Exception {
@@ -90,7 +92,20 @@ final class OcspClient {
     if (rs == null || rs.length == 0) {
       throw new IllegalStateException("OCSP response has no entries");
     }
-    var status = rs[0].getCertStatus();
+    // The response must be about THIS certificate. Without this check a
+    // (plain-HTTP, hence spoofable) responder could answer with a validly
+    // signed GOOD status for some other certificate from the same issuer.
+    SingleResp matching = null;
+    for (SingleResp r : rs) {
+      if (r.getCertID() != null && cert.getSerialNumber().equals(r.getCertID().getSerialNumber())) {
+        matching = r;
+        break;
+      }
+    }
+    if (matching == null) {
+      throw new IllegalStateException("OCSP response does not cover the requested certificate serial");
+    }
+    var status = matching.getCertStatus();
     if (status != org.bouncycastle.cert.ocsp.CertificateStatus.GOOD) {
       throw new IllegalStateException("OCSP cert status is not GOOD");
     }

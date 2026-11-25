@@ -342,7 +342,7 @@ public final class BulkPdfSignerService {
           destDir.toPath(), pdfFile.getName(), sanitizeFilename);
       boolean outputWritten = false;
       try {
-        Files.write(reservedOutPath, signedPdf, StandardOpenOption.TRUNCATE_EXISTING);
+        writeDurably(reservedOutPath, signedPdf);
         outputWritten = true;
       } finally {
         if (!outputWritten) {
@@ -370,6 +370,43 @@ public final class BulkPdfSignerService {
           signResult.isTimestamped(), System.currentTimeMillis() - fileStartMs, sourceDeleteError);
     } catch (Exception e) {
       return FileResult.failed(pdfFile.getName(), safeMsg(e));
+    } catch (OutOfMemoryError e) {
+      // One oversized PDF must fail on its own, not take down the batch.
+      return FileResult.failed(pdfFile.getName(), "Not enough memory to sign this file (" + pdfFile.length() + " bytes)");
+    }
+  }
+
+  /**
+   * Writes {@code content} to a temp file beside {@code target}, forces it
+   * to disk, then atomically renames it over the (already reserved, empty)
+   * target. A crash or full disk therefore never leaves a truncated
+   * "-signed.pdf" that looks complete — which matters most with
+   * {@code deleteSourceOnSuccess}, where the original is removed right after.
+   */
+  private static void writeDurably(Path target, byte[] content) throws java.io.IOException {
+    // Not Files.createTempFile: that forces owner-only (0600) permissions,
+    // which the rename would carry over to the signed PDF and could lock out
+    // whatever downstream process collects files from destDir. CREATE_NEW
+    // with a random name keeps the directory's normal default permissions.
+    Path tmp = target.resolveSibling(".trustsign-" + java.util.UUID.randomUUID() + ".part");
+    try {
+      try (java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(
+          tmp, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW)) {
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(content);
+        while (buf.hasRemaining()) {
+          ch.write(buf);
+        }
+        ch.force(true);
+      }
+      try {
+        Files.move(tmp, target,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+      } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+        Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+      }
+    } finally {
+      Files.deleteIfExists(tmp);
     }
   }
 

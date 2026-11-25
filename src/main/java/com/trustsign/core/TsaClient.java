@@ -39,6 +39,8 @@ public final class TsaClient {
     }
   }
 
+  private static final int MAX_TSA_RESPONSE_BYTES = 1024 * 1024;
+
   private final Config cfg;
   private final SecureRandom rng = new SecureRandom();
 
@@ -62,32 +64,32 @@ public final class TsaClient {
 
     TimeStampRequestGenerator gen = new TimeStampRequestGenerator();
     gen.setCertReq(true);
-    TimeStampRequest req = gen.generate(oid, digest, java.math.BigInteger.valueOf(Math.abs(rng.nextLong())));
+    TimeStampRequest req = gen.generate(oid, digest, new java.math.BigInteger(64, rng));
     byte[] reqBytes = req.getEncoded();
 
-    HttpURLConnection conn = (HttpURLConnection) new URL(cfg.url().trim()).openConnection();
-    conn.setConnectTimeout(Math.max(cfg.connectTimeoutMs(), 1000));
-    conn.setReadTimeout(Math.max(cfg.readTimeoutMs(), 1000));
-    conn.setRequestMethod("POST");
-    conn.setDoOutput(true);
-    conn.setRequestProperty("Content-Type", "application/timestamp-query");
-    conn.setRequestProperty("Accept", "application/timestamp-reply");
-
-    try (OutputStream os = conn.getOutputStream()) {
-      os.write(reqBytes);
-    }
-
-    int code = conn.getResponseCode();
-    InputStream is = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-    if (is == null) {
-      throw new IllegalStateException("TSA HTTP " + code + " with empty response body");
-    }
     byte[] respBytes;
-    try (InputStream in = is) {
-      respBytes = in.readAllBytes();
-    }
-    if (code < 200 || code >= 300) {
-      throw new IllegalStateException("TSA HTTP " + code + " response: " + new String(respBytes));
+    HttpURLConnection conn = (HttpURLConnection) new URL(cfg.url().trim()).openConnection();
+    try {
+      conn.setConnectTimeout(Math.max(cfg.connectTimeoutMs(), 1000));
+      conn.setReadTimeout(Math.max(cfg.readTimeoutMs(), 1000));
+      conn.setRequestMethod("POST");
+      conn.setDoOutput(true);
+      conn.setRequestProperty("Content-Type", "application/timestamp-query");
+      conn.setRequestProperty("Accept", "application/timestamp-reply");
+
+      try (OutputStream os = conn.getOutputStream()) {
+        os.write(reqBytes);
+      }
+
+      int code = conn.getResponseCode();
+      if (code < 200 || code >= 300) {
+        throw new IllegalStateException("TSA HTTP " + code);
+      }
+      try (InputStream in = conn.getInputStream()) {
+        respBytes = BoundedIo.readAtMost(in, MAX_TSA_RESPONSE_BYTES, "TSA");
+      }
+    } finally {
+      conn.disconnect();
     }
 
     TimeStampResponse resp = new TimeStampResponse(respBytes);

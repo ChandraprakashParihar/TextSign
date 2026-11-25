@@ -14,7 +14,6 @@ import java.security.Provider;
 import java.security.Signature;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -102,9 +101,13 @@ public final class PdfSignerService {
       (byte) 0x02
   };
 
-  private static final DateTimeFormatter APPEARANCE_TIMESTAMP_UTC = DateTimeFormatter
-      .ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'")
-      .withZone(ZoneOffset.UTC);
+  // private static final DateTimeFormatter APPEARANCE_TIMESTAMP_UTC = DateTimeFormatter
+  //     .ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'")
+  //     .withZone(ZoneOffset.UTC);
+
+  private static final DateTimeFormatter APPEARANCE_TIMESTAMP_IST = DateTimeFormatter
+      .ofPattern("yyyy-MM-dd HH:mm:ss")
+      .withZone(java.time.ZoneId.of("Asia/Kolkata"));
 
   private static final float DEFAULT_COORDINATE_WIDTH = 150f;
   private static final float DEFAULT_COORDINATE_HEIGHT = 50f;
@@ -386,7 +389,8 @@ public final class PdfSignerService {
     }
   }
 
-  public static List<SignatureFieldInfo> detectSignatureFields(byte[] pdfBytes) throws InvalidPdfException, IOException {
+  public static List<SignatureFieldInfo> detectSignatureFields(byte[] pdfBytes)
+      throws InvalidPdfException, IOException {
     try {
       requireNonEmptyPdf(pdfBytes);
     } catch (IllegalArgumentException e) {
@@ -567,8 +571,10 @@ public final class PdfSignerService {
   }
 
   /**
-   * Signs a PDF using a pre-built IExternalSignature (e.g. direct PKCS#11 C_Sign).
-   * Used when Java's KeyStore cannot expose the private key but the PKCS#11 C API can sign.
+   * Signs a PDF using a pre-built IExternalSignature (e.g. direct PKCS#11
+   * C_Sign).
+   * Used when Java's KeyStore cannot expose the private key but the PKCS#11 C API
+   * can sign.
    */
   public static PdfSigningResult signPdfWithExternalSignature(
       byte[] pdfBytes,
@@ -616,10 +622,25 @@ public final class PdfSignerService {
 
   private static final class DummyPrivateKey implements java.security.PrivateKey {
     private final String algorithm;
-    DummyPrivateKey(String algorithm) { this.algorithm = algorithm; }
-    @Override public String getAlgorithm() { return algorithm; }
-    @Override public String getFormat() { return null; }
-    @Override public byte[] getEncoded() { return null; }
+
+    DummyPrivateKey(String algorithm) {
+      this.algorithm = algorithm;
+    }
+
+    @Override
+    public String getAlgorithm() {
+      return algorithm;
+    }
+
+    @Override
+    public String getFormat() {
+      return null;
+    }
+
+    @Override
+    public byte[] getEncoded() {
+      return null;
+    }
   }
 
   private static PreSignState analyzeInputPdf(byte[] pdfBytes, List<Integer> stampPageIndices, PdfSigningOptions opts)
@@ -1075,7 +1096,8 @@ public final class PdfSignerService {
           PdfSigner.CryptoStandard.CMS);
       // Do not rewrite widget/page annotations after signing. A post-sign incremental
       // revision is interpreted by Acrobat as "unsigned changes after last signature"
-      // (e.g., "Annotations Deleted"), even when the signature itself stays cryptographically valid.
+      // (e.g., "Annotations Deleted"), even when the signature itself stays
+      // cryptographically valid.
       return out.toByteArray();
     }
   }
@@ -1151,7 +1173,8 @@ public final class PdfSignerService {
       if (field == null) {
         return;
       }
-      // Prefer removing border at the widget level (what Acrobat renders as the field "box").
+      // Prefer removing border at the widget level (what Acrobat renders as the field
+      // "box").
       List<PdfWidgetAnnotation> widgets = field.getWidgets();
       if (widgets != null) {
         for (PdfWidgetAnnotation w : widgets) {
@@ -1159,7 +1182,7 @@ public final class PdfSignerService {
             continue;
           }
           // Equivalent to "no border" for widget annotations.
-          w.put(PdfName.Border, new PdfArray(new float[] {0f, 0f, 0f}));
+          w.put(PdfName.Border, new PdfArray(new float[] { 0f, 0f, 0f }));
           PdfDictionary bs = new PdfDictionary();
           bs.put(PdfName.W, new PdfNumber(0));
           bs.put(PdfName.S, PdfName.S);
@@ -1168,8 +1191,8 @@ public final class PdfSignerService {
           // Some templates use appearance characteristics; keep border colors neutral.
           PdfDictionary mk = w.getAppearanceCharacteristics();
           if (mk != null) {
-            mk.put(PdfName.BC, new PdfArray(new float[] {1f, 1f, 1f}));
-            mk.put(PdfName.BG, new PdfArray(new float[] {1f, 1f, 1f}));
+            mk.put(PdfName.BC, new PdfArray(new float[] { 1f, 1f, 1f }));
+            mk.put(PdfName.BG, new PdfArray(new float[] { 1f, 1f, 1f }));
           }
         }
       }
@@ -1177,7 +1200,8 @@ public final class PdfSignerService {
       try {
         field.setBorderWidth(0);
       } catch (Exception ignored) {
-        // Not all field types expose border setters; widget border removal is sufficient.
+        // Not all field types expose border setters; widget border removal is
+        // sufficient.
       }
     } catch (Exception e) {
       LOG.warn("Failed to suppress signature field border for '{}': {}", fieldName, safeMessage(e));
@@ -1219,7 +1243,8 @@ public final class PdfSignerService {
     }
     appearance.setRenderingMode(PdfSignatureAppearance.RenderingMode.DESCRIPTION);
     appearance.setReuseAppearance(false);
-    // Full-bleed layer-2 text (no iText 30% top band), with or without background image.
+    // Full-bleed layer-2 text (no iText 30% top band), with or without background
+    // image.
     if (signer instanceof MultiWidgetPdfSigner multi) {
       multi.useFullBleedDescriptionAppearance();
     }
@@ -1319,7 +1344,7 @@ public final class PdfSignerService {
       String location,
       boolean finalVersion) {
     String subject = extractDisplaySubject(cert);
-    String when = APPEARANCE_TIMESTAMP_UTC.format(java.time.Instant.now());
+    String when = APPEARANCE_TIMESTAMP_IST.format(java.time.Instant.now()) + " IST";
     StringBuilder sb = new StringBuilder();
     if (finalVersion) {
       // sb.append("FINAL VERSION\nNo further edits permitted.\n");
@@ -1620,7 +1645,8 @@ public final class PdfSignerService {
       x = adjustedX;
       y = adjustedY;
     }
-    LOG.info("Signature placement page={} mode={} requested=[x={}, y={}] rect=[x={}, y={}, w={}, h={}] page=[w={}, h={}]",
+    LOG.info(
+        "Signature placement page={} mode={} requested=[x={}, y={}] rect=[x={}, y={}, w={}, h={}] page=[w={}, h={}]",
         pageIndex + 1,
         effectivePlacement.hasCustomCoordinates()
             ? ("custom-" + (effectivePlacement.origin() == CoordinateOrigin.TOP_LEFT ? "top-left" : "bottom-left"))

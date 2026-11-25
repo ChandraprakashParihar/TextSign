@@ -20,6 +20,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class CrlFetcher {
+  /** Large national-CA CRLs run to several MB; anything beyond this is treated as hostile/broken. */
+  static final int MAX_CRL_BYTES = 32 * 1024 * 1024;
+
   static byte[] fetchCrl(X509Certificate cert, X509Certificate issuer, int connectTimeoutMs, int readTimeoutMs)
       throws Exception {
     List<String> urls = extractCrlUrls(cert);
@@ -41,18 +44,18 @@ final class CrlFetcher {
 
   private static byte[] download(String url, int cto, int rto) throws Exception {
     HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-    conn.setConnectTimeout(Math.max(1000, cto));
-    conn.setReadTimeout(Math.max(1000, rto));
-    conn.setRequestMethod("GET");
-    int code = conn.getResponseCode();
-    InputStream is = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream();
-    if (is == null) throw new IllegalStateException("CRL HTTP " + code + " empty body");
-    byte[] body;
-    try (InputStream in = is) {
-      body = in.readAllBytes();
+    try {
+      conn.setConnectTimeout(Math.max(1000, cto));
+      conn.setReadTimeout(Math.max(1000, rto));
+      conn.setRequestMethod("GET");
+      int code = conn.getResponseCode();
+      if (code < 200 || code >= 300) throw new IllegalStateException("CRL HTTP " + code);
+      try (InputStream in = conn.getInputStream()) {
+        return BoundedIo.readAtMost(in, MAX_CRL_BYTES, "CRL");
+      }
+    } finally {
+      conn.disconnect();
     }
-    if (code < 200 || code >= 300) throw new IllegalStateException("CRL HTTP " + code);
-    return body;
   }
 
   private static void validate(byte[] crlBytes, X509Certificate issuer) throws Exception {

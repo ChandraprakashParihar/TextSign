@@ -22,7 +22,11 @@ final class XmlSecurity {
   static Document parseHardened(InputStream in) throws Exception {
     DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
     dbf.setNamespaceAware(true); // required for XML-DSig's DOM-based signing/validation
-    setFeatureIfSupported(dbf, "http://apache.org/xml/features/disallow-doctype-decl", true);
+    // The DOCTYPE ban is the primary XXE defence and must fail closed: if a
+    // parser implementation does not support it, refuse to parse at all
+    // rather than silently parsing untrusted XML without it.
+    dbf.setFeature(javax.xml.XMLConstants.FEATURE_SECURE_PROCESSING, true);
+    dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
     setFeatureIfSupported(dbf, "http://xml.org/sax/features/external-general-entities", false);
     setFeatureIfSupported(dbf, "http://xml.org/sax/features/external-parameter-entities", false);
     setFeatureIfSupported(dbf, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);

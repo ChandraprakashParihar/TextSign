@@ -30,14 +30,30 @@ public final class RequestTrace {
     return UUID.randomUUID().toString().replace("-", "");
   }
 
-  private static String normalizeTxnId(String raw) {
+  private static final int MAX_TXN_ID_LENGTH = 128;
+
+  /**
+   * Client-supplied txnIds are echoed into a response header, the JSON body and every log line,
+   * so they are restricted to a conservative character set and length. Anything else (CR/LF,
+   * control characters, quotes) is dropped to prevent log forging / header injection.
+   */
+  static String normalizeTxnId(String raw) {
     String v = raw == null ? "" : raw.trim();
     if (v.length() >= 2) {
       if ((v.startsWith("\"") && v.endsWith("\"")) || (v.startsWith("'") && v.endsWith("'"))) {
         v = v.substring(1, v.length() - 1).trim();
       }
     }
-    return v.isBlank() ? UUID.randomUUID().toString().replace("-", "") : v;
+    StringBuilder sb = new StringBuilder(Math.min(v.length(), MAX_TXN_ID_LENGTH));
+    for (int i = 0; i < v.length() && sb.length() < MAX_TXN_ID_LENGTH; i++) {
+      char c = v.charAt(i);
+      boolean safe = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+          || c == '-' || c == '_' || c == '.' || c == ':';
+      if (safe) {
+        sb.append(c);
+      }
+    }
+    return sb.length() == 0 ? UUID.randomUUID().toString().replace("-", "") : sb.toString();
   }
 
   public static String resolveClientIp(HttpServletRequest req) {

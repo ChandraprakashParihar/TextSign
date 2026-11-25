@@ -264,14 +264,14 @@ public final class OoxmlSignerService {
    * Creates the staging temp file with owner-only access where the platform
    * supports POSIX permissions (Files.createTempFile already restricts to the
    * owner by default per its javadoc, but this makes the intent explicit and
-   * defends against a platform where that default doesn't hold). Also
-   * registers {@code deleteOnExit()} as a second line of defense alongside
-   * the caller's finally-block delete — covers a normal JVM shutdown that
-   * skips the finally block (e.g. System.exit from unrelated code), though
-   * neither this nor any other in-process mechanism can run on a hard kill
-   * (SIGKILL/OOM-killer/power loss); a periodic ops-level sweep of the temp
-   * directory for orphaned "trustsign-ooxml-*" files is the correct backstop
-   * for that case, not application code.
+   * defends against a platform where that default doesn't hold).
+   *
+   * <p>Deliberately does NOT call {@code deleteOnExit()}: every call would
+   * add an entry to a JVM-wide set that is never pruned until shutdown — an
+   * unbounded memory leak in a long-running server signing many documents.
+   * The caller's finally-block delete is the cleanup; a hard kill
+   * (SIGKILL/power loss) can only be covered by an ops-level sweep of the
+   * temp directory for orphaned "trustsign-ooxml-*" files.
    */
   private static Path createRestrictedTempFile() throws java.io.IOException {
     boolean posix = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
@@ -283,7 +283,6 @@ public final class OoxmlSignerService {
     } else {
       tempFile = Files.createTempFile("trustsign-ooxml-", ".ooxml");
     }
-    tempFile.toFile().deleteOnExit();
     return tempFile;
   }
 

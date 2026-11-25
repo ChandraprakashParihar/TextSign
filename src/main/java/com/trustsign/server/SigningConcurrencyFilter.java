@@ -60,14 +60,10 @@ public final class SigningConcurrencyFilter extends HttpFilter {
       permit = gate.enter(acquireTimeoutMs);
       chain.doFilter(req, res);
     } catch (SigningOverloadException e) {
-      res.setStatus(503);
-      res.setContentType("application/json");
-      res.getWriter().write("{\"error\":\"Service busy\",\"message\":\"" + escapeJson(e.getMessage()) + "\"}");
+      writeBusy(res, e.getMessage());
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      res.setStatus(503);
-      res.setContentType("application/json");
-      res.getWriter().write("{\"error\":\"Service busy\",\"message\":\"Interrupted while waiting for signing capacity\"}");
+      writeBusy(res, "Interrupted while waiting for signing capacity");
     } finally {
       if (permit != null) {
         try {
@@ -78,12 +74,35 @@ public final class SigningConcurrencyFilter extends HttpFilter {
     }
   }
 
-  private static String pathInfo(HttpServletRequest req) {
-    String p = req.getPathInfo();
-    if (p == null || p.isBlank()) {
+  private static final String API_PREFIX = "/pki";
+
+  /**
+   * Path of the request relative to the {@code /pki} API root (e.g. {@code /sign-pdf}).
+   *
+   * <p>Must be derived from the request URI, not {@code getPathInfo()}: under Spring Boot the
+   * DispatcherServlet is mapped to {@code /}, so {@code getPathInfo()} is always {@code null}
+   * and every request would silently bypass the gate.
+   */
+  static String pathInfo(HttpServletRequest req) {
+    String uri = req.getRequestURI();
+    if (uri == null || uri.isBlank()) {
       return "";
     }
-    return p.startsWith("/") ? p : "/" + p;
+    String ctx = req.getContextPath();
+    if (ctx != null && !ctx.isEmpty() && uri.startsWith(ctx)) {
+      uri = uri.substring(ctx.length());
+    }
+    int semi = uri.indexOf(';'); // strip path parameters such as ;jsessionid=...
+    if (semi >= 0) {
+      uri = uri.substring(0, semi);
+    }
+    if (uri.equals(API_PREFIX) || uri.startsWith(API_PREFIX + "/")) {
+      uri = uri.substring(API_PREFIX.length());
+    }
+    while (uri.length() > 1 && uri.endsWith("/")) {
+      uri = uri.substring(0, uri.length() - 1);
+    }
+    return uri;
   }
 
   static boolean requiresSlot(String method, String pathInfo) {
@@ -97,10 +116,34 @@ public final class SigningConcurrencyFilter extends HttpFilter {
     return "GET".equals(m) && GET_TOKEN_PATHS.contains(pathInfo);
   }
 
+  /** Same response shape as ApiServlet errors ({@code status}/{@code message}/{@code code}), plus Retry-After. */
+  private static void writeBusy(HttpServletResponse res, String message) throws IOException {
+    if (res.isCommitted()) {
+      return;
+    }
+    res.setStatus(503);
+    res.setHeader("Retry-After", "5");
+    res.setContentType("application/json");
+    res.setCharacterEncoding("UTF-8");
+    res.getWriter().write("{\"status\":false,\"message\":\"" + escapeJson(message)
+        + "\",\"code\":\"TS_BUSY\"}");
+  }
+
   private static String escapeJson(String s) {
     if (s == null) {
       return "";
     }
-    return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    StringBuilder sb = new StringBuilder(s.length() + 8);
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      if (c == '"' || c == '\\') {
+        sb.append('\\').append(c);
+      } else if (c < 0x20) {
+        sb.append(' ');
+      } else {
+        sb.append(c);
+      }
+    }
+    return sb.toString();
   }
 }

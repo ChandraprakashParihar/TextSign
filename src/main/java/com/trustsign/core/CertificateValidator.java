@@ -62,7 +62,8 @@ public final class CertificateValidator {
    *
    * Behaviour is controlled by system properties:
    * - trustsign.requireDigitalSignature (default: true)
-   * - trustsign.enableCrlCheck (default: false)
+   * - trustsign.enableCrlCheck (default: true)
+   * - trustsign.crlFailHard (default: false); when true, an unreachable/unparseable CRL blocks signing
    * - trustsign.enablePathValidation (default: true)
    * - trustsign.truststore.path (optional, file path)
    * - trustsign.truststore.password (optional, for custom trust store)
@@ -323,18 +324,60 @@ public final class CertificateValidator {
       if (failHard) {
         throw new SecurityException("CRL check failed: " + e.getMessage(), e);
       }
+      // Soft-fail is a deliberate availability trade-off, but it must never
+      // be silent: signing proceeded WITHOUT a revocation check.
+      LOG.warn("CRL revocation check could not be completed for serial={} (signing allowed, trustsign.crlFailHard=false): {}",
+          cert.getSerialNumber().toString(16), e.toString());
     }
   }
 
+  private record CachedCrl(X509CRL crl, long expiresAtMs) {}
+
+  private static final long CRL_CACHE_MAX_TTL_MS = 10 * 60_000L;
+  private static final int CRL_CACHE_MAX_ENTRIES = 64;
+  private static final java.util.concurrent.ConcurrentHashMap<String, CachedCrl> CRL_CACHE =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
   private static boolean isRevokedByCrl(X509Certificate cert, String crlUrl) throws Exception {
+    return loadCrl(crlUrl).isRevoked(cert);
+  }
+
+  /**
+   * Downloads a CRL, reusing a recent copy for up to {@link #CRL_CACHE_MAX_TTL_MS}
+   * (never past the CRL's own nextUpdate). Without this every single signing
+   * request re-downloaded the full CRL — multi-MB for a national CA — and a
+   * slow CRL host added its whole timeout to every request.
+   */
+  private static X509CRL loadCrl(String crlUrl) throws Exception {
+    long now = System.currentTimeMillis();
+    CachedCrl cached = CRL_CACHE.get(crlUrl);
+    if (cached != null && now < cached.expiresAtMs()) {
+      return cached.crl();
+    }
     URLConnection conn = new URL(crlUrl).openConnection();
     conn.setConnectTimeout(10_000);
     conn.setReadTimeout(15_000);
+    X509CRL crl;
     try (InputStream in = conn.getInputStream()) {
-      CertificateFactory cf = CertificateFactory.getInstance("X.509");
-      X509CRL crl = (X509CRL) cf.generateCRL(in);
-      return crl.isRevoked(cert);
+      byte[] body = BoundedIo.readAtMost(in, CrlFetcher.MAX_CRL_BYTES, "CRL");
+      crl = (X509CRL) CertificateFactory.getInstance("X.509")
+          .generateCRL(new java.io.ByteArrayInputStream(body));
+    } finally {
+      if (conn instanceof java.net.HttpURLConnection http) {
+        http.disconnect();
+      }
     }
+    long expiresAt = now + CRL_CACHE_MAX_TTL_MS;
+    if (crl.getNextUpdate() != null) {
+      expiresAt = Math.min(expiresAt, crl.getNextUpdate().getTime());
+    }
+    if (expiresAt > now) {
+      if (CRL_CACHE.size() >= CRL_CACHE_MAX_ENTRIES) {
+        CRL_CACHE.clear();
+      }
+      CRL_CACHE.put(crlUrl, new CachedCrl(crl, expiresAt));
+    }
+    return crl;
   }
 
   /**
@@ -691,7 +734,11 @@ public final class CertificateValidator {
    * Verifies the truststore file against an HMAC stored alongside it.
    * The HMAC uses an application secret (embedded in the obfuscated JAR),
    * so the client cannot forge a valid HMAC for a tampered truststore.
-   * The /map-certificate endpoint recomputes the HMAC after modifying the truststore.
+   * The /map-certificate endpoint recomputes the HMAC after modifying the truststore,
+   * and the clientFolder/installer build generates it for the packaged truststore.
+   *
+   * <p>Mandatory whenever a truststore is configured: a missing, empty or
+   * non-matching integrity file all reject the truststore.
    */
   private static void verifyTruststoreIntegrity(File truststoreFile) {
     String path = truststoreFile.getAbsolutePath();
@@ -700,20 +747,24 @@ public final class CertificateValidator {
       return;
     }
 
+    // Fail closed: a missing or empty integrity file is treated exactly like a
+    // mismatch. If absence merely skipped the check, anyone able to swap the
+    // truststore could disable the protection by deleting one file.
     File hmacFile = new File(truststoreFile.getParentFile(), TRUSTSTORE_HMAC_FILE);
-    if (!hmacFile.exists()) {
-      LOG.debug("No truststore HMAC file found — skipping integrity check");
-      hmacVerifiedPath = path;
-      hmacVerifiedMtime = mtime;
-      return;
+    if (!hmacFile.isFile()) {
+      LOG.error("TRUSTSTORE INTEGRITY FAILURE: integrity file missing: {}", hmacFile.getAbsolutePath());
+      throw new SecurityException(
+          "Truststore integrity file (" + TRUSTSTORE_HMAC_FILE + ") is missing. "
+              + "Re-run certificate mapping (/map-certificate) or reinstall the vendor-supplied config package.");
     }
     try {
       String expected = java.nio.file.Files.readString(hmacFile.toPath(),
           java.nio.charset.StandardCharsets.UTF_8).trim();
       if (expected.isEmpty()) {
-        hmacVerifiedPath = path;
-        hmacVerifiedMtime = mtime;
-        return;
+        LOG.error("TRUSTSTORE INTEGRITY FAILURE: integrity file is empty: {}", hmacFile.getAbsolutePath());
+        throw new SecurityException(
+            "Truststore integrity file (" + TRUSTSTORE_HMAC_FILE + ") is empty. "
+                + "Re-run certificate mapping (/map-certificate) or reinstall the vendor-supplied config package.");
       }
 
       String actual = computeTruststoreHmac(truststoreFile);
@@ -764,7 +815,8 @@ public final class CertificateValidator {
   public static Map<String, Object> cacheStats() {
     Map<String, Object> out = new java.util.LinkedHashMap<>();
     out.put("truststoreCached", cachedTrustStore != null);
-    out.put("truststoreCacheKey", cachedTrustStoreCacheKey);
+    // The cache key embeds the truststore password — never expose it; report the path only.
+    out.put("truststorePath", System.getProperty("trustsign.truststore.path"));
     out.put("truststoreLastModifiedMs", cachedTrustStoreMtime);
     out.put("truststoreLastCheckedAtMs", cachedTrustStoreCheckedAtMs);
     out.put("truststoreStatTtlMs", TRUSTSTORE_STAT_TTL_MS);
@@ -784,6 +836,8 @@ public final class CertificateValidator {
     cachedTrustStoreCacheKey = null;
     cachedTrustStoreMtime = -1L;
     cachedTrustStoreCheckedAtMs = 0L;
+    hmacVerifiedPath = null;
+    hmacVerifiedMtime = -1L;
   }
 
   private CertificateValidator() {}
